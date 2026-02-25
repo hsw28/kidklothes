@@ -1,0 +1,8 @@
+{
+  "android": {
+    "package": "com.anonymous.layetteoutunfurlservice"
+  },
+  "ios": {
+    "bundleIdentifier": "com.anonymous.layetteoutunfurlservice"
+  }
+}

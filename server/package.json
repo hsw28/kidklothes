@@ -1,18 +1,23 @@
 {
-  "name": "kidklothes-unfurl-service",
+  "name": "layetteout-unfurl-service",
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
     "express": "^4.21.2",
     "lru-cache": "^10.4.3",
-    "undici": "^7.16.0"
+    "undici": "^7.16.0",
+    "expo": "~54.0.33",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

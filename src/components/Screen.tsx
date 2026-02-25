@@ -1,31 +1,109 @@
 import React from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, ViewStyle } from 'react-native';
+import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { PrimaryButton } from '@/components/PrimaryButton';
+import { useData } from '@/db/DataContext';
+import { useAppTheme } from '@/theme';
 
 interface ScreenProps {
   children: React.ReactNode;
   scroll?: boolean;
   style?: ViewStyle;
+  disableDataStateGate?: boolean;
+  overlay?: React.ReactNode;
 }
 
-export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, style }) => {
-  if (scroll) {
+export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, style, disableDataStateGate = false, overlay }) => {
+  const theme = useAppTheme();
+  const data = useData();
+  const styles = StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    root: {
+      flex: 1,
+    },
+    content: {
+      paddingHorizontal: theme.spacing.screen,
+      paddingVertical: theme.spacing.section,
+      gap: theme.spacing.section,
+    },
+    centerWrap: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: theme.spacing.screen,
+      gap: 12,
+    },
+    statusCard: {
+      width: '100%',
+      maxWidth: 520,
+      backgroundColor: theme.colors.card,
+      borderRadius: theme.radius.card,
+      padding: theme.spacing.cardPadding,
+      gap: 10,
+      shadowColor: theme.colors.shadow,
+      shadowOpacity: 0.08,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 2,
+    },
+    statusTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: theme.colors.textPrimary,
+    },
+    statusBody: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+  });
+
+  if (!disableDataStateGate && data.loading) {
     return (
       <SafeAreaView style={styles.safe}>
-        <ScrollView contentContainerStyle={[styles.content, style]}>{children}</ScrollView>
+        <View style={styles.centerWrap}>
+          <View style={styles.statusCard}>
+            <ActivityIndicator color={theme.colors.accentPrimary} />
+            <Text style={styles.statusTitle}>Loading…</Text>
+            <Text style={styles.statusBody}>Getting your closet data ready.</Text>
+          </View>
+        </View>
       </SafeAreaView>
     );
   }
 
-  return <SafeAreaView style={[styles.safe, styles.content, style]}>{children}</SafeAreaView>;
-};
+  if (!disableDataStateGate && data.errorMessage) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.centerWrap}>
+          <View style={styles.statusCard}>
+            <Text style={styles.statusTitle}>Couldn’t Load Data</Text>
+            <Text style={styles.statusBody}>{data.errorMessage}</Text>
+            <PrimaryButton label="Try Again" onPress={() => void data.refresh()} />
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: '#f7f7f8',
-  },
-  content: {
-    padding: 16,
-    gap: 12,
-  },
-});
+  if (scroll) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={[styles.content, style]}>{children}</ScrollView>
+          {overlay}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={[styles.root, styles.content, style]}>
+        {children}
+        {overlay}
+      </View>
+    </SafeAreaView>
+  );
+};

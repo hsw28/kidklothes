@@ -1,8 +1,11 @@
 {
   "expo": {
-    "name": "kidklothes",
-    "slug": "kidklothes",
-    "scheme": "kidklothes",
+    "name": "Layette Out",
+    "slug": "layetteout",
+    "scheme": [
+      "layetteout",
+      "layetteout"
+    ],
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -11,12 +14,19 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.kidklothes"
+      "bundleIdentifier": "com.anonymous.layetteout"
     },
     "android": {
-      "package": "com.anonymous.kidklothes"
+      "package": "com.anonymous.layetteout"
     },
     "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Layette Out to access your photos so you can add item and kid photos.",
+          "cameraPermission": "Allow Layette Out to use your camera so you can take photos for items and kid profiles."
+        }
+      ],
       [
         "expo-share-intent",
         {

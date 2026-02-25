@@ -10,9 +10,9 @@ import Social
 import UIKit
 
 class ShareViewController: UIViewController {
-  let hostAppGroupIdentifier = "group.com.anonymous.kidklothes"
-  let shareProtocol = "kidklothes"
-  let sharedKey = "kidklothesShareKey"
+  let hostAppGroupIdentifier = "group.com.anonymous.layetteout"
+  let shareProtocol = "layetteout"
+  let sharedKey = "layetteoutShareKey"
   var sharedMedia: [SharedMediaFile] = []
   var sharedWebUrl: [WebUrl] = []
   var sharedText: [String] = []

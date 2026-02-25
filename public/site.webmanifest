@@ -1,0 +1,16 @@
+{
+  "name": "Layette Out",
+  "short_name": "Layette Out",
+  "description": "Local-first iOS app for organizing kids clothing and wishlists.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f5f2",
+  "theme_color": "#f7f5f2",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "560x560",
+      "type": "image/png"
+    }
+  ]
+}

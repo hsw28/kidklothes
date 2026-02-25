@@ -1,27 +1,80 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccentName, getAccentColors, useAppTheme } from '@/theme';
 
 interface ChipSelectorProps<T extends string> {
   label: string;
   options: T[];
   value?: T;
   onChange: (value: T) => void;
+  onOptionLongPress?: (value: T) => void;
+  accent?: AccentName;
 }
 
-export const ChipSelector = <T extends string>({ label, options, value, onChange }: ChipSelectorProps<T>) => {
+export const ChipSelector = <T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  onOptionLongPress,
+  accent = 'coral',
+}: ChipSelectorProps<T>) => {
+  const theme = useAppTheme();
+  const styles = StyleSheet.create({
+    container: {
+      gap: 8,
+    },
+    label: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      fontWeight: '600',
+    },
+    row: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    chip: {
+      paddingHorizontal: theme.spacing.chipPadX,
+      paddingVertical: theme.spacing.chipPadY + 1,
+      minHeight: 38,
+      borderRadius: theme.radius.chip,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      justifyContent: 'center',
+      shadowColor: theme.colors.shadow,
+      shadowOpacity: 0.03,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
+    },
+    text: {
+      fontSize: 13,
+      fontWeight: '600',
+    },
+  });
+
   return (
     <View style={styles.container}>
       <Text style={styles.label}>{label}</Text>
       <View style={styles.row}>
         {options.map((option) => {
           const active = value === option;
+          const colors = getAccentColors(theme, accent, active);
           return (
             <Pressable
               key={option}
               onPress={() => onChange(option)}
-              style={[styles.chip, active && styles.activeChip]}
+              onLongPress={onOptionLongPress ? () => onOptionLongPress(option) : undefined}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: colors.bg,
+                  borderColor: active ? (accent === 'coral' ? theme.colors.accentCoralSoft : accent === 'sage' ? theme.colors.accentSageSoft : theme.colors.accentPeriwinkleSoft) : theme.colors.border,
+                },
+              ]}
             >
-              <Text style={[styles.text, active && styles.activeText]}>{option}</Text>
+              <Text style={[styles.text, { color: colors.text }]}>{option}</Text>
             </Pressable>
           );
         })}
@@ -29,38 +82,3 @@ export const ChipSelector = <T extends string>({ label, options, value, onChange
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    gap: 6,
-  },
-  label: {
-    fontSize: 13,
-    color: '#444',
-    fontWeight: '600',
-  },
-  row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    borderWidth: 1,
-    borderColor: '#d3d3d6',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-  },
-  activeChip: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
-  },
-  text: {
-    color: '#333',
-    fontSize: 13,
-  },
-  activeText: {
-    color: '#fff',
-  },
-});

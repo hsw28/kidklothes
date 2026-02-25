@@ -1,0 +1,139 @@
+import { BrandFit, Condition, ItemStatus, KidFit, PrintAlias } from '@/models';
+import { ClosetCategory, closetCategoryToClothingType, closetLabel } from '@/utils/categories';
+import { resolveOutboundLink } from '@/utils/outbound';
+import { resolvePrintName } from '@/utils/printName';
+
+type ItemPayloadFormInput = {
+  childId?: string;
+  quickMode: boolean;
+  title: string;
+  url: string;
+  brand: string;
+  printName: string;
+  brandTags: string;
+  imageUrl: string;
+  extraImageUrls: string;
+  clothingTypeLabelFallback: string;
+  size: string;
+  sizeNormalized: string;
+  category?: ClosetCategory;
+  storageLocationId: string;
+  brandFit?: BrandFit;
+  kidFit?: KidFit;
+  brandSizeNote: string;
+  condition?: Condition;
+  status: ItemStatus;
+  purchasePrice: string;
+  targetResalePrice: string;
+  soldPrice: string;
+  soldDate: string;
+  tags: string;
+  seasonTags: string;
+  notes: string;
+  printAliases: PrintAlias[];
+  brandOverride?: string;
+};
+
+export type NormalizedItemPayload = {
+  childId?: string;
+  title: string;
+  url?: string;
+  brand?: string;
+  printName?: string;
+  printNameNorm?: string;
+  brandTags: string[];
+  imageUrl?: string;
+  imageUrls: string[];
+  clothingType: ReturnType<typeof closetCategoryToClothingType>;
+  size: string;
+  sizeNormalized?: string;
+  category?: ClosetCategory;
+  storageLocationId?: string;
+  brandFit?: BrandFit;
+  kidFit?: KidFit;
+  brandSizeNote?: string;
+  fitRating?: undefined;
+  fitException?: undefined;
+  condition?: Condition;
+  status: ItemStatus;
+  purchasePrice?: number;
+  targetResalePrice?: number;
+  soldPrice?: number;
+  soldDate?: string;
+  tags: string[];
+  seasonTags: string[];
+  notes?: string;
+  sourceDomain?: string;
+  canonicalUrl?: string;
+  outboundUrl?: string;
+};
+
+const parseMoney = (value: string) => {
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedItemPayload => {
+  const mergedImageUrls = Array.from(
+    new Set([input.imageUrl, ...input.extraImageUrls.split(',')].map((value) => value.trim()).filter(Boolean)),
+  );
+
+  const printNameNorm = resolvePrintName(input.printName || '', input.printAliases);
+  const derivedType = closetCategoryToClothingType(input.category);
+  const baseTitle = input.quickMode
+    ? `${input.size.trim() || 'New'} ${input.category ? closetLabel[input.category] : input.clothingTypeLabelFallback}`
+    : input.title;
+
+  const payload = {
+    childId: input.childId || undefined,
+    title: baseTitle,
+    url: input.url || undefined,
+    brand: (input.brandOverride ?? input.brand) || undefined,
+    printName: input.printName || undefined,
+    printNameNorm: printNameNorm || undefined,
+    brandTags: input.brandTags
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+    imageUrl: mergedImageUrls[0] || undefined,
+    imageUrls: mergedImageUrls,
+    clothingType: derivedType,
+    size: input.size,
+    sizeNormalized: input.sizeNormalized || undefined,
+    category: input.category,
+    storageLocationId: input.storageLocationId || undefined,
+    brandFit: input.brandFit,
+    kidFit: input.kidFit,
+    brandSizeNote: input.brandSizeNote || undefined,
+    fitRating: undefined,
+    fitException: undefined,
+    condition: input.condition,
+    status: input.status,
+    purchasePrice: parseMoney(input.purchasePrice),
+    targetResalePrice: parseMoney(input.targetResalePrice),
+    soldPrice: parseMoney(input.soldPrice),
+    soldDate: input.soldDate.trim() || undefined,
+    tags: input.tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean),
+    seasonTags: input.seasonTags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean),
+    notes: input.notes || undefined,
+  };
+
+  const resolved = resolveOutboundLink(payload.url || '', {
+    canonicalUrl: payload.url,
+    monetize: false,
+  });
+
+  return {
+    ...payload,
+    sourceDomain: resolved.sourceDomain || undefined,
+    canonicalUrl: resolved.canonicalUrl || undefined,
+    outboundUrl: resolved.outboundUrl || undefined,
+  };
+};
+

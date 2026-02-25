@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.anonymous.kidklothes'
+    namespace 'com.anonymous.layetteout'
     defaultConfig {
-        applicationId 'com.anonymous.kidklothes'
+        applicationId 'com.anonymous.layetteout'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

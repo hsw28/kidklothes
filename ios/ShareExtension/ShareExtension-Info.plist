@@ -5,7 +5,7 @@
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
     <key>CFBundleDisplayName</key>
-    <string>kidklothes - Share Extension</string>
+    <string>Layette Out - Share Extension</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleDevelopmentRegion</key>
@@ -36,6 +36,6 @@
       <string>com.apple.share-services</string>
     </dict>
     <key>AppGroupIdentifier</key>
-    <string>group.com.anonymous.kidklothes</string>
+    <string>group.com.anonymous.layetteout</string>
   </dict>
 </plist>

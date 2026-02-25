@@ -1,4 +1,5 @@
 import * as ExpoLinking from 'expo-linking';
+import { ItemStatus } from '@/models';
 
 type ShareIntentLike = {
   webUrl?: string;
@@ -34,8 +35,26 @@ export const extractUrlFromShareIntent = (intent?: ShareIntentLike | null): stri
   return undefined;
 };
 
-export const toAddItemDeepLink = (url: string): string => {
-  return ExpoLinking.createURL('/items/add', {
-    queryParams: { url },
+type AddItemShareOptions = {
+  destination: 'closet' | 'wishlist';
+  status?: ItemStatus;
+  source?: string;
+};
+
+const buildAddItemPath = (destination: 'closet' | 'wishlist') =>
+  destination === 'wishlist' ? '/wishlist/add' : '/closet/items/add';
+
+export const toAddItemDeepLink = (
+  url: string,
+  options: AddItemShareOptions = { destination: 'closet' },
+): string => {
+  const destination = options.destination;
+  const status = options.status ?? (destination === 'wishlist' ? 'wishlist' : 'owned');
+  return ExpoLinking.createURL(buildAddItemPath(destination), {
+    queryParams: {
+      url,
+      prefillStatus: status,
+      source: options.source ?? 'shareext',
+    },
   });
 };

@@ -21,21 +21,31 @@ const mapSelectedItems = (selectedIds: string[], allItems: Item[]) => {
 };
 
 export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { children, items, outfits, addOutfit, updateOutfit, deleteOutfit } = useData();
+  const { children, items, childItems, outfits, addOutfit, updateOutfit, deleteOutfit, markItemsWorn } = useData();
   const editingId = route.params?.outfitId;
   const existing = useMemo(() => outfits.find((outfit) => outfit.id === editingId), [editingId, outfits]);
 
   const [name, setName] = useState(existing?.name ?? '');
   const [notes, setNotes] = useState(existing?.notes ?? '');
+  const [occasionTags, setOccasionTags] = useState(existing?.occasionTags.join(', ') ?? '');
+  const [weatherHint, setWeatherHint] = useState(existing?.weatherHint ?? '');
   const [childId, setChildId] = useState(existing?.childId ?? '');
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>(existing?.itemIds ?? []);
   const [saving, setSaving] = useState(false);
   const previewRef = useRef<any>(null);
 
-  const availableItems = useMemo(() => items.filter((item) => item.childId === childId), [childId, items]);
+  const availableItemIds = useMemo(
+    () => childItems.filter((link) => link.childId === childId).map((link) => link.itemId),
+    [childId, childItems],
+  );
+  const availableItems = useMemo(() => items.filter((item) => availableItemIds.includes(item.id)), [availableItemIds, items]);
   const selectedItems = useMemo(() => mapSelectedItems(selectedItemIds, availableItems), [availableItems, selectedItemIds]);
   const selectedImageUrls = useMemo(
-    () => selectedItems.map((item) => item.imageUrl).filter(Boolean).slice(0, 4) as string[],
+    () =>
+      selectedItems
+        .map((item) => item.cachedImageUri || item.imageUrls[0] || item.imageUrl)
+        .filter(Boolean)
+        .slice(0, 4) as string[],
     [selectedItems],
   );
   const shareablePreviewUri = existing?.previewUri;
@@ -50,6 +60,23 @@ export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const toggleItem = (itemId: string) => {
     setSelectedItemIds((prev) => (prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]));
+  };
+
+  const swapItem = (item: Item) => {
+    const candidates = availableItems.filter(
+      (candidate) =>
+        candidate.id !== item.id &&
+        candidate.clothingType === item.clothingType &&
+        candidate.status === 'owned' &&
+        candidate.size === item.size,
+    );
+    const replacement = candidates[0];
+    if (!replacement) {
+      Alert.alert('No swap found', 'No similar owned item found for this slot.');
+      return;
+    }
+
+    setSelectedItemIds((prev) => prev.map((id) => (id === item.id ? replacement.id : id)));
   };
 
   const capturePreviewUri = async (): Promise<string | undefined> => {
@@ -87,6 +114,11 @@ export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
         notes: notes || undefined,
         itemIds: selectedItemIds,
         previewUri,
+        occasionTags: occasionTags
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+        weatherHint: weatherHint || undefined,
       };
 
       if (existing) {
@@ -99,6 +131,20 @@ export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const duplicateOutfit = async () => {
+    if (!existing) return;
+    await addOutfit({
+      childId: existing.childId,
+      name: `${existing.name} (copy)`,
+      itemIds: existing.itemIds,
+      notes: existing.notes,
+      previewUri: existing.previewUri,
+      occasionTags: existing.occasionTags,
+      weatherHint: existing.weatherHint,
+    });
+    Alert.alert('Duplicated', 'Created a copy of this outfit.');
   };
 
   const sharePreview = async () => {
@@ -116,6 +162,15 @@ export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
     } catch {
       Alert.alert('Share failed', 'Could not open the share sheet for this preview.');
     }
+  };
+
+  const markWorn = async () => {
+    if (selectedItemIds.length === 0) {
+      Alert.alert('No items selected', 'Select at least one item first.');
+      return;
+    }
+    await markItemsWorn(selectedItemIds);
+    Alert.alert('Updated', 'Marked selected items as worn today.');
   };
 
   return (
@@ -139,6 +194,8 @@ export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
         <>
           <FormInput label="Outfit name" value={name} onChangeText={setName} placeholder="Weekend picnic" />
           <FormInput label="Notes" value={notes} onChangeText={setNotes} placeholder="Optional" multiline />
+          <FormInput label="Occasion tags" value={occasionTags} onChangeText={setOccasionTags} placeholder="school, sleep, travel" />
+          <FormInput label="Weather hint" value={weatherHint} onChangeText={setWeatherHint} placeholder="cold / mild / warm" />
 
           <Text style={styles.heading}>Saved items</Text>
           {availableItems.length === 0 ? (
@@ -150,12 +207,16 @@ export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Pressable key={item.id} onPress={() => toggleItem(item.id)}>
                   <Card style={[styles.pick, active && styles.pickActive]}>
                     <View style={styles.itemRow}>
-                      {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.thumb} /> : <View style={styles.thumbPlaceholder} />}
+                      {item.cachedImageUri || item.imageUrls[0] || item.imageUrl ? (
+                        <Image source={{ uri: item.cachedImageUri || item.imageUrls[0] || item.imageUrl }} style={styles.thumb} />
+                      ) : (
+                        <View style={styles.thumbPlaceholder} />
+                      )}
                       <View style={styles.itemBody}>
                         <Text style={styles.itemName}>{item.title}</Text>
                         <View style={styles.row}>
                           <Text style={styles.meta}>{item.clothingType}</Text>
-                          <Text style={styles.meta}>Size {item.size}</Text>
+                          <Text style={styles.meta}>Size {item.size || 'N/A'}</Text>
                         </View>
                       </View>
                     </View>
@@ -172,13 +233,14 @@ export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
             selectedItems.map((item) => (
               <Card key={`selected-${item.id}`}>
                 <Text style={styles.itemName}>{item.title}</Text>
-                <Text style={styles.meta}>{item.clothingType} • Size {item.size}</Text>
+                <Text style={styles.meta}>{item.clothingType} • Size {item.size || 'N/A'}</Text>
+                <PrimaryButton label="Swap Similar" variant="secondary" onPress={() => swapItem(item)} />
               </Card>
             ))
           )}
 
           <Text style={styles.heading}>Preview</Text>
-          <ViewShot ref={previewRef} options={{ format: 'jpg', quality: 0.9 }} style={styles.previewShot} collapsable={false}>
+          <ViewShot ref={previewRef} options={{ format: 'jpg', quality: 0.9 }} style={styles.previewShot}>
             {selectedImageUrls.length > 0 ? (
               <View style={styles.collage}>
                 {selectedImageUrls.map((uri, idx) => (
@@ -210,7 +272,9 @@ export const OutfitBuilderScreen: React.FC<Props> = ({ navigation, route }) => {
           </ViewShot>
 
           <PrimaryButton label={saving ? 'Saving...' : existing ? 'Save Outfit' : 'Create Outfit'} onPress={save} />
+          <PrimaryButton label="Mark Worn" variant="secondary" onPress={markWorn} />
           {existing ? <PrimaryButton label="Share Image" variant="secondary" onPress={sharePreview} /> : null}
+          {existing ? <PrimaryButton label="Duplicate Outfit" variant="secondary" onPress={duplicateOutfit} /> : null}
           {existing ? (
             <PrimaryButton
               label="Delete Outfit"

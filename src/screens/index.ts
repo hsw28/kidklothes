@@ -6,3 +6,6 @@ export * from './OutfitBuilderScreen';
 export * from './KidsListScreen';
 export * from './KidFormScreen';
 export * from './SettingsScreen';
+export * from './DrawerScanScreen';
+export * from './DrawerScanResultsScreen';
+export * from './BatchAddScreen';

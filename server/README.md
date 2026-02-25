@@ -1,4 +1,4 @@
-# kidklothes unfurl service
+# layetteout unfurl service
 
 Minimal Node + Express TypeScript service for URL unfurling.
 
@@ -33,7 +33,7 @@ Response body:
 
 ## Run
 
-From `/Users/Hannah/Programming/kidklothes/server`:
+From `/Users/Hannah/Programming/layetteout/server`:
 
 ```bash
 npm install

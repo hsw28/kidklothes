@@ -1,47 +1,67 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, ViewStyle } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, ViewStyle } from 'react-native';
+import { useAppTheme } from '@/theme';
 
 interface PrimaryButtonProps {
   label: string;
-  onPress: () => void;
+  onPress: () => void | Promise<void>;
   variant?: 'primary' | 'secondary' | 'danger';
   style?: ViewStyle;
 }
 
 export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, variant = 'primary', style }) => {
+  const theme = useAppTheme();
+  const styles = StyleSheet.create({
+    button: {
+      borderRadius: theme.radius.chip,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    primary: {
+      backgroundColor: theme.colors.accentPrimary,
+      shadowColor: theme.colors.shadow,
+      shadowOpacity: 0.08,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 2,
+    },
+    secondary: {
+      backgroundColor: theme.colors.surfaceMuted,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    danger: {
+      backgroundColor: theme.isDark ? '#7A3A3A' : '#E3B1AA',
+    },
+    text: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.textPrimary,
+    },
+    lightText: {
+      color: theme.isDark ? '#1E1E1E' : '#1E1E1E',
+    },
+  });
+
   return (
-    <Pressable onPress={onPress} style={[styles.button, styles[variant], style]}>
+    <TouchableOpacity
+      activeOpacity={0.88}
+      onPress={() => {
+        try {
+          const result = onPress();
+          if (result && typeof (result as Promise<void>).catch === 'function') {
+            void (result as Promise<void>).catch((error) => {
+              console.error('PrimaryButton onPress failed', error);
+            });
+          }
+        } catch (error) {
+          console.error('PrimaryButton onPress failed', error);
+        }
+      }}
+      style={[styles.button, styles[variant], style]}
+    >
       <Text style={[styles.text, variant !== 'secondary' && styles.lightText]}>{label}</Text>
-    </Pressable>
+    </TouchableOpacity>
   );
 };
-
-const styles = StyleSheet.create({
-  button: {
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  primary: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
-  },
-  secondary: {
-    backgroundColor: '#fff',
-    borderColor: '#ddd',
-  },
-  danger: {
-    backgroundColor: '#b91c1c',
-    borderColor: '#b91c1c',
-  },
-  text: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#222',
-  },
-  lightText: {
-    color: '#fff',
-  },
-});
