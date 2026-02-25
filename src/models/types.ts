@@ -106,6 +106,7 @@ export interface Item extends BaseItem {
   brandFit?: BrandFit;
   kidFit?: KidFit;
   brandSizeNote?: string;
+  fabric?: string;
   fitRating?: FitRating;
   fitException?: FitException;
   condition?: Condition;
@@ -202,7 +203,9 @@ export interface AppSettings {
   wishlistCategoryOrder?: string[];
   hiddenWishlistCategories?: string[];
   kidsPreviewCategories?: string[];
+  inventoryRealityCheckOwnedThreshold?: number;
   developerModeEnabled?: boolean;
+  betaKidLimitBannerDismissed?: boolean;
 }
 
 export interface ActivityEvent {

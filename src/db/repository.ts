@@ -6,6 +6,7 @@ import { resolveOutboundLink } from '@/utils/outbound';
 import { SAMPLE_CHILD_IDS, SAMPLE_ITEM_IDS } from '@/utils/sampleData';
 import { validateNewItemInput } from '@/utils/itemValidation';
 import { sanitizeCategoryOrder, sanitizeHiddenCategories, sanitizeCategoryOrder as sanitizeOrder } from '@/utils/categories';
+import { getMaxKidsAllowed } from '@/config/betaLimits';
 import { makeId } from '@/utils/id';
 import { getDb, initDatabase } from './sqlite';
 
@@ -52,6 +53,7 @@ export interface NewItemInput {
   brandFit?: Item['brandFit'];
   kidFit?: Item['kidFit'];
   brandSizeNote?: string;
+  fabric?: string;
   fitRating?: Item['fitRating'];
   fitException?: Item['fitException'];
   condition?: Item['condition'];
@@ -183,6 +185,7 @@ type ItemRow = {
   brandFit: string | null;
   kidFit: string | null;
   brandSizeNote: string | null;
+  fabric: string | null;
   fitRating: string | null;
   fitException: string | null;
   condition: string | null;
@@ -263,7 +266,9 @@ type SettingsRow = {
   wishlistCategoryOrder: string | null;
   hiddenWishlistCategories: string | null;
   kidsPreviewCategories: string | null;
+  inventoryRealityCheckOwnedThreshold: number | null;
   developerModeEnabled: number | null;
+  betaKidLimitBannerDismissed: number | null;
 };
 
 type EventRow = {
@@ -310,7 +315,9 @@ const defaultSettings: AppSettings = {
   wishlistCategoryOrder: undefined,
   hiddenWishlistCategories: [],
   kidsPreviewCategories: undefined,
+  inventoryRealityCheckOwnedThreshold: 4,
   developerModeEnabled: false,
+  betaKidLimitBannerDismissed: false,
 };
 
 const parseStringList = (value: string | null): string[] => {
@@ -416,6 +423,7 @@ const mapItem = (row: ItemRow, tags: string[], brandTags: string[], childIds: st
   brandFit: (row.brandFit as Item['brandFit']) ?? undefined,
   kidFit: (row.kidFit as Item['kidFit']) ?? undefined,
   brandSizeNote: row.brandSizeNote ?? undefined,
+  fabric: row.fabric ?? undefined,
   fitRating: (row.fitRating as Item['fitRating']) ?? undefined,
   fitException: (row.fitException as Item['fitException']) ?? undefined,
   condition: (row.condition as Item['condition']) ?? undefined,
@@ -459,8 +467,13 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
     hiddenClosetCategoriesGlobal: sanitizeHiddenCategories(parseStringList(row.hiddenClosetCategoriesGlobal), { includeOther: true }),
     wishlistCategoryOrder: sanitizeCategoryOrder(parseStringList(row.wishlistCategoryOrder), { includeOther: false }),
     hiddenWishlistCategories: sanitizeHiddenCategories(parseStringList(row.hiddenWishlistCategories), { includeOther: false }),
-    kidsPreviewCategories: sanitizeCategoryOrder(parseStringList(row.kidsPreviewCategories), { includeOther: false }),
+    kidsPreviewCategories: (() => {
+      const raw = parseStringList(row.kidsPreviewCategories);
+      return sanitizeCategoryOrder(raw, { includeOther: true, fallback: raw as any });
+    })(),
+    inventoryRealityCheckOwnedThreshold: row.inventoryRealityCheckOwnedThreshold ?? defaultSettings.inventoryRealityCheckOwnedThreshold,
     developerModeEnabled: row.developerModeEnabled === 1,
+    betaKidLimitBannerDismissed: row.betaKidLimitBannerDismissed === 1,
   };
 };
 
@@ -703,7 +716,7 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     await db.runAsync(
-      `UPDATE settings SET detailPromptMode = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, developerModeEnabled = ? WHERE id = ?;`,
+      `UPDATE settings SET detailPromptMode = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, betaKidLimitBannerDismissed = ? WHERE id = ?;`,
       next.detailPromptMode,
       next.notificationsEnabled ? 1 : 0,
       next.notifyWeeklyTidy ? 1 : 0,
@@ -720,12 +733,30 @@ export const repository = {
       JSON.stringify(sanitizeHiddenCategories(next.hiddenClosetCategoriesGlobal, { includeOther: true })),
       next.wishlistCategoryOrder ? JSON.stringify(sanitizeCategoryOrder(next.wishlistCategoryOrder, { includeOther: false })) : null,
       JSON.stringify(sanitizeHiddenCategories(next.hiddenWishlistCategories, { includeOther: false })),
-      next.kidsPreviewCategories ? JSON.stringify(sanitizeCategoryOrder(next.kidsPreviewCategories, { includeOther: false })) : null,
+      next.kidsPreviewCategories
+        ? JSON.stringify(sanitizeCategoryOrder(next.kidsPreviewCategories, { includeOther: true, fallback: next.kidsPreviewCategories as any }))
+        : null,
+      next.inventoryRealityCheckOwnedThreshold ?? null,
       next.developerModeEnabled ? 1 : 0,
+      next.betaKidLimitBannerDismissed ? 1 : 0,
       'app',
     );
 
     return next;
+  },
+
+  async getKidCount(): Promise<number> {
+    await initDatabase();
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) AS count FROM children WHERE deletedAt IS NULL;');
+    return row?.count ?? 0;
+  },
+
+  async canCreateAnotherKid(): Promise<{ ok: boolean; current: number; max: number }> {
+    const current = await repository.getKidCount();
+    const rawMax = getMaxKidsAllowed();
+    const max = Number.isFinite(rawMax) ? rawMax : Number.MAX_SAFE_INTEGER;
+    return { ok: current < rawMax, current, max };
   },
 
   async addChild(input: NewChildInput): Promise<Child> {
@@ -771,6 +802,13 @@ export const repository = {
         archiveAt,
         ...SAMPLE_ITEM_IDS,
       );
+    }
+
+    const kidLimit = await repository.canCreateAnotherKid();
+    if (!kidLimit.ok) {
+      const error = new Error('KID_LIMIT_REACHED');
+      (error as Error & { code?: string }).code = 'KID_LIMIT_REACHED';
+      throw error;
     }
 
     const child: Child = {
@@ -939,6 +977,7 @@ export const repository = {
       brandFit: input.brandFit,
       kidFit: input.kidFit,
       brandSizeNote: trimOrNull(input.brandSizeNote) ?? undefined,
+      fabric: trimOrNull(input.fabric) ?? undefined,
       fitRating: input.fitRating,
       fitException: input.fitException,
       condition: input.condition,
@@ -951,7 +990,7 @@ export const repository = {
 
     const itemInsertColumns = [
       'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
-      'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount',
+      'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount',
     ] as const;
     const itemInsertValues: Array<string | number | null> = [
       item.id,
@@ -987,6 +1026,7 @@ export const repository = {
       item.brandFit ?? null,
       item.kidFit ?? null,
       item.brandSizeNote ?? null,
+      item.fabric ?? null,
       item.fitRating ?? null,
       item.fitException ?? null,
       item.condition ?? null,
@@ -1110,6 +1150,7 @@ export const repository = {
       brandFit: patch.brandFit ?? existing.brandFit,
       kidFit: patch.kidFit ?? existing.kidFit,
       brandSizeNote: patch.brandSizeNote !== undefined ? trimOrNull(patch.brandSizeNote) ?? undefined : existing.brandSizeNote,
+      fabric: patch.fabric !== undefined ? trimOrNull(patch.fabric) ?? undefined : existing.fabric,
       fitRating: patch.fitRating ?? existing.fitRating,
       fitException: patch.fitException ?? existing.fitException,
       condition: patch.condition ?? existing.condition,
@@ -1153,6 +1194,7 @@ export const repository = {
         brandFit = ?,
         kidFit = ?,
         brandSizeNote = ?,
+        fabric = ?,
         fitRating = ?,
         fitException = ?,
         condition = ?,
@@ -1190,6 +1232,7 @@ export const repository = {
       updated.brandFit ?? null,
       updated.kidFit ?? null,
       updated.brandSizeNote ?? null,
+      updated.fabric ?? null,
       updated.fitRating ?? null,
       updated.fitException ?? null,
       updated.condition ?? null,
@@ -1596,7 +1639,7 @@ export const repository = {
     for (const item of payload.items) {
       const importItemColumns = [
         'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
-        'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount',
+        'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount',
       ] as const;
       const importItemValues: Array<string | number | null> = [
         item.id,
@@ -1632,6 +1675,7 @@ export const repository = {
         item.brandFit ?? null,
         item.kidFit ?? null,
         item.brandSizeNote ?? null,
+        item.fabric ?? null,
         item.fitRating ?? null,
         item.fitException ?? null,
         item.condition ?? null,

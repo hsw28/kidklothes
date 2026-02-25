@@ -301,7 +301,7 @@ export const BeforeYouBuyScreen: React.FC<Props> = ({ route, navigation }) => {
     <Screen>
       <Card>
         <Text style={styles.title}>Going Shopping?</Text>
-        <Text style={styles.subtitle}>Use this quick loop to avoid duplicates and overbuying.</Text>
+        <Text style={styles.subtitle}>Save now, add details later, and avoid duplicates while shopping.</Text>
         {selectedChild?.currentSize?.code ? (
           <Text style={styles.subtitle}>
             Wearing now: {formatSizeDisplay(selectedChild.currentSize.code, selectedChild.currentSize.otherText ?? null)}
@@ -338,7 +338,8 @@ export const BeforeYouBuyScreen: React.FC<Props> = ({ route, navigation }) => {
             </Pressable>
           ))}
         </View>
-        <PrimaryButton label="Open Drop Prep" variant="secondary" onPress={() => navigation.navigate('DropPrep', { childId: selectedChild?.id })} />
+        <PrimaryButton label="Drop Prep" variant="secondary" onPress={() => navigation.navigate('DropPrep', { childId: selectedChild?.id })} />
+        <Text style={styles.meta}>Prep for the drop (what you have, what you need).</Text>
       </Card>
 
       {!summary ? (
@@ -346,7 +347,7 @@ export const BeforeYouBuyScreen: React.FC<Props> = ({ route, navigation }) => {
       ) : (
         <>
           <Card>
-            <Text style={styles.section}>Current Size Inventory</Text>
+            <Text style={styles.section}>Current Size (Profile)</Text>
             {Array.from(summary.wearingNow.entries()).map(([category, size]) => (
               <Text key={category} style={styles.meta}>
                 {category}: {size}
@@ -420,7 +421,7 @@ export const BeforeYouBuyScreen: React.FC<Props> = ({ route, navigation }) => {
           {showLocationUi ? (
             <Card>
               <Pressable onPress={() => setShowLocationCounts((prev) => !prev)}>
-                <Text style={styles.section}>Counts by Location {showLocationCounts ? 'Hide' : 'Show'}</Text>
+                <Text style={styles.section}>Counts by Location {showLocationCounts ? '▾' : '▸'}</Text>
               </Pressable>
               {showLocationCounts ? (
                 countsByLocation.length > 0 ? (

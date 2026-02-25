@@ -7,12 +7,13 @@ import { useAppTheme } from '@/theme';
 interface ScreenProps {
   children: React.ReactNode;
   scroll?: boolean;
+  scrollEnabled?: boolean;
   style?: ViewStyle;
   disableDataStateGate?: boolean;
   overlay?: React.ReactNode;
 }
 
-export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, style, disableDataStateGate = false, overlay }) => {
+export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, scrollEnabled = true, style, disableDataStateGate = false, overlay }) => {
   const theme = useAppTheme();
   const data = useData();
   const styles = StyleSheet.create({
@@ -91,7 +92,7 @@ export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, style, 
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.root}>
-          <ScrollView contentContainerStyle={[styles.content, style]}>{children}</ScrollView>
+          <ScrollView scrollEnabled={scrollEnabled} contentContainerStyle={[styles.content, style]}>{children}</ScrollView>
           {overlay}
         </View>
       </SafeAreaView>

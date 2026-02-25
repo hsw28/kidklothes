@@ -70,15 +70,15 @@ export const categoryIconName: Record<ClosetCategory, string> = {
 export const categoryGlyph: Record<ClosetCategory, string> = {
   tops: 'T',
   pants: 'P',
-  'one-pieces': '1',
+  'one-pieces': 'O',
   'dresses-skirts': 'D',
   sets: 'S',
-  pjs: 'Z',
-  swim: 'W',
-  outerwear: 'O',
+  pjs: 'PJ',
+  swim: 'S',
+  outerwear: 'OW',
   shoes: 'S',
   accessories: 'A',
-  other: '•',
+  other: 'O',
 };
 
 export const getCategoryEmptyMicrocopy = (category: ClosetCategory, count: number): string => {
@@ -274,8 +274,11 @@ export const getConfiguredWishlistCategories = (settings?: Pick<AppSettings, 'wi
     includeOther: false,
   });
 
-export const getConfiguredKidsPreviewCategories = (settings?: Pick<AppSettings, 'kidsPreviewCategories'>) =>
-  sanitizeCategoryOrder(settings?.kidsPreviewCategories, {
+export const getConfiguredKidsPreviewCategories = (settings?: Pick<AppSettings, 'kidsPreviewCategories'>) => {
+  const raw = (settings?.kidsPreviewCategories ?? []).filter((entry): entry is ClosetCategory => isClosetCategory(entry));
+  if (raw.length === 0) return [...KIDS_PREVIEW_CATEGORIES];
+  return sanitizeCategoryOrder(raw, {
     includeOther: true,
-    fallback: KIDS_PREVIEW_CATEGORIES,
+    fallback: raw,
   });
+};

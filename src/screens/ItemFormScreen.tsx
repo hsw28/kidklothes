@@ -257,58 +257,62 @@ const scoreSimilarity = (candidate: Item, input: { title: string; brand: string;
 export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const { children, items, childItems, storageLocations, printAliases, settings, logEvent, addItem, updateItem, updateItemCachedImage, updateSettings } = useData();
   const editing = route.params?.itemId;
+  const duplicateFromItemId = route.params?.duplicateFromItemId;
   const shoppingMode = route.params?.shoppingMode === true;
   const existing = useMemo(() => items.find((item) => item.id === editing), [editing, items]);
-  const existingChildLink = useMemo(() => childItems.find((link) => link.itemId === editing), [childItems, editing]);
+  const sourceItemId = duplicateFromItemId ?? editing;
+  const sourceItem = useMemo(() => items.find((item) => item.id === sourceItemId), [sourceItemId, items]);
+  const sourceChildLink = useMemo(() => childItems.find((link) => link.itemId === sourceItemId), [childItems, sourceItemId]);
 
-  const initialType = existing?.clothingType ?? route.params?.prefillType ?? (shoppingMode ? settings.lastShoppingType : undefined) ?? 'top';
+  const initialType = sourceItem?.clothingType ?? route.params?.prefillType ?? (shoppingMode ? settings.lastShoppingType : undefined) ?? 'top';
 
-  const [title, setTitle] = useState(existing?.title ?? '');
-  const [url, setUrl] = useState(existing?.url ?? route.params?.url ?? '');
-  const [brand, setBrand] = useState(existing?.brand ?? route.params?.prefillBrand ?? '');
-  const [printName, setPrintName] = useState(existing?.printName ?? '');
-  const [brandTags, setBrandTags] = useState(existing?.brandTags.join(', ') ?? existing?.brand ?? route.params?.prefillBrand ?? '');
-  const existingPrimaryImage = existing?.imageUrl ?? existing?.imageUrls?.[0] ?? existing?.cachedImageUri ?? '';
-  const existingExtraImages = existing
-    ? (existing.imageUrls ?? []).filter((entry) => entry && entry !== existingPrimaryImage).join(', ')
+  const [title, setTitle] = useState(sourceItem?.title ?? '');
+  const [url, setUrl] = useState(sourceItem?.url ?? route.params?.url ?? '');
+  const [brand, setBrand] = useState(sourceItem?.brand ?? route.params?.prefillBrand ?? '');
+  const [printName, setPrintName] = useState(sourceItem?.printName ?? '');
+  const [brandTags, setBrandTags] = useState(sourceItem?.brandTags.join(', ') ?? sourceItem?.brand ?? route.params?.prefillBrand ?? '');
+  const existingPrimaryImage = sourceItem?.imageUrl ?? sourceItem?.imageUrls?.[0] ?? sourceItem?.cachedImageUri ?? '';
+  const existingExtraImages = sourceItem
+    ? (sourceItem.imageUrls ?? []).filter((entry) => entry && entry !== existingPrimaryImage).join(', ')
     : '';
   const [imageUrl, setImageUrl] = useState(existingPrimaryImage);
   const [extraImageUrls, setExtraImageUrls] = useState(existingExtraImages);
-  const [size, setSize] = useState(existing?.size ?? '');
-  const [sizeNormalized, setSizeNormalized] = useState(existing?.sizeNormalized ?? '');
-  const [brandSizeNote, setBrandSizeNote] = useState(existing?.brandSizeNote ?? '');
-  const [brandFit, setBrandFit] = useState<BrandFit | undefined>(existing?.brandFit);
-  const [kidFit, setKidFit] = useState<KidFit | undefined>(existing?.kidFit ?? (existing ? undefined : 'unknown'));
-  const [purchasePrice, setPurchasePrice] = useState(existing?.purchasePrice?.toString() ?? '');
-  const [targetResalePrice, setTargetResalePrice] = useState(existing?.targetResalePrice?.toString() ?? '');
-  const [soldPrice, setSoldPrice] = useState(existing?.soldPrice?.toString() ?? '');
-  const [soldDate, setSoldDate] = useState(existing?.soldDate ?? '');
-  const [notes, setNotes] = useState(existing?.notes ?? '');
-  const [tags, setTags] = useState(existing?.tags.join(', ') ?? '');
-  const [seasonTags, setSeasonTags] = useState(existing?.seasonTags.join(', ') ?? '');
-  const [childId, setChildId] = useState(existingChildLink?.childId ?? route.params?.prefillChildId ?? settings.lastShoppingChildId ?? children[0]?.id ?? '');
+  const [size, setSize] = useState(sourceItem?.size ?? '');
+  const [sizeNormalized, setSizeNormalized] = useState(sourceItem?.sizeNormalized ?? '');
+  const [brandSizeNote, setBrandSizeNote] = useState(sourceItem?.brandSizeNote ?? '');
+  const [fabric, setFabric] = useState(sourceItem?.fabric ?? '');
+  const [brandFit, setBrandFit] = useState<BrandFit | undefined>(sourceItem?.brandFit);
+  const [kidFit, setKidFit] = useState<KidFit | undefined>(sourceItem?.kidFit ?? (editing ? undefined : 'unknown'));
+  const [purchasePrice, setPurchasePrice] = useState(sourceItem?.purchasePrice?.toString() ?? '');
+  const [targetResalePrice, setTargetResalePrice] = useState(sourceItem?.targetResalePrice?.toString() ?? '');
+  const [soldPrice, setSoldPrice] = useState(sourceItem?.soldPrice?.toString() ?? '');
+  const [soldDate, setSoldDate] = useState(sourceItem?.soldDate ?? '');
+  const [notes, setNotes] = useState(sourceItem?.notes ?? '');
+  const [tags, setTags] = useState(sourceItem?.tags.join(', ') ?? '');
+  const [seasonTags, setSeasonTags] = useState(sourceItem?.seasonTags.join(', ') ?? '');
+  const [childId, setChildId] = useState(sourceChildLink?.childId ?? route.params?.prefillChildId ?? settings.lastShoppingChildId ?? children[0]?.id ?? '');
   const [clothingType, setClothingType] = useState<ClothingType>(initialType);
-  const [status, setStatus] = useState<ItemStatus>(existing?.status ?? route.params?.prefillStatus ?? 'wishlist');
-  const [storageLocationId, setStorageLocationId] = useState(existingChildLink?.storageLocationId ?? '');
-  const [condition, setCondition] = useState<Condition | undefined>(existing?.condition);
+  const [status, setStatus] = useState<ItemStatus>(sourceItem?.status ?? route.params?.prefillStatus ?? 'wishlist');
+  const [storageLocationId, setStorageLocationId] = useState(sourceChildLink?.storageLocationId ?? '');
+  const [condition, setCondition] = useState<Condition | undefined>(sourceItem?.condition);
   const [category, setCategory] = useState<ClosetCategory | undefined>(
-    normalizeItemCategoryToClosetCategory(existing?.category)
+    normalizeItemCategoryToClosetCategory(sourceItem?.category)
     ?? normalizeItemCategoryToClosetCategory(route.params?.prefillCategory)
-    ?? useCategoryDefault(existing?.clothingType),
+    ?? useCategoryDefault(sourceItem?.clothingType),
   );
   const [isFetchingPreview, setIsFetchingPreview] = useState(false);
   const [previewCard, setPreviewCard] = useState<PreviewCardState>(() => (route.params?.url ? { status: 'loading', domain: getDomainLabel(route.params.url) } : { status: 'idle' }));
   const [showAdvancedMediaFields, setShowAdvancedMediaFields] = useState(false);
-  const [titleTouched, setTitleTouched] = useState(Boolean(existing?.title));
-  const [brandTouched, setBrandTouched] = useState(Boolean(existing?.brand));
-  const [imageTouched, setImageTouched] = useState(Boolean(existing?.imageUrl));
-  const [quickMode, setQuickMode] = useState(!existing && (route.params?.quick ?? false));
+  const [titleTouched, setTitleTouched] = useState(Boolean(sourceItem?.title));
+  const [brandTouched, setBrandTouched] = useState(Boolean(sourceItem?.brand));
+  const [imageTouched, setImageTouched] = useState(Boolean(sourceItem?.imageUrl || sourceItem?.cachedImageUri));
+  const [quickMode, setQuickMode] = useState(!editing && (route.params?.quick ?? false));
   const [duplicateCandidates, setDuplicateCandidates] = useState<SimilarCandidate[]>([]);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [showSizePickerModal, setShowSizePickerModal] = useState(false);
   const [duplicateModalMessage, setDuplicateModalMessage] = useState('These look close to what you are adding.');
   const [pendingAddAnother, setPendingAddAnother] = useState(false);
-  const [didAutofillPrint, setDidAutofillPrint] = useState(Boolean(existing?.printName));
+  const [didAutofillPrint, setDidAutofillPrint] = useState(Boolean(sourceItem?.printName));
   const [showPrintSuggestions, setShowPrintSuggestions] = useState(true);
   const [debouncedPrintQuery, setDebouncedPrintQuery] = useState((existing?.printName ?? '').trim());
   const deepLinkUrlRef = useRef(route.params?.url?.trim() || '');
@@ -602,6 +606,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       brandFit,
       kidFit,
       brandSizeNote,
+      fabric,
       condition,
       status,
       purchasePrice,
@@ -616,25 +621,36 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     });
 
   const getDuplicateCandidates = (): SimilarCandidate[] => {
-    const draftTitle = quickMode ? `${size.trim() || 'New'} ${clothingType}` : title;
-    const scored = items
+    const draftTitle = normalizeText((quickMode ? (title.trim() || `${size.trim() || 'New'} ${category ? closetLabel[category] : clothingType}`) : title).trim());
+    const normalizedBrand = normalizeText(brand || '');
+    const normalizedPrint = resolvePrintName(printName, printAliases);
+    const draftCategory = category;
+
+    return items
       .filter((candidate) => {
         if (editing && candidate.id === editing) return false;
         return candidate.childIds.includes(childId);
       })
-      .map((candidate) => {
-        const result = scoreSimilarity(candidate, {
-          title: draftTitle,
-          brand,
-          clothingType,
-          size,
-        });
-        return { item: candidate, score: result.score, reasons: result.reasons };
+      .flatMap((candidate) => {
+        const exactTitle = draftTitle && normalizeText(candidate.title) === draftTitle;
+        if (exactTitle) {
+          return [{ item: candidate, score: 1, reasons: ['Exact same title'] } satisfies SimilarCandidate];
+        }
+
+        if (!normalizedBrand || !normalizedPrint) return [];
+        const candidateBrand = normalizeText(candidate.brand || candidate.brandTags[0] || '');
+        if (!candidateBrand || candidateBrand !== normalizedBrand) return [];
+        const candidatePrint = candidate.printNameNorm || resolvePrintName(candidate.printName ?? '', printAliases);
+        if (!candidatePrint || candidatePrint !== normalizedPrint) return [];
+        if (draftCategory) {
+          const candidateCategory = normalizeItemCategoryToClosetCategory(candidate.category);
+          if (candidateCategory && candidateCategory !== draftCategory) return [];
+        } else if (candidate.clothingType !== clothingType) {
+          return [];
+        }
+        return [{ item: candidate, score: 0.96, reasons: ['Same brand', 'Same category', 'Same print'] } satisfies SimilarCandidate];
       })
-      .filter((entry) => entry.score >= 0.72)
-      .sort((a, b) => b.score - a.score)
       .slice(0, 3);
-    return scored;
   };
 
   const getPrintDuplicateCandidates = (): SimilarCandidate[] => {
@@ -714,7 +730,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
     if (status === 'wishlist' && size.trim()) {
       const awareness = getWishlistAwareness(items, { childId, clothingType: closetCategoryToClothingType(category), size });
-      if (awareness.ownedCount >= 4) {
+      const inventoryRealityThreshold = Math.max(1, settings.inventoryRealityCheckOwnedThreshold ?? 4);
+      if (awareness.ownedCount >= inventoryRealityThreshold) {
         Alert.alert('Inventory Reality Check', `You already own ${awareness.ownedCount} ${category ? closetLabel[category] : clothingType} items in size ${size}.`);
       }
     }
@@ -731,10 +748,28 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
     if (!addAnother) {
       if (status === 'wishlist' && created) {
-        Alert.alert('Saved to Wishlist', 'You can add details later.', [
-          { text: 'Close', style: 'cancel', onPress: () => navigation.goBack() },
-          { text: 'Add Details', onPress: () => navigation.replace('ItemDetail', { itemId: created.id }) },
-        ]);
+        const hasMeaningfulDetails = Boolean(
+          printName.trim() ||
+            fabric.trim() ||
+            notes.trim() ||
+            tags.trim() ||
+            seasonTags.trim() ||
+            extraImageUrls.trim() ||
+            (brandTags.trim() && normalizeText(brandTags) !== normalizeText(brand || '')) ||
+            (url.trim() && titleTouched) ||
+            (brand.trim() && brandTouched) ||
+            imageTouched,
+        );
+
+        if (!hasMeaningfulDetails) {
+          Alert.alert('Saved to Wishlist', 'You can add details later.', [
+            { text: 'Close', style: 'cancel', onPress: () => navigation.goBack() },
+            { text: 'Add Details', onPress: () => navigation.replace('ItemDetail', { itemId: created.id }) },
+          ]);
+          return;
+        }
+
+        Alert.alert('Saved to Wishlist', 'Saved.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
         return;
       }
       navigation.goBack();
@@ -754,6 +789,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     setSize(defaultWearingSize || '');
     setSizeNormalized('');
     setBrandSizeNote('');
+    setFabric('');
     setBrandFit(undefined);
     setKidFit('unknown');
     setPurchasePrice('');
@@ -1154,6 +1190,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                 onChange={(label) => setKidFit(kidFitOptions.find((option) => option.label === label)?.value)}
               />
               <FormInput label="Notes (optional)" value={brandSizeNote} onChangeText={setBrandSizeNote} placeholder="e.g. runs long" />
+              <FormInput label="Fabric (optional)" value={fabric} onChangeText={setFabric} placeholder="e.g. cotton rib, bamboo modal" />
             </>
           ) : null}
           {status !== 'wishlist' ? (

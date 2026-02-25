@@ -21,6 +21,7 @@ type ItemPayloadFormInput = {
   brandFit?: BrandFit;
   kidFit?: KidFit;
   brandSizeNote: string;
+  fabric: string;
   condition?: Condition;
   status: ItemStatus;
   purchasePrice: string;
@@ -52,6 +53,7 @@ export type NormalizedItemPayload = {
   brandFit?: BrandFit;
   kidFit?: KidFit;
   brandSizeNote?: string;
+  fabric?: string;
   fitRating?: undefined;
   fitException?: undefined;
   condition?: Condition;
@@ -105,6 +107,7 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
     brandFit: input.brandFit,
     kidFit: input.kidFit,
     brandSizeNote: input.brandSizeNote || undefined,
+    fabric: input.fabric.trim() || undefined,
     fitRating: undefined,
     fitException: undefined,
     condition: input.condition,

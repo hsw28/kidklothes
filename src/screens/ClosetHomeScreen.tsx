@@ -3,11 +3,13 @@ import { Alert, Animated, FlatList, Image, Modal, PanResponder, Pressable, Scrol
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
+import { BetaKidLimitModal } from '@/components/BetaKidLimitModal';
 import { ChipSelector } from '@/components/ChipSelector';
 import { DraggableCategoryPrefsEditor } from '@/components/DraggableCategoryPrefsEditor';
 import { EmptyState } from '@/components/EmptyState';
 import { FloatingActionButton } from '@/components/FloatingActionButton';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { FormInput } from '@/components/FormInput';
 import { RemoteImage } from '@/components/RemoteImage';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
@@ -31,13 +33,26 @@ import { formatPieceCount } from '@/utils/formatCounts';
 import { formatItemCategoryLabel, getBrandShortLabel } from '@/utils/itemLabels';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
 import { showActionMenu } from '@/utils/actionSheets';
+import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'ClosetHome'>;
 
 const sizeModeLabels: Record<ClosetSizeMode, string> = {
   now: 'Now',
   next: 'Next',
-  both: 'Both',
+  both: 'All',
+};
+
+const sizeModeToSelection = (mode: ClosetSizeMode): { now: boolean; next: boolean } => ({
+  now: mode === 'now' || mode === 'both',
+  next: mode === 'next' || mode === 'both',
+});
+
+const selectionToSizeMode = (selection: { now: boolean; next: boolean }, fallback: ClosetSizeMode): ClosetSizeMode => {
+  if (selection.now && selection.next) return 'both';
+  if (selection.now) return 'now';
+  if (selection.next) return 'next';
+  return fallback;
 };
 const FEATURE_SINGLE_RECENT = false;
 const CLOSET_GRID_COLUMNS = 2;
@@ -79,6 +94,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
   const heroImages = thumbs.filter(Boolean);
   const [heroWidth, setHeroWidth] = useState(0);
   const [heroIndex, setHeroIndex] = useState(0);
+  const heroDidDragRef = useRef(false);
   const extraCount = Math.max(0, count - 1);
   const countLabel = String(count);
 
@@ -117,6 +133,9 @@ const ClosetTileComponent: React.FC<TileProps> = ({
         useNativeDriver: true,
       }),
     ]).start();
+
+
+
 
   const styles = StyleSheet.create({
     tileShell: {
@@ -338,10 +357,15 @@ const ClosetTileComponent: React.FC<TileProps> = ({
   });
 
   return (
-    <Animated.View style={styles.tileShell}>
+    <Animated.View style={styles.tileShell} {...(isReorderMode ? panHandlers : {})}>
       <Pressable
-        {...(isReorderMode ? panHandlers : {})}
-        onPress={onPress}
+        onPress={() => {
+          if (heroDidDragRef.current) {
+            heroDidDragRef.current = false;
+            return;
+          }
+          onPress();
+        }}
         onLongPress={onLongPress}
         onPressIn={pressIn}
         onPressOut={pressOut}
@@ -373,6 +397,8 @@ const ClosetTileComponent: React.FC<TileProps> = ({
         </Animated.View>
         <View
           style={styles.heroWrap}
+          onStartShouldSetResponderCapture={() => heroImages.length > 1}
+          onMoveShouldSetResponderCapture={() => heroImages.length > 1}
           onLayout={(event) => {
             const nextWidth = Math.round(event.nativeEvent.layout.width);
             if (nextWidth && nextWidth !== heroWidth) setHeroWidth(nextWidth);
@@ -394,6 +420,9 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               scrollEventThrottle={16}
               showsHorizontalScrollIndicator={false}
               style={styles.heroPager}
+              onTouchStart={(event) => { heroDidDragRef.current = false; event.stopPropagation(); }}
+              onTouchMove={(event) => { heroDidDragRef.current = true; event.stopPropagation(); }}
+              onTouchEnd={(event) => event.stopPropagation()}
               onMomentumScrollEnd={(event) => {
                 const width = heroWidth || event.nativeEvent.layoutMeasurement.width || 1;
                 const nextIndex = Math.round(event.nativeEvent.contentOffset.x / width);
@@ -549,11 +578,13 @@ const RecentlyAddedItemCardComponent: React.FC<RecentlyAddedItemCardProps> = ({ 
 const RecentlyAddedItemCard = React.memo(RecentlyAddedItemCardComponent);
 
 export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { children, items, childItems, storageLocations, settings, logEvent, updateChild, updateSettings } = useData();
+  const { children, items, childItems, storageLocations, settings, logEvent, updateChild, updateSettings, canCreateAnotherKid } = useData();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [sizeMode, setSizeMode] = useState<ClosetSizeMode>('now');
+  const [specificSizes, setSpecificSizes] = useState<string[]>([]);
   const [brandId, setBrandId] = useState<string>('All');
   const [seasonFilter, setSeasonFilter] = useState<string>('All');
+  const [closetSearch, setClosetSearch] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showCategoryLayoutEditor, setShowCategoryLayoutEditor] = useState(false);
   const [showTileGridReorderMode, setShowTileGridReorderMode] = useState(false);
@@ -574,6 +605,18 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const tilePanRespondersRef = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
   const theme = useAppTheme();
   const renderDebugRef = useRef<{ count: number; windowStart: number }>({ count: 0, windowStart: Date.now() });
+  const [showKidLimitModal, setShowKidLimitModal] = useState(false);
+  const [kidLimitCurrentCount, setKidLimitCurrentCount] = useState(children.length);
+
+  const openAddKidFromEmptyState = useCallback(async () => {
+    const result = await canCreateAnotherKid();
+    if (!result.ok) {
+      setKidLimitCurrentCount(result.current);
+      setShowKidLimitModal(true);
+      return;
+    }
+    (navigation.getParent() as any)?.navigate('Kids', { screen: 'KidForm', params: { returnToClosetAfterCreate: true } });
+  }, [canCreateAnotherKid, navigation]);
 
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
   const selectedChild = children.find((child) => child.id === childId) ?? children[0];
@@ -611,6 +654,10 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       lastDefaultedChildRef.current = selectedChild.id;
     }
   }, [selectedChild?.id, selectedChild?.usesMixedSizes]);
+
+  useEffect(() => {
+    setSpecificSizes((prev) => (prev.length ? [] : prev));
+  }, [selectedChild?.id]);
 
   const styles = StyleSheet.create({
     headerTitle: {
@@ -755,6 +802,35 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 8,
+    },
+    sizeToggleWrap: {
+      gap: 8,
+      marginTop: 2,
+    },
+    sizeToggleRow: {
+      flexDirection: 'row',
+      gap: 8,
+      flexWrap: 'wrap',
+    },
+    sizeToggleChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      borderRadius: 999,
+      backgroundColor: theme.colors.chipBg,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    sizeToggleChipActive: {
+      backgroundColor: theme.colors.accentPrimarySoft,
+      borderColor: theme.colors.accentPrimary,
+    },
+    sizeToggleChipText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textPrimary,
+    },
+    sizeToggleChipTextActive: {
+      color: theme.colors.textPrimary,
     },
     topBrandLabel: {
       fontSize: 12,
@@ -1006,6 +1082,10 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const normalize = (value: string) => value.toLowerCase().trim();
   const matchesSizeMode = (item: (typeof ownedItems)[number]) => {
+    if (specificSizes.length > 0) {
+      const itemSize = normalize(item.size);
+      return specificSizes.some((value) => normalize(value) === itemSize);
+    }
     if (sizeMode === 'both') return true;
     const category = closetCategoryForItem(item);
     const current = sizeAnchors.currentByCategory.get(category);
@@ -1023,7 +1103,28 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     return item.seasonTags.some((tag) => tag.toLowerCase().trim() === selectedSeason.toLowerCase().trim());
   };
 
-  const sizeScopedItems = useMemo(() => ownedItems.filter(matchesSizeMode), [ownedItems, sizeMode, sizeAnchors]);
+  const sizeScopedItems = useMemo(() => ownedItems.filter(matchesSizeMode), [ownedItems, sizeMode, sizeAnchors, specificSizes]);
+
+  const availableSpecificSizes = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const item of ownedItems) {
+      const raw = (item.size || '').trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      const current = labels.get(key);
+      if (!current || (current === current.toLowerCase() && raw !== raw.toLowerCase())) labels.set(key, raw);
+    }
+    return Array.from(labels.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [ownedItems]);
+
+  useEffect(() => {
+    if (!specificSizes.length) return;
+    const allowed = new Set(availableSpecificSizes.map((v) => v.toLowerCase()));
+    setSpecificSizes((prev) => {
+      const next = prev.filter((v) => allowed.has(v.toLowerCase()));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [availableSpecificSizes]);
 
   const seasonOptions = useMemo(() => {
     const values = new Set<string>();
@@ -1034,19 +1135,30 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [sizeScopedItems, brandId]);
 
   const brandOptions = useMemo(() => {
-    const values = new Map<string, number>();
+    const values = new Map<string, { count: number; label: string }>();
+    const normalizeBrandKey = (value: string) => value.trim().toLowerCase();
     sizeScopedItems
       .filter((item) => matchesSeason(item, seasonFilter))
       .forEach((item) => {
         const candidate = (item.brandTags[0] || item.brand || '').trim();
         if (!candidate) return;
-        values.set(candidate, (values.get(candidate) ?? 0) + 1);
+        const key = normalizeBrandKey(candidate);
+        const current = values.get(key);
+        if (!current) {
+          values.set(key, { count: 1, label: candidate });
+          return;
+        }
+        const preferredLabel =
+          current.label.toLowerCase() === current.label && candidate.toLowerCase() !== candidate
+            ? candidate
+            : current.label;
+        values.set(key, { count: current.count + 1, label: preferredLabel });
       });
     return [
       'All',
-      ...Array.from(values.entries())
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([name]) => name),
+      ...Array.from(values.values())
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+        .map((entry) => entry.label),
     ];
   }, [sizeScopedItems, seasonFilter]);
 
@@ -1148,6 +1260,39 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const openItemDetail = useCallback((itemId: string) => {
     navigation.navigate('ItemDetail', { itemId });
   }, [navigation]);
+  const openClosetSearchResults = useCallback(() => {
+    const q = closetSearch.trim();
+    if (!q) return;
+    navigation.navigate('ItemsList', {
+      initialChildId: selectedChild?.id,
+      initialStatus: 'owned',
+      hideInbox: true,
+      initialQuery: q,
+    });
+  }, [closetSearch, navigation, selectedChild?.id]);
+
+  const toggleClosetSizeSelection = useCallback((key: 'now' | 'next') => {
+    setSpecificSizes([]);
+    const current = sizeModeToSelection(sizeMode);
+    const nextSelection = { ...current, [key]: !current[key] };
+    const nextMode = selectionToSizeMode(nextSelection, 'both');
+    setSizeMode(nextMode);
+    if (selectedChild?.id) sizeModeOverridesRef.current[selectedChild.id] = nextMode;
+  }, [sizeMode, selectedChild?.id]);
+
+  const selectAllClosetSizes = useCallback(() => {
+    setSpecificSizes([]);
+    setSizeMode('both');
+    if (selectedChild?.id) sizeModeOverridesRef.current[selectedChild.id] = 'both';
+  }, [selectedChild?.id]);
+
+  const toggleSpecificClosetSize = useCallback((value: string) => {
+    setSpecificSizes((prev) => {
+      const exists = prev.some((entry) => entry.toLowerCase() === value.toLowerCase());
+      if (exists) return prev.filter((entry) => entry.toLowerCase() !== value.toLowerCase());
+      return [...prev, value];
+    });
+  }, []);
 
   const moveCategoryInList = useCallback((list: ClosetCategory[], from: number, to: number): ClosetCategory[] => {
     if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return list;
@@ -1176,7 +1321,9 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       if (tilePanRespondersRef.current[category]) return tilePanRespondersRef.current[category];
       tilePanRespondersRef.current[category] = PanResponder.create({
         onStartShouldSetPanResponder: () => showTileGridReorderMode,
+        onStartShouldSetPanResponderCapture: () => showTileGridReorderMode,
         onMoveShouldSetPanResponder: (_, gesture) => showTileGridReorderMode && (Math.abs(gesture.dx) > 3 || Math.abs(gesture.dy) > 3),
+        onMoveShouldSetPanResponderCapture: (_, gesture) => showTileGridReorderMode && (Math.abs(gesture.dx) > 3 || Math.abs(gesture.dy) > 3),
         onPanResponderGrant: () => {
           tileDragStateRef.current = { category };
         },
@@ -1207,6 +1354,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           tileOrderRef.current = next;
           setTileGridOrder(next);
         },
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
         onPanResponderRelease: () => {
           tileDragStateRef.current = null;
           void persistVisibleCategoryOrder([...tileOrderRef.current]);
@@ -1248,7 +1397,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             </Text>
             <PrimaryButton
               label="Add Kid"
-              onPress={() => (navigation.getParent() as any)?.navigate('Kids', { screen: 'KidForm', params: { returnToClosetAfterCreate: true } })}
+              onPress={() => void openAddKidFromEmptyState()}
             />
             <Text style={{ fontSize: 13, color: theme.colors.textSecondary }}>You can add more kids anytime.</Text>
             <Pressable
@@ -1345,6 +1494,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <Screen
       style={styles.screenContent}
+      scrollEnabled={!showTileGridReorderMode}
       overlay={(
         <>
           {showFirstKidAddedHint ? (
@@ -1403,20 +1553,60 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           }}
           accent="coral"
         />
-        <ChipSelector
-          label="Size"
-          options={['Now', 'Next', 'Both']}
-          value={sizeModeLabels[sizeMode]}
-          onChange={(label) => {
-            const nextMode = label.toLowerCase() as ClosetSizeMode;
-            setSizeMode(nextMode);
-            if (selectedChild?.id) sizeModeOverridesRef.current[selectedChild.id] = nextMode;
-          }}
+        <View style={styles.sizeToggleWrap}>
+          <Text style={styles.topBrandLabel}>Size</Text>
+          <View style={styles.sizeToggleRow}>
+            <Pressable
+              style={[styles.sizeToggleChip, sizeModeToSelection(sizeMode).now ? styles.sizeToggleChipActive : null]}
+              onPress={() => toggleClosetSizeSelection('now')}
+            >
+              <Text style={[styles.sizeToggleChipText, sizeModeToSelection(sizeMode).now ? styles.sizeToggleChipTextActive : null]}>Now</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.sizeToggleChip, sizeModeToSelection(sizeMode).next ? styles.sizeToggleChipActive : null]}
+              onPress={() => toggleClosetSizeSelection('next')}
+            >
+              <Text style={[styles.sizeToggleChipText, sizeModeToSelection(sizeMode).next ? styles.sizeToggleChipTextActive : null]}>Next</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.sizeToggleChip, sizeMode === 'both' && specificSizes.length === 0 ? styles.sizeToggleChipActive : null]}
+              onPress={selectAllClosetSizes}
+            >
+              <Text style={[styles.sizeToggleChipText, sizeMode === 'both' && specificSizes.length === 0 ? styles.sizeToggleChipTextActive : null]}>All</Text>
+            </Pressable>
+          </View>
+          {availableSpecificSizes.length > 0 ? (
+            <View style={styles.sizeToggleRow}>
+              {availableSpecificSizes.slice(0, 12).map((value) => {
+                const active = specificSizes.some((entry) => entry.toLowerCase() === value.toLowerCase());
+                return (
+                  <Pressable
+                    key={`closet-size-${value}`}
+                    style={[styles.sizeToggleChip, active ? styles.sizeToggleChipActive : null]}
+                    onPress={() => toggleSpecificClosetSize(value)}
+                  >
+                    <Text style={[styles.sizeToggleChipText, active ? styles.sizeToggleChipTextActive : null]}>{value}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+        <FormInput
+          label="Search Closet"
+          value={closetSearch}
+          onChangeText={setClosetSearch}
+          placeholder="Search title, print, brand, tags (e.g. daisy)"
+          autoCapitalize="none"
+          autoCorrect={false}
         />
+        {closetSearch.trim() ? (
+          <PrimaryButton label="See Matches" variant="secondary" onPress={openClosetSearchResults} />
+        ) : null}
         {advancedUnlocked ? (
           <View style={styles.topBrandRowWrap}>
             <View style={styles.topBrandHeader}>
-              <Text style={styles.topBrandLabel}>Brand Mode</Text>
+              <Text style={styles.topBrandLabel}>Brand Filter</Text>
               <Text style={styles.topBrandModeText}>{activeBrandName ? `Filtering: ${activeBrandName}` : 'All brands'}</Text>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroller} contentContainerStyle={styles.chipRow}>
@@ -1703,9 +1893,9 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               setFiltersExpanded(true);
             }}
             accessibilityRole="button"
-            accessibilityLabel="Brand Mode action"
+            accessibilityLabel="Brand Filter action"
           >
-            <Text style={styles.actionCardTitle}>Brand Mode</Text>
+            <Text style={styles.actionCardTitle}>Brand Filter</Text>
             <Text style={styles.actionCardMeta}>Filter closet by brand</Text>
           </Pressable>
           <Pressable
@@ -1727,7 +1917,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         <>
           <Card>
             <Pressable onPress={() => setShowNew((prev) => !prev)}>
-              <Text style={styles.sectionToggle}>New this week {showNew ? 'Hide' : 'Show'}</Text>
+              <Text style={styles.sectionToggle}>New this week {showNew ? '▾' : '▸'}</Text>
             </Pressable>
             {showNew ? (
               newThisWeek.length ? (
@@ -1747,7 +1937,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
 
           <Card>
             <Pressable onPress={() => setShowStash((prev) => !prev)}>
-              <Text style={styles.sectionToggle}>Size-ups stash {showStash ? 'Hide' : 'Show'}</Text>
+              <Text style={styles.sectionToggle}>Size-ups stash {showStash ? '▾' : '▸'}</Text>
             </Pressable>
             {showStash ? (
               sizeUpsStash.length ? (
@@ -1767,7 +1957,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
 
           <Card>
             <Pressable onPress={() => setShowDupes((prev) => !prev)}>
-              <Text style={styles.sectionToggle}>Duplicate prints across sizes {showDupes ? 'Hide' : 'Show'}</Text>
+              <Text style={styles.sectionToggle}>Duplicate prints across sizes {showDupes ? '▾' : '▸'}</Text>
             </Pressable>
             {showDupes ? (
               duplicatePrints.length ? (
@@ -1795,6 +1985,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           </Pressable>
         </Pressable>
       </Modal>
+      <BetaKidLimitModal
+        visible={showKidLimitModal}
+        onClose={() => setShowKidLimitModal(false)}
+        onSendFeedback={() => { void openKidLimitFeedbackEmail(kidLimitCurrentCount); }}
+      />
     </Screen>
   );
 };

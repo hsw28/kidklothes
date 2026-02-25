@@ -16,6 +16,7 @@ import {
   closetCategories,
   closetLabel,
   getConfiguredKidsPreviewCategories,
+  KIDS_PREVIEW_CATEGORIES,
   reorderCategoryList,
   sanitizeCategoryOrder,
 } from '@/utils/categories';
@@ -85,7 +86,7 @@ export const SettingsScreen: React.FC = () => {
       ? current.filter((entry) => entry !== category)
       : [...current, category];
     await updateSettings({
-      kidsPreviewCategories: next.length > 0 ? next : getConfiguredKidsPreviewCategories(settings),
+      kidsPreviewCategories: next.length > 0 ? next : [...KIDS_PREVIEW_CATEGORIES],
     });
   };
 
@@ -374,21 +375,12 @@ export const SettingsScreen: React.FC = () => {
           value={settings.advancedFeaturesUnlocked ? 'Unlocked' : 'Locked'}
           onChange={(value) => updateSettings({ advancedFeaturesUnlocked: value === 'Unlocked' })}
         />
-        {advancedUnlocked ? (
-          <>
-            <ChipSelector
-              label="Monetized Links"
-              options={['Off', 'On']}
-              value={settings.monetizationEnabled ? 'On' : 'Off'}
-              onChange={(value) => updateSettings({ monetizationEnabled: value === 'On' })}
-            />
-            {settings.monetizationEnabled ? (
-              <Text style={{ color: '#4b5563' }}>
-                Disclosure: Some outbound links may be affiliate links when monetization is enabled.
-              </Text>
-            ) : null}
-          </>
-        ) : null}
+        <ChipSelector
+          label="Inventory Reality Check Threshold"
+          options={['4', '6', '8', '12']}
+          value={String(settings.inventoryRealityCheckOwnedThreshold ?? 4)}
+          onChange={(value) => updateSettings({ inventoryRealityCheckOwnedThreshold: Number(value) || 4 })}
+        />
       </Card>
 
       <PrimaryButton label="Run Reminder Check" variant="secondary" onPress={runReminderCheck} />

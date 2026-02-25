@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
+import { BetaKidLimitModal } from '@/components/BetaKidLimitModal';
 import { EmptyState } from '@/components/EmptyState';
+import { PrimaryButton } from '@/components/PrimaryButton';
 import { FloatingActionButton } from '@/components/FloatingActionButton';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
@@ -14,6 +16,7 @@ import { getChildItems } from '@/utils/fitInsights';
 import { isSampleChildId } from '@/utils/sampleData';
 import { formatSizeDisplay, getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
+import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 
 type Props = NativeStackScreenProps<KidsStackParamList, 'KidsList'>;
 
@@ -131,10 +134,16 @@ const KidDashboardCardComponent: React.FC<KidDashboardCardProps> = ({ child, onO
 const KidDashboardCard = React.memo(KidDashboardCardComponent);
 
 export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
-  const { children, childItems, items, logEvent, settings } = useData();
+  const { children, childItems, items, logEvent, settings, updateSettings, canCreateAnotherKid } = useData();
   const { openPromote, promoteModal } = usePromoteChildSize();
   const hasOnlySampleKids = children.length > 0 && children.every((child) => isSampleChildId(child.id));
   const previewCategories: ClosetCategory[] = useMemo(() => getConfiguredKidsPreviewCategories(settings), [settings]);
+  const [showKidLimitModal, setShowKidLimitModal] = useState(false);
+  const [kidLimitCurrentCount, setKidLimitCurrentCount] = useState(children.length);
+  const showKidLimit = useCallback((current: number) => {
+    setKidLimitCurrentCount(current);
+    setShowKidLimitModal(true);
+  }, []);
 
   useEffect(() => {
     void logEvent('kids_dashboard_opened');
@@ -171,6 +180,15 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
     if (!full) return;
     openPromote({ child: full });
   }, [children, openPromote]);
+
+  const attemptOpenKidForm = useCallback(async () => {
+    const result = await canCreateAnotherKid();
+    if (!result.ok) {
+      showKidLimit(result.current);
+      return;
+    }
+    navigation.navigate('KidForm');
+  }, [canCreateAnotherKid, navigation, showKidLimit]);
 
   const childCards = useMemo<KidCardData[]>(() => (
     children.map((child) => {
@@ -215,17 +233,23 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
     <Screen
       scroll={false}
       style={styles.screen}
-      overlay={<FloatingActionButton onPress={() => navigation.navigate('KidForm')} accessibilityLabel="Add kid" testID="kids-fab-add" />}
+      overlay={<FloatingActionButton onPress={() => void attemptOpenKidForm()} accessibilityLabel="Add kid" testID="kids-fab-add" />}
     >
       {children.length === 0 ? (
         <EmptyState
           title="No kids added yet."
           subtitle="Add a child profile to start organizing their closet and wishlist."
           actionLabel="Add Kid"
-          onActionPress={() => navigation.navigate('KidForm')}
+          onActionPress={() => void attemptOpenKidForm()}
         />
       ) : (
         <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+          {children.length > 2 && !settings.betaKidLimitBannerDismissed ? (
+            <Card>
+              <Text style={styles.betaLimitBannerText}>You’re over the beta limit. Creating new children is temporarily disabled.</Text>
+              <PrimaryButton label="Got it" variant="secondary" onPress={() => void updateSettings({ betaKidLimitBannerDismissed: true })} />
+            </Card>
+          ) : null}
           {hasOnlySampleKids ? (
             <Card>
               <Text style={styles.sampleBannerTitle}>Sample kids</Text>
@@ -246,6 +270,11 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
       )}
 
       {promoteModal}
+      <BetaKidLimitModal
+        visible={showKidLimitModal}
+        onClose={() => setShowKidLimitModal(false)}
+        onSendFeedback={() => { void openKidLimitFeedbackEmail(kidLimitCurrentCount); }}
+      />
     </Screen>
   );
 };
@@ -379,6 +408,11 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: 13,
     color: '#716A63',
+  },
+  betaLimitBannerText: {
+    fontSize: 14,
+    color: '#4A4039',
+    marginBottom: 8,
   },
   sampleBannerTitle: {
     fontSize: 15,

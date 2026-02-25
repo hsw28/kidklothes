@@ -236,7 +236,7 @@ export const BrandSnapshotScreen: React.FC<Props> = ({ navigation, route }) => {
 
       <Card>
         <Pressable onPress={() => setShowDupes((prev) => !prev)}>
-          <Text style={styles.sectionTitle}>Print duplicates within brand {showDupes ? '(Hide)' : '(Show)'}</Text>
+          <Text style={styles.sectionTitle}>Print duplicates within brand {showDupes ? '▾' : '▸'}</Text>
         </Pressable>
         {showDupes ? (
           printDupes.length ? (

@@ -23,6 +23,8 @@ interface DataContextValue {
   addChild: (input: NewChildInput) => Promise<Child | undefined>;
   updateChild: (id: ID, patch: Partial<NewChildInput>) => Promise<void>;
   deleteChild: (id: ID) => Promise<void>;
+  getKidCount: () => Promise<number>;
+  canCreateAnotherKid: () => Promise<{ ok: boolean; current: number; max: number }>;
   addItem: (input: NewItemInput) => Promise<Item | undefined>;
   addItemsBatch: (input: BatchAddInput) => Promise<Item[]>;
   updateItem: (id: ID, patch: Partial<NewItemInput>) => Promise<void>;
@@ -74,6 +76,7 @@ const defaultSettings: AppSettings = {
   hiddenWishlistCategories: [],
   kidsPreviewCategories: undefined,
   developerModeEnabled: false,
+  betaKidLimitBannerDismissed: false,
 };
 
 const DataContext = createContext<DataContextValue | undefined>(undefined);
@@ -185,6 +188,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       addChild: async (input) => runAndRefreshWithResult(() => repository.addChild(input)),
       updateChild: async (id, patch) => runAndRefresh(() => repository.updateChild(id, patch)),
       deleteChild: async (id) => runAndRefresh(() => repository.deleteChild(id)),
+      getKidCount: async () => repository.getKidCount(),
+      canCreateAnotherKid: async () => repository.canCreateAnotherKid(),
       addItem: async (input) => runAndRefreshWithResult(() => repository.addItem(input)),
       addItemsBatch: async (input) => runAndRefreshWithResult(() => repository.addItemsBatch(input)),
       updateItem: async (id, patch) => runAndRefresh(() => repository.updateItem(id, patch)),

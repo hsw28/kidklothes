@@ -45,7 +45,7 @@ const tokenMatch = (item: Item, query: string) => {
     .filter(Boolean);
   if (tokens.length === 0) return true;
 
-  const haystack = [item.title, item.brand ?? '', item.brandTags.join(' '), item.tags.join(' ')].join(' ').toLowerCase();
+  const haystack = [item.title, item.printName ?? '', item.brand ?? '', item.brandTags.join(' '), item.tags.join(' ')].join(' ').toLowerCase();
   return tokens.every((token) => haystack.includes(token));
 };
 
@@ -182,7 +182,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
   const [sortedFilter, setSortedFilter] = useState<SortedFilter>('All');
   const [brandFilter, setBrandFilter] = useState<string>(route.params?.initialBrandId ?? 'All');
   const [wearFilter, setWearFilter] = useState<WearFilter>('All');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(route.params?.initialQuery ?? '');
   const [debouncedQuery, setDebouncedQuery] = useState('');
 
   const [captureUrl, setCaptureUrl] = useState('');
@@ -250,6 +250,11 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
     if (route.params?.initialStorageLocationId === undefined) return;
     setStorageLocationIdFilter(route.params.initialStorageLocationId);
   }, [route.params?.initialStorageLocationId]);
+
+  useEffect(() => {
+    if (route.params?.initialQuery === undefined) return;
+    setQuery(route.params.initialQuery);
+  }, [route.params?.initialQuery]);
 
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedQuery(query), 250);

@@ -15,7 +15,12 @@ const isSupportedImageUri = (value?: string | null) => {
   if (!value) return false;
   const trimmed = value.trim();
   if (!trimmed) return false;
-  return /^(https?:\/\/|file:\/\/|content:\/\/|ph:\/\/|assets-library:\/\/)/i.test(trimmed);
+  return /^(https?:\/\/|file:\/\/|content:\/\/|ph:\/\/|assets-library:\/\/)/i.test(trimmed) || trimmed.startsWith('/');
+};
+
+const isRemoteHttpUri = (value?: string | null) => {
+  if (!value) return false;
+  return /^https?:\/\//i.test(value.trim());
 };
 
 const RemoteImageComponent: React.FC<Props> = ({
@@ -33,14 +38,18 @@ const RemoteImageComponent: React.FC<Props> = ({
 
   useEffect(() => {
     setFailed(false);
-    setIsLoading(Boolean(isSupportedImageUri(uri)));
-    imageOpacity.setValue(0);
+    const supported = Boolean(isSupportedImageUri(uri));
+    const remote = isRemoteHttpUri(uri);
+    setIsLoading(supported && remote);
+    imageOpacity.setValue(supported ? (remote ? 0 : 1) : 0);
   }, [uri, imageOpacity]);
 
   const normalizedUri = useMemo(() => {
     if (!uri) return '';
     const trimmed = uri.trim();
-    return trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
+    if (trimmed.startsWith('//')) return `https:${trimmed}`;
+    if (trimmed.startsWith('/')) return `file://${trimmed}`;
+    return trimmed;
   }, [uri]);
 
   const showImage = isSupportedImageUri(normalizedUri) && !failed;
@@ -68,6 +77,10 @@ const RemoteImageComponent: React.FC<Props> = ({
           onLoadStart={() => setIsLoading(true)}
           onLoadEnd={() => {
             setIsLoading(false);
+            if (!isRemoteHttpUri(normalizedUri)) {
+              imageOpacity.setValue(1);
+              return;
+            }
             Animated.timing(imageOpacity, {
               toValue: 1,
               duration: 180,

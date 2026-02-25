@@ -22,9 +22,10 @@ export type ItemsStackParamList = {
         initialBrandId?: string;
         initialSizeBucket?: 'All' | 'now' | 'next';
         initialStorageLocationId?: ID;
+        initialQuery?: string;
       }
     | undefined;
-  AddItem: { itemId?: ID; url?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
+  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
   ItemDetail: { itemId: ID };
 };
 
@@ -58,6 +59,7 @@ export type ClosetStackParamList = {
         initialBrandId?: string;
         initialSizeBucket?: 'All' | 'now' | 'next';
         initialStorageLocationId?: ID;
+        initialQuery?: string;
       }
     | undefined;
   SellBin: undefined;
@@ -65,7 +67,7 @@ export type ClosetStackParamList = {
   OutfitsList: undefined;
   OutfitBuilder: { outfitId?: ID } | undefined;
   ItemDetail: { itemId: ID };
-  AddItem: { itemId?: ID; url?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
+  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
 };
 
 export type KidsStackParamList = {

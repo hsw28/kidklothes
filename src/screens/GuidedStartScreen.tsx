@@ -127,7 +127,7 @@ export const GuidedStartScreen: React.FC<Props> = ({ navigation }) => {
 
         {renderInfoCard('🧺', 'Closet', 'Track what fits now and next.', goCloset, 'Open Closet')}
         {renderInfoCard('🛍️', 'Wishlist', 'Save links from any store.', goWishlist, 'Open Wishlist')}
-        {renderInfoCard('📦', 'Drop Prep', 'Check size-ups and duplicates before buying.', goDropPrep, 'Open Drop Prep')}
+        {renderInfoCard('📦', 'Drop Prep', 'Check size-ups and duplicates before buying.', goDropPrep, 'Explore Drop Prep')}
       </View>
 
       <Card>

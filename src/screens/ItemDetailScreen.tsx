@@ -115,6 +115,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         {item.clickCount > 0 ? <Text style={styles.label}>Outbound clicks: {item.clickCount}</Text> : null}
         {brandFitLabel(item.brandFit) ? <Text style={styles.label}>Runs: {brandFitLabel(item.brandFit)}</Text> : null}
         {kidFitLabel(item.kidFit) ? <Text style={styles.label}>Fit on Kid: {kidFitLabel(item.kidFit)}</Text> : null}
+        {item.fabric ? <Text style={styles.label}>Fabric: {item.fabric}</Text> : null}
         {item.brandSizeNote ? <Text style={styles.label}>Fit note: {item.brandSizeNote}</Text> : null}
         {item.status !== 'wishlist' ? <Text style={styles.label}>Worn count: {item.wornCount}</Text> : null}
         {item.condition ? <Text style={styles.label}>Condition: {item.condition}</Text> : null}
@@ -178,6 +179,11 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           }}
         />
       ) : null}
+      <PrimaryButton
+        label="Duplicate Item"
+        variant="secondary"
+        onPress={() => navigation.navigate('AddItem', { duplicateFromItemId: item.id })}
+      />
       <PrimaryButton label="Edit Item" onPress={() => navigation.navigate('AddItem', { itemId: item.id })} />
       <PrimaryButton
         label="Delete Item"

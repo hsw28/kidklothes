@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
+import { BetaKidLimitModal } from '@/components/BetaKidLimitModal';
 import { ChipSelector } from '@/components/ChipSelector';
 import { FormInput } from '@/components/FormInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -11,11 +12,18 @@ import { SizeCode } from '@/models';
 import { KidsStackParamList } from '@/navigation/types';
 import { useAppTheme } from '@/theme';
 import { pickPhotoFromLibrary, takePhotoWithCamera } from '@/utils/photoPicker';
+import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 import { SIZE_OPTIONS, formatSizeDisplay, inferNextSize } from '@/utils/sizes';
 
 type Props = NativeStackScreenProps<KidsStackParamList, 'KidForm'>;
 
 type SizeFieldKey = 'current' | 'next';
+
+const isKidLimitReachedError = (error: unknown) => {
+  const code = (error as { code?: string })?.code;
+  const message = error instanceof Error ? error.message : '';
+  return code === 'KID_LIMIT_REACHED' || message === 'KID_LIMIT_REACHED';
+};
 
 const pickerLabels = {
   current: 'Wearing Now (Size)',
@@ -23,7 +31,7 @@ const pickerLabels = {
 } as const;
 
 export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { children, storageLocations, addChild, updateChild, deleteChild, createStorageLocation, listStorageLocations } = useData();
+  const { children, storageLocations, addChild, updateChild, deleteChild, createStorageLocation, listStorageLocations, canCreateAnotherKid } = useData();
   const editingId = route.params?.childId;
   const returnToClosetAfterCreate = route.params?.returnToClosetAfterCreate ?? false;
   const existing = useMemo(() => children.find((child) => child.id === editingId), [children, editingId]);
@@ -39,6 +47,17 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [nextSizeOther, setNextSizeOther] = useState(existing?.nextSize.otherText ?? '');
   const [showSizePicker, setShowSizePicker] = useState<SizeFieldKey | null>(null);
   const [createStarterCubbies, setCreateStarterCubbies] = useState(!existing);
+  const [showKidLimitModal, setShowKidLimitModal] = useState(false);
+  const [kidLimitCurrentCount, setKidLimitCurrentCount] = useState(children.length);
+
+  const goToKidsList = () => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'KidsList' as never }],
+    });
+    const rootNav = navigation.getParent() as any;
+    rootNav?.navigate?.('Kids', { screen: 'KidsList' });
+  };
 
   const styles = StyleSheet.create({
     sectionTitle: {
@@ -212,9 +231,14 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
       if (existing) {
         await updateChild(existing.id, payload);
-        if (navigation.canGoBack()) navigation.goBack();
-        else navigation.navigate('KidsList');
+        goToKidsList();
       } else {
+        const canCreate = await canCreateAnotherKid();
+        if (!canCreate.ok) {
+          setKidLimitCurrentCount(canCreate.current);
+          setShowKidLimitModal(true);
+          return;
+        }
         const created = await addChild(payload);
         if (created && createStarterCubbies) {
           const existingLocations = await listStorageLocations(created.id).catch(() =>
@@ -238,7 +262,7 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
             params: { showFirstKidAddedHint: true },
           });
         } else {
-          navigation.replace('KidsList');
+          goToKidsList();
         }
       }
     } catch (error) {
@@ -248,6 +272,12 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
           hasName: Boolean(name.trim()),
           createStarterCubbies,
         }, error);
+      }
+      if (isKidLimitReachedError(error)) {
+        const canCreate = await canCreateAnotherKid().catch(() => ({ current: children.length } as any));
+        setKidLimitCurrentCount(canCreate.current ?? children.length);
+        setShowKidLimitModal(true);
+        return;
       }
       Alert.alert('Save Failed', error instanceof Error ? error.message : 'Could not save kid profile. Please try again.');
     }
@@ -285,8 +315,8 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
       {nextSizeCode === 'OTHER' ? <FormInput label="Enter next size" value={nextSizeOther} onChangeText={setNextSizeOther} placeholder="e.g. 3T" /> : null}
 
       <Card>
-        <Text style={styles.sectionTitle}>Mixed sizes (2T pants, 3T tops)</Text>
-        <Text style={styles.helperText}>Sets default views to show both sizes.</Text>
+        <Text style={styles.sectionTitle}>Mixed sizes across categories</Text>
+        <Text style={styles.helperText}>Default view: choose current size or all sizes.</Text>
         <ChipSelector
           label="Mixed Sizes"
           options={['On', 'Off']}
@@ -323,7 +353,7 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
                     void (async () => {
                       try {
                         await deleteChild(existing.id);
-                        navigation.navigate('KidsList');
+                        goToKidsList();
                       } catch (error) {
                         if (__DEV__) console.error('[KidForm] delete failed', { childId: existing.id }, error);
                         Alert.alert('Delete Failed', error instanceof Error ? error.message : 'Could not delete kid profile.');
@@ -363,6 +393,11 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
           </Pressable>
         </Pressable>
       </Modal>
+      <BetaKidLimitModal
+        visible={showKidLimitModal}
+        onClose={() => setShowKidLimitModal(false)}
+        onSendFeedback={() => { void openKidLimitFeedbackEmail(kidLimitCurrentCount); }}
+      />
     </Screen>
   );
 };

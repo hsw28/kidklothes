@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
+import { BetaKidLimitModal } from '@/components/BetaKidLimitModal';
 import { ChipSelector } from '@/components/ChipSelector';
 import { FormInput } from '@/components/FormInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -11,11 +12,14 @@ import { useUndoToast } from '@/hooks/useUndoToast';
 import { ClosetStackParamList } from '@/navigation/types';
 import { DRAWER_SCAN_CATEGORY_DEFS } from '@/utils/categories';
 import { pickPhotoFromLibrary, takePhotoWithCamera } from '@/utils/photoPicker';
+import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'DrawerScan'>;
 
+const isKidLimitReachedError = (error: unknown) => (error as { code?: string })?.code === 'KID_LIMIT_REACHED' || (error instanceof Error && error.message === 'KID_LIMIT_REACHED');
+
 export const DrawerScanScreen: React.FC<Props> = ({ navigation }) => {
-  const { children, items, childItems, addChild, addItemsBatch, archiveItems, logEvent } = useData();
+  const { children, items, childItems, addChild, addItemsBatch, archiveItems, logEvent, canCreateAnotherKid } = useData();
   const { showToast } = useUndoToast();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [newChildName, setNewChildName] = useState('');
@@ -23,6 +27,8 @@ export const DrawerScanScreen: React.FC<Props> = ({ navigation }) => {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [photoByLabel, setPhotoByLabel] = useState<Record<string, string | undefined>>({});
   const [saving, setSaving] = useState(false);
+  const [showKidLimitModal, setShowKidLimitModal] = useState(false);
+  const [kidLimitCurrentCount, setKidLimitCurrentCount] = useState(children.length);
 
   const defaultSize = useMemo(() => {
     if (!childId) return '';
@@ -43,7 +49,23 @@ export const DrawerScanScreen: React.FC<Props> = ({ navigation }) => {
 
   const addNewChild = async () => {
     if (!newChildName.trim()) return;
-    const created = await addChild({ name: newChildName.trim() });
+    const canCreate = await canCreateAnotherKid();
+    if (!canCreate.ok) {
+      setKidLimitCurrentCount(canCreate.current);
+      setShowKidLimitModal(true);
+      return;
+    }
+    let created;
+    try {
+      created = await addChild({ name: newChildName.trim() });
+    } catch (error) {
+      if (isKidLimitReachedError(error)) {
+        setKidLimitCurrentCount(canCreate.current);
+        setShowKidLimitModal(true);
+        return;
+      }
+      throw error;
+    }
     if (!created) return;
     setChildId(created.id);
     setNewChildName('');
@@ -191,6 +213,11 @@ export const DrawerScanScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.section}>Running total: {total} items</Text>
         <PrimaryButton label={saving ? 'Saving...' : `Save ${total} items`} onPress={() => void save()} />
       </Card>
+      <BetaKidLimitModal
+        visible={showKidLimitModal}
+        onClose={() => setShowKidLimitModal(false)}
+        onSendFeedback={() => { void openKidLimitFeedbackEmail(kidLimitCurrentCount); }}
+      />
     </Screen>
   );
 };

@@ -110,7 +110,7 @@ export const ChildDashboardScreen: React.FC<Props> = ({ route, navigation }) => 
       .join(', ');
 
     const message = [
-      'Current size inventory',
+      'Current size counts',
       currentInventory || 'No data yet',
       '',
       'Size-up inventory',
@@ -185,7 +185,7 @@ export const ChildDashboardScreen: React.FC<Props> = ({ route, navigation }) => 
 
       <Card>
         <Pressable onPress={() => setShowInsights((prev) => !prev)} style={styles.insightsToggle}>
-          <Text style={[styles.sectionTitle, { fontFamily: theme.fonts.serif }]}>Insights {showInsights ? 'Hide' : 'Show'}</Text>
+          <Text style={[styles.sectionTitle, { fontFamily: theme.fonts.serif }]}>Insights {showInsights ? '▾' : '▸'}</Text>
         </Pressable>
         {showInsights ? (
           <View style={styles.insightsBlock}>

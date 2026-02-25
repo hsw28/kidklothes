@@ -1,7 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'layetteout.db';
-const LATEST_DB_VERSION = 24;
+const LATEST_DB_VERSION = 26;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let initPromise: Promise<void> | null = null;
@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS items (
   brandFit TEXT,
   kidFit TEXT,
   brandSizeNote TEXT,
+  fabric TEXT,
   fitRating TEXT,
   fitException TEXT,
   condition TEXT,
@@ -147,7 +148,9 @@ CREATE TABLE IF NOT EXISTS settings (
   wishlistCategoryOrder TEXT,
   hiddenWishlistCategories TEXT,
   kidsPreviewCategories TEXT,
-  developerModeEnabled INTEGER NOT NULL DEFAULT 0
+  inventoryRealityCheckOwnedThreshold INTEGER,
+  developerModeEnabled INTEGER NOT NULL DEFAULT 0,
+  betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -223,8 +226,8 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
   if ((row?.count ?? 0) > 0) return;
 
   await db.runAsync(
-    `INSERT INTO settings (id, detailPromptMode, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, developerModeEnabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO settings (id, detailPromptMode, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, betaKidLimitBannerDismissed)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     'app',
     'sometimes',
     0,
@@ -243,6 +246,8 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
     null,
     '[]',
     null,
+    null,
+    0,
     0,
   );
 };
@@ -714,6 +719,28 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
     }
     await db.execAsync('PRAGMA user_version = 24;');
     currentVersion = 24;
+  }
+
+  if (currentVersion < 25) {
+    const itemColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('items');`);
+    if (!itemColumns.some((column) => column.name === 'fabric')) {
+      await db.execAsync('ALTER TABLE items ADD COLUMN fabric TEXT;');
+    }
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'inventoryRealityCheckOwnedThreshold')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN inventoryRealityCheckOwnedThreshold INTEGER;');
+    }
+    await db.execAsync('PRAGMA user_version = 25;');
+    currentVersion = 25;
+  }
+
+  if (currentVersion < 26) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'betaKidLimitBannerDismissed')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync('PRAGMA user_version = 26;');
+    currentVersion = 26;
   }
 
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');
