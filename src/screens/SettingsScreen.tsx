@@ -29,11 +29,16 @@ import Constants from 'expo-constants';
 import { PRIVACY_POLICY_URL } from '@/constants/legal';
 
 const promptModes: AppSettings['detailPromptMode'][] = ['never', 'sometimes', 'always'];
+const closetAddViewModes: AppSettings['closetAddDefaultView'][] = ['detailed', 'simple'];
 const DEV_SAMPLE_MARKER = '[DEV_SAMPLE_GENERATED]';
 const promptModeLabels: Record<AppSettings['detailPromptMode'], string> = {
   never: 'Never',
   sometimes: 'Sometimes',
   always: 'Always',
+};
+const closetAddViewLabels: Record<AppSettings['closetAddDefaultView'], string> = {
+  detailed: 'Detailed',
+  simple: 'Simple',
 };
 
 export const SettingsScreen: React.FC = () => {
@@ -327,6 +332,15 @@ export const SettingsScreen: React.FC = () => {
           onChange={(value) => {
             const mode = promptModes.find((entry) => promptModeLabels[entry] === value) ?? settings.detailPromptMode;
             updateSettings({ detailPromptMode: mode });
+          }}
+        />
+        <ChipSelector
+          label="Closet Add Default View"
+          options={closetAddViewModes.map((mode) => closetAddViewLabels[mode])}
+          value={closetAddViewLabels[settings.closetAddDefaultView]}
+          onChange={(value) => {
+            const mode = closetAddViewModes.find((entry) => closetAddViewLabels[entry] === value) ?? settings.closetAddDefaultView;
+            updateSettings({ closetAddDefaultView: mode });
           }}
         />
         <ChipSelector

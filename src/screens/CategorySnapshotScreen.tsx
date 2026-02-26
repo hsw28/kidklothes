@@ -14,9 +14,10 @@ import { ClosetCategory, closetCategoryToClothingType, closetLabel } from '@/uti
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { categoryForItem, getChildItems, getDuplicateAdjacentGroups, getSizeUpCounts, getWearingNowByCategory, sizeToNumber } from '@/utils/fitInsights';
 import { normalizePrintName } from '@/utils/printName';
-import { formatSizeDisplay } from '@/utils/sizes';
+import { formatSizeDisplay, getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
 import { useAppTheme } from '@/theme';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
+import { getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'CategorySnapshot'>;
 
@@ -59,7 +60,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const child = children.find((entry) => entry.id === route.params.childId);
   const category = route.params.category as ClosetCategory;
   const [sizeModeFilter, setSizeModeFilter] = useState<ClosetSizeMode>(route.params.sizeMode ?? 'both');
-  const [specificSizes, setSpecificSizes] = useState<string[]>([]);
+  const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
   const [brandFilter, setBrandFilter] = useState<string>(route.params.brandId ?? 'All');
   const season = route.params.season;
   const [binType, setBinType] = useState<ClothingType>('bottom');
@@ -85,6 +86,10 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     { label: 'Next', value: 'next' },
     { label: 'All', value: 'both' },
   ];
+  const currentSizeLabel = getChildCurrentSizeText(child);
+  const nextSizeLabel = getChildNextSizeText(child);
+  const currentSizeNormalized = normalizeSizeLabel(currentSizeLabel || '');
+  const nextSizeNormalized = normalizeSizeLabel(nextSizeLabel || '');
   const sizeSelection = useMemo(
     () => ({
       now: sizeModeFilter === 'now' || sizeModeFilter === 'both',
@@ -94,33 +99,25 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   );
   const toggleSizeSelection = useCallback(
     (key: 'now' | 'next') => {
-      setSpecificSizes([]);
       const next = { ...sizeSelection, [key]: !sizeSelection[key] };
-      if (next.now && next.next) {
-        setSizeModeFilter('both');
-        return;
-      }
-      if (next.now) {
-        setSizeModeFilter('now');
-        return;
-      }
-      if (next.next) {
-        setSizeModeFilter('next');
-        return;
-      }
-      setSizeModeFilter('both');
+      let nextMode: ClosetSizeMode = 'both';
+      if (next.now && next.next) nextMode = 'both';
+      else if (next.now) nextMode = 'now';
+      else if (next.next) nextMode = 'next';
+      setSizeModeFilter(nextMode);
+      if (nextMode === 'now') setSelectedSizeChip(currentSizeNormalized || null);
+      else if (nextMode === 'next') setSelectedSizeChip(nextSizeNormalized || null);
+      else setSelectedSizeChip(null);
     },
-    [sizeSelection],
+    [sizeSelection, currentSizeNormalized, nextSizeNormalized],
   );
-  const selectAllSizes = useCallback(() => { setSpecificSizes([]); setSizeModeFilter('both'); }, []);
+  const selectAllSizes = useCallback(() => { setSelectedSizeChip(null); setSizeModeFilter('both'); }, []);
 
-  const toggleSpecificSize = useCallback((value: string) => {
-    setSpecificSizes((prev) => {
-      const exists = prev.some((entry) => entry.toLowerCase() === value.toLowerCase());
-      if (exists) return prev.filter((entry) => entry.toLowerCase() !== value.toLowerCase());
-      return [...prev, value];
-    });
-  }, []);
+  const selectSpecificSizeChip = useCallback((value: string) => {
+    const transition = getSizeChipTransitionOnTap({ tapped: value, currentSize: currentSizeNormalized, nextSize: nextSizeNormalized });
+    setSizeModeFilter(transition.mode);
+    setSelectedSizeChip(transition.selectedSizeChip || null);
+  }, [currentSizeNormalized, nextSizeNormalized]);
 
   const categoryBaseItems = useMemo(() => {
     if (!child) return null;
@@ -130,41 +127,70 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     return { childData, linkMap, owned };
   }, [child, items, childItems, category]);
 
-  const availableExactSizes = useMemo(() => {
-    if (!categoryBaseItems) return [] as string[];
-    const scopedByLocation = categoryBaseItems.owned.filter((item) => {
+  const locationScopedOwnedCategoryItems = useMemo(() => {
+    if (!categoryBaseItems) return [] as typeof items;
+    return categoryBaseItems.owned.filter((item) => {
       if (locationFilter === 'All') return true;
       const locationId = categoryBaseItems.linkMap.get(item.id) ?? '';
       if (locationFilter === 'Unassigned') return !locationId;
       const location = childLocations.find((entry) => entry.id === locationId);
       return location?.name === locationFilter;
     });
-    const scopedBySeason = season
-      ? scopedByLocation.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
-      : scopedByLocation;
-    const labels = new Map<string, string>();
-    scopedBySeason.forEach((item) => {
-      const raw = (item.size || '').trim();
-      if (!raw) return;
-      const key = raw.toLowerCase();
-      const current = labels.get(key);
-      if (!current || (current === current.toLowerCase() && raw !== raw.toLowerCase())) labels.set(key, raw);
-    });
-    return Array.from(labels.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [categoryBaseItems, childLocations, locationFilter, season]);
+  }, [categoryBaseItems, locationFilter, childLocations]);
+
+  const seasonScopedOwnedCategoryItems = useMemo(() => (
+    season
+      ? locationScopedOwnedCategoryItems.filter((item: (typeof items)[number]) => item.seasonTags.some((tag: string) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
+      : locationScopedOwnedCategoryItems
+  ), [locationScopedOwnedCategoryItems, season]);
+
+  const presentSizeEntries = useMemo(
+    () => uniqueSortedSizeEntries(seasonScopedOwnedCategoryItems.map((item) => item.sizeNormalized || item.size)),
+    [seasonScopedOwnedCategoryItems],
+  );
+
+  const activeSizeEntries = useMemo(
+    () => uniqueSortedSizeEntries([currentSizeLabel, nextSizeLabel]),
+    [currentSizeLabel, nextSizeLabel],
+  );
+
+  const visibleExactSizeEntries = useMemo(() => {
+    if (sizeModeFilter === 'both') return presentSizeEntries;
+    return activeSizeEntries.length > 0 ? activeSizeEntries : presentSizeEntries;
+  }, [sizeModeFilter, activeSizeEntries, presentSizeEntries]);
+
+  const activeSizeNormalizedSet = useMemo(() => new Set(activeSizeEntries.map((entry) => entry.normalized)), [activeSizeEntries]);
 
   useEffect(() => {
-    if (!specificSizes.length) return;
-    const allowed = new Set(availableExactSizes.map((v) => v.toLowerCase()));
-    setSpecificSizes((prev) => {
-      const next = prev.filter((v) => allowed.has(v.toLowerCase()));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [availableExactSizes]);
+    if (!selectedSizeChip) return;
+    const allowed = new Set([...presentSizeEntries, ...activeSizeEntries].map((entry) => entry.normalized));
+    if (!allowed.has(selectedSizeChip)) setSelectedSizeChip(null);
+  }, [selectedSizeChip, presentSizeEntries, activeSizeEntries]);
+
+  useEffect(() => {
+    if (sizeModeFilter === 'now') {
+      setSelectedSizeChip(currentSizeNormalized || null);
+      return;
+    }
+    if (sizeModeFilter === 'next') {
+      setSelectedSizeChip(nextSizeNormalized || null);
+    }
+  }, [sizeModeFilter, currentSizeNormalized, nextSizeNormalized]);
+
+  const matchesSnapshotSizeFilter = useCallback((item: { size: string; sizeNormalized?: string }) => {
+    const itemSize = normalizeSizeLabel(item.sizeNormalized || item.size || '');
+    if (!itemSize) return sizeModeFilter === 'both' && !selectedSizeChip;
+    if (selectedSizeChip) return itemSize === selectedSizeChip;
+    if (sizeModeFilter === 'both') return true;
+    if (sizeModeFilter === 'now') {
+      if (child?.usesMixedSizes && activeSizeNormalizedSet.size > 0) return activeSizeNormalizedSet.has(itemSize);
+      return Boolean(currentSizeNormalized && itemSize === currentSizeNormalized);
+    }
+    return Boolean(nextSizeNormalized && itemSize === nextSizeNormalized);
+  }, [sizeModeFilter, selectedSizeChip, child?.usesMixedSizes, activeSizeNormalizedSet, currentSizeNormalized, nextSizeNormalized]);
 
   const availableBrandOptions = useMemo(() => {
     if (!categoryBaseItems || !child) return ['All'];
-    const anchors = getSizeAnchors(categoryBaseItems.owned, child);
     const scopedByLocation = categoryBaseItems.owned.filter((item) => {
       if (locationFilter === 'All') return true;
       const locationId = categoryBaseItems.linkMap.get(item.id) ?? '';
@@ -172,14 +198,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       const location = childLocations.find((entry) => entry.id === locationId);
       return location?.name === locationFilter;
     });
-    const scopedBySize = scopedByLocation.filter((item) => {
-      if (specificSizes.length > 0) return specificSizes.some((value) => value.toLowerCase().trim() === item.size.toLowerCase().trim());
-      if (sizeModeFilter === 'both') return true;
-      const current = anchors.currentByCategory.get(category);
-      const next = anchors.nextByCategory.get(category);
-      if (sizeModeFilter === 'now') return Boolean(current && item.size.toLowerCase().trim() === current.toLowerCase().trim());
-      return Boolean(next && item.size.toLowerCase().trim() === next.toLowerCase().trim());
-    });
+    const scopedBySize = scopedByLocation.filter((item) => matchesSnapshotSizeFilter(item));
     const scopedBySeason = season
       ? scopedBySize.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : scopedBySize;
@@ -196,7 +215,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       item.brandTags.forEach((tag) => addName(tag));
     });
     return ['All', ...Array.from(names.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
-  }, [categoryBaseItems, child, childLocations, locationFilter, sizeModeFilter, category, season, specificSizes]);
+  }, [categoryBaseItems, child, childLocations, locationFilter, sizeModeFilter, category, season, matchesSnapshotSizeFilter]);
 
   useEffect(() => {
     if (!availableBrandOptions.includes(brandFilter)) {
@@ -217,14 +236,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       return location?.name === locationFilter;
     });
     const anchors = getSizeAnchors(owned, child);
-    const sizeFiltered = owned.filter((item) => {
-      if (specificSizes.length > 0) return specificSizes.some((value) => value.toLowerCase().trim() === item.size.toLowerCase().trim());
-      if (sizeModeFilter === 'both') return true;
-      const current = anchors.currentByCategory.get(closetCategoryForItem(item));
-      const next = anchors.nextByCategory.get(closetCategoryForItem(item));
-      if (sizeModeFilter === 'now') return Boolean(current && item.size.toLowerCase().trim() === current.toLowerCase().trim());
-      return Boolean(next && item.size.toLowerCase().trim() === next.toLowerCase().trim());
-    });
+    const sizeFiltered = owned.filter((item) => matchesSnapshotSizeFilter(item));
     const brandFiltered = brandFilter !== 'All'
       ? sizeFiltered.filter((item) => item.brandTags.includes(brandFilter) || (item.brand ?? '').toLowerCase().trim() === brandFilter.toLowerCase().trim())
       : sizeFiltered;
@@ -255,7 +267,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       mostWorn: sortedByWorn[0],
       leastWorn: sortedByWorn.length ? sortedByWorn[sortedByWorn.length - 1] : undefined,
     };
-  }, [child, categoryBaseItems, category, locationFilter, childLocations, sizeModeFilter, brandFilter, season, specificSizes]);
+  }, [child, categoryBaseItems, category, locationFilter, childLocations, brandFilter, season, matchesSnapshotSizeFilter]);
 
   if (!child || !summary) {
     return (
@@ -301,7 +313,6 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const sizeModeLabel = sizeModeOptions.find((option) => option.value === sizeModeFilter)?.label ?? 'All';
   const addCategoryFromSnapshot = useCallback(() => {
     navigation.navigate('AddItem', {
-      quick: true,
       prefillStatus: 'owned',
       prefillChildId: child.id,
       prefillCategory: category,
@@ -323,20 +334,20 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
               <Pressable style={[styles.sizeChip, sizeSelection.next ? styles.sizeChipActive : null]} onPress={() => toggleSizeSelection('next')}>
                 <Text style={[styles.sizeChipText, sizeSelection.next ? styles.sizeChipTextActive : null]}>Next</Text>
               </Pressable>
-              <Pressable style={[styles.sizeChip, sizeModeFilter === 'both' && specificSizes.length === 0 ? styles.sizeChipActive : null]} onPress={selectAllSizes}>
-                <Text style={[styles.sizeChipText, sizeModeFilter === 'both' && specificSizes.length === 0 ? styles.sizeChipTextActive : null]}>All</Text>
+              <Pressable style={[styles.sizeChip, sizeModeFilter === 'both' && !selectedSizeChip ? styles.sizeChipActive : null]} onPress={selectAllSizes}>
+                <Text style={[styles.sizeChipText, sizeModeFilter === 'both' && !selectedSizeChip ? styles.sizeChipTextActive : null]}>All</Text>
               </Pressable>
               <Pressable style={[styles.sizeChip, compactGrid ? styles.sizeChipActive : null]} onPress={() => setCompactGrid((prev) => !prev)}>
                 <Text style={[styles.sizeChipText, compactGrid ? styles.sizeChipTextActive : null]}>{compactGrid ? 'Comfortable Grid' : 'Compact Grid'}</Text>
               </Pressable>
             </View>
-            {availableExactSizes.length > 0 ? (
+            {visibleExactSizeEntries.length > 0 ? (
               <View style={styles.sizeToggleRow}>
-                {availableExactSizes.slice(0, 12).map((value) => {
-                  const active = specificSizes.some((entry) => entry.toLowerCase() === value.toLowerCase());
+                {visibleExactSizeEntries.slice(0, 16).map((entry) => {
+                  const active = selectedSizeChip === entry.normalized;
                   return (
-                    <Pressable key={`snapshot-size-${value}`} style={[styles.sizeChip, active ? styles.sizeChipActive : null]} onPress={() => toggleSpecificSize(value)}>
-                      <Text style={[styles.sizeChipText, active ? styles.sizeChipTextActive : null]}>{value}</Text>
+                    <Pressable key={`snapshot-size-${entry.normalized}`} style={[styles.sizeChip, active ? styles.sizeChipActive : null]} onPress={() => selectSpecificSizeChip(entry.label)}>
+                      <Text style={[styles.sizeChipText, active ? styles.sizeChipTextActive : null]}>{entry.label}</Text>
                     </Pressable>
                   );
                 })}
@@ -361,7 +372,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
             />
           </View>
         ) : (
-          <View style={styles.grid}>
+          <View style={[styles.grid, compactGrid ? styles.gridCompact : null]}>
             {gridItems.map((item) => {
               return (
                 <CategoryGridCard
@@ -492,6 +503,9 @@ const styles = StyleSheet.create({
     columnGap: 8,
     marginTop: 8,
   },
+  gridCompact: {
+    justifyContent: 'flex-start',
+  },
   gridCard: {
     width: '48.5%',
     borderRadius: 14,
@@ -507,7 +521,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   gridCardCompact: {
-    width: '31.8%',
+    width: '31%',
     padding: 4,
     gap: 4,
   },

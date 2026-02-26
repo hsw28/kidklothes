@@ -14,6 +14,7 @@ import { useAppTheme } from '@/theme';
 import { pickPhotoFromLibrary, takePhotoWithCamera } from '@/utils/photoPicker';
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 import { SIZE_OPTIONS, formatSizeDisplay, inferNextSize } from '@/utils/sizes';
+import { APPAREL_AGE_SIZES, APPAREL_ALPHA_SIZES, US_SHOE_SIZES } from '@/lib/sizing';
 
 type Props = NativeStackScreenProps<KidsStackParamList, 'KidForm'>;
 
@@ -29,6 +30,8 @@ const pickerLabels = {
   current: 'Wearing Now (Size)',
   next: 'Next Size',
 } as const;
+const APPAREL_SIZE_OPTIONS = [...APPAREL_AGE_SIZES, ...APPAREL_ALPHA_SIZES, 'Other…'];
+const SHOE_SIZE_OPTIONS = [...US_SHOE_SIZES, 'Other…'];
 
 export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const { children, storageLocations, addChild, updateChild, deleteChild, createStorageLocation, listStorageLocations, canCreateAnotherKid } = useData();
@@ -49,6 +52,11 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [createStarterCubbies, setCreateStarterCubbies] = useState(!existing);
   const [showKidLimitModal, setShowKidLimitModal] = useState(false);
   const [kidLimitCurrentCount, setKidLimitCurrentCount] = useState(children.length);
+  const [apparelSizeCurrent, setApparelSizeCurrent] = useState(existing?.apparelSizeCurrent ?? '');
+  const [apparelSizeNext, setApparelSizeNext] = useState(existing?.apparelSizeNext ?? '');
+  const [shoeSizeSystem, setShoeSizeSystem] = useState(existing?.shoeSizeSystem ?? 'US_SHOE');
+  const [shoeSizeCurrent, setShoeSizeCurrent] = useState(existing?.shoeSizeCurrent ?? '');
+  const [shoeSizeNext, setShoeSizeNext] = useState(existing?.shoeSizeNext ?? '');
 
   const goToKidsList = () => {
     navigation.reset({
@@ -223,6 +231,11 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
         photoUri: photoUri.trim() || undefined,
         notes: notes || undefined,
         usesMixedSizes,
+        apparelSizeCurrent: apparelSizeCurrent.trim() || undefined,
+        apparelSizeNext: apparelSizeNext.trim() || undefined,
+        shoeSizeSystem: shoeSizeSystem as any,
+        shoeSizeCurrent: shoeSizeCurrent.trim() || undefined,
+        shoeSizeNext: shoeSizeNext.trim() || undefined,
         currentSizeCode: currentSizeCode ?? undefined,
         currentSizeOther: currentSizeCode === 'OTHER' ? currentSizeOther.trim() : '',
         nextSizeCode: nextSizeCode ?? undefined,
@@ -323,6 +336,81 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
           value={usesMixedSizes ? 'On' : 'Off'}
           onChange={(value) => setUsesMixedSizes(value === 'On')}
         />
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Clothing sizes (defaults)</Text>
+        <Text style={styles.helperText}>Used for suggestions and fit-bin defaults only.</Text>
+        <ChipSelector
+          label="Apparel Current"
+          options={APPAREL_SIZE_OPTIONS}
+          value={APPAREL_SIZE_OPTIONS.includes(apparelSizeCurrent as any) ? apparelSizeCurrent : (apparelSizeCurrent ? 'Other…' : undefined)}
+          onChange={(value) => {
+            if (value === 'Other…') {
+              if (APPAREL_SIZE_OPTIONS.includes(apparelSizeCurrent as any)) setApparelSizeCurrent('');
+              return;
+            }
+            setApparelSizeCurrent(value);
+          }}
+        />
+        {(!APPAREL_SIZE_OPTIONS.includes(apparelSizeCurrent as any) || apparelSizeCurrent === '') ? (
+          <FormInput label="Apparel Current (custom optional)" value={apparelSizeCurrent} onChangeText={setApparelSizeCurrent} placeholder="e.g. Medium" />
+        ) : null}
+        <ChipSelector
+          label="Apparel Next"
+          options={APPAREL_SIZE_OPTIONS}
+          value={APPAREL_SIZE_OPTIONS.includes(apparelSizeNext as any) ? apparelSizeNext : (apparelSizeNext ? 'Other…' : undefined)}
+          onChange={(value) => {
+            if (value === 'Other…') {
+              if (APPAREL_SIZE_OPTIONS.includes(apparelSizeNext as any)) setApparelSizeNext('');
+              return;
+            }
+            setApparelSizeNext(value);
+          }}
+        />
+        {(!APPAREL_SIZE_OPTIONS.includes(apparelSizeNext as any) || apparelSizeNext === '') ? (
+          <FormInput label="Apparel Next (custom optional)" value={apparelSizeNext} onChangeText={setApparelSizeNext} placeholder="e.g. L" />
+        ) : null}
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Shoe sizes (defaults)</Text>
+        <ChipSelector
+          label="Shoe System"
+          options={['US_SHOE']}
+          value={shoeSizeSystem}
+          onChange={(value) => setShoeSizeSystem(value)}
+        />
+        <ChipSelector
+          label="Shoe Current"
+          options={SHOE_SIZE_OPTIONS}
+          value={SHOE_SIZE_OPTIONS.includes(shoeSizeCurrent as any) ? shoeSizeCurrent : (shoeSizeCurrent ? 'Other…' : undefined)}
+          onChange={(value) => {
+            if (value === 'Other…') {
+              if (SHOE_SIZE_OPTIONS.includes(shoeSizeCurrent as any)) setShoeSizeCurrent('');
+              return;
+            }
+            setShoeSizeCurrent(value);
+          }}
+        />
+        {(!SHOE_SIZE_OPTIONS.includes(shoeSizeCurrent as any) || shoeSizeCurrent === '') ? (
+          <FormInput label="Shoe Current (custom optional)" value={shoeSizeCurrent} onChangeText={setShoeSizeCurrent} placeholder="e.g. EU 28" />
+        ) : null}
+        <ChipSelector
+          label="Shoe Next"
+          options={SHOE_SIZE_OPTIONS}
+          value={SHOE_SIZE_OPTIONS.includes(shoeSizeNext as any) ? shoeSizeNext : (shoeSizeNext ? 'Other…' : undefined)}
+          onChange={(value) => {
+            if (value === 'Other…') {
+              if (SHOE_SIZE_OPTIONS.includes(shoeSizeNext as any)) setShoeSizeNext('');
+              return;
+            }
+            setShoeSizeNext(value);
+          }}
+        />
+        {(!SHOE_SIZE_OPTIONS.includes(shoeSizeNext as any) || shoeSizeNext === '') ? (
+          <FormInput label="Shoe Next (custom optional)" value={shoeSizeNext} onChangeText={setShoeSizeNext} placeholder="e.g. EU 29" />
+        ) : null}
       </Card>
 
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline placeholder="Optional" />

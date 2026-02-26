@@ -1,7 +1,8 @@
 import * as SQLite from 'expo-sqlite';
+import { inferSizeScheme, isShoeCategory, normalizeSize } from '@/lib/sizing';
 
 const DB_NAME = 'layetteout.db';
-const LATEST_DB_VERSION = 26;
+const LATEST_DB_VERSION = 28;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let initPromise: Promise<void> | null = null;
@@ -16,6 +17,11 @@ CREATE TABLE IF NOT EXISTS children (
   notes TEXT,
   hiddenClosetCategories TEXT,
   usesMixedSizes INTEGER NOT NULL DEFAULT 0,
+  apparelSizeCurrent TEXT,
+  apparelSizeNext TEXT,
+  shoeSizeCurrent TEXT,
+  shoeSizeNext TEXT,
+  shoeSizeSystem TEXT DEFAULT 'US_SHOE',
   currentSizeCode TEXT,
   currentSizeOther TEXT,
   nextSizeCode TEXT,
@@ -55,6 +61,10 @@ CREATE TABLE IF NOT EXISTS items (
   updatedAt INTEGER NOT NULL,
   deletedAt INTEGER,
   sizeNormalized TEXT,
+  sizeType TEXT,
+  sizeSystem TEXT,
+  sizeScheme TEXT,
+  sizeRaw TEXT,
   category TEXT,
   brandFit TEXT,
   kidFit TEXT,
@@ -65,7 +75,9 @@ CREATE TABLE IF NOT EXISTS items (
   condition TEXT,
   seasonTags TEXT,
   lastWornAt INTEGER,
-  wornCount INTEGER NOT NULL DEFAULT 0
+  wornCount INTEGER NOT NULL DEFAULT 0,
+  fitBin TEXT DEFAULT 'unsure',
+  fitBinTouched INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS child_items (
@@ -132,6 +144,7 @@ CREATE TABLE IF NOT EXISTS outfit_tags (
 CREATE TABLE IF NOT EXISTS settings (
   id TEXT PRIMARY KEY NOT NULL,
   detailPromptMode TEXT NOT NULL,
+  closetAddDefaultView TEXT NOT NULL DEFAULT 'detailed',
   notificationsEnabled INTEGER NOT NULL,
   notifyWeeklyTidy INTEGER NOT NULL,
   notifyOutgrow INTEGER NOT NULL,
@@ -226,10 +239,11 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
   if ((row?.count ?? 0) > 0) return;
 
   await db.runAsync(
-    `INSERT INTO settings (id, detailPromptMode, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, betaKidLimitBannerDismissed)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, betaKidLimitBannerDismissed)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     'app',
     'sometimes',
+    'detailed',
     0,
     0,
     0,
@@ -741,6 +755,88 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
     }
     await db.execAsync('PRAGMA user_version = 26;');
     currentVersion = 26;
+  }
+
+  if (currentVersion < 27) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'closetAddDefaultView')) {
+      await db.execAsync(`ALTER TABLE settings ADD COLUMN closetAddDefaultView TEXT NOT NULL DEFAULT 'detailed';`);
+    }
+    await db.execAsync(`UPDATE settings SET closetAddDefaultView = COALESCE(NULLIF(TRIM(closetAddDefaultView), ''), 'detailed');`);
+    await db.execAsync('PRAGMA user_version = 27;');
+    currentVersion = 27;
+  }
+
+  if (currentVersion < 28) {
+    const childColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('children');`);
+    const itemColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('items');`);
+
+    const ensureChildColumn = async (name: string, sql: string) => {
+      if (!childColumns.some((column) => column.name === name)) {
+        await db.execAsync(sql);
+      }
+    };
+    const ensureItemColumn = async (name: string, sql: string) => {
+      if (!itemColumns.some((column) => column.name === name)) {
+        await db.execAsync(sql);
+      }
+    };
+
+    await ensureChildColumn('apparelSizeCurrent', 'ALTER TABLE children ADD COLUMN apparelSizeCurrent TEXT;');
+    await ensureChildColumn('apparelSizeNext', 'ALTER TABLE children ADD COLUMN apparelSizeNext TEXT;');
+    await ensureChildColumn('shoeSizeCurrent', 'ALTER TABLE children ADD COLUMN shoeSizeCurrent TEXT;');
+    await ensureChildColumn('shoeSizeNext', 'ALTER TABLE children ADD COLUMN shoeSizeNext TEXT;');
+    await ensureChildColumn(`shoeSizeSystem`, `ALTER TABLE children ADD COLUMN shoeSizeSystem TEXT DEFAULT 'US_SHOE';`);
+
+    await ensureItemColumn('sizeType', 'ALTER TABLE items ADD COLUMN sizeType TEXT;');
+    await ensureItemColumn('sizeSystem', 'ALTER TABLE items ADD COLUMN sizeSystem TEXT;');
+    await ensureItemColumn('sizeScheme', 'ALTER TABLE items ADD COLUMN sizeScheme TEXT;');
+    await ensureItemColumn('sizeRaw', 'ALTER TABLE items ADD COLUMN sizeRaw TEXT;');
+    await ensureItemColumn(`fitBin`, `ALTER TABLE items ADD COLUMN fitBin TEXT DEFAULT 'unsure';`);
+    await ensureItemColumn('fitBinTouched', 'ALTER TABLE items ADD COLUMN fitBinTouched INTEGER NOT NULL DEFAULT 0;');
+
+    await db.execAsync(`UPDATE children SET shoeSizeSystem = COALESCE(NULLIF(TRIM(shoeSizeSystem), ''), 'US_SHOE');`);
+    await db.execAsync(`
+      UPDATE children
+      SET apparelSizeCurrent = COALESCE(NULLIF(TRIM(apparelSizeCurrent), ''), currentSizeCode),
+          apparelSizeNext = COALESCE(NULLIF(TRIM(apparelSizeNext), ''), nextSizeCode)
+      WHERE 1=1;
+    `);
+
+    const legacyItems = await db.getAllAsync<{ id: string; category: string | null; clothingType: string | null; size: string | null }>(
+      'SELECT id, category, clothingType, size FROM items;',
+    );
+    for (const row of legacyItems) {
+      const sizeRaw = (row.size ?? '').trim();
+      const normalized = normalizeSize(sizeRaw);
+      const shoe = isShoeCategory(String(row.category ?? row.clothingType ?? ''));
+      const sizeType = shoe ? 'shoe' : 'apparel';
+      const sizeSystem = shoe ? 'US_SHOE' : 'APPAREL';
+      const sizeScheme = sizeRaw ? inferSizeScheme(sizeRaw) : 'CUSTOM';
+      await db.runAsync(
+        `UPDATE items
+         SET sizeRaw = COALESCE(NULLIF(TRIM(sizeRaw), ''), ?),
+             sizeNormalized = COALESCE(NULLIF(TRIM(sizeNormalized), ''), ?),
+             sizeType = COALESCE(NULLIF(TRIM(sizeType), ''), ?),
+             sizeSystem = COALESCE(NULLIF(TRIM(sizeSystem), ''), ?),
+             sizeScheme = COALESCE(NULLIF(TRIM(sizeScheme), ''), ?),
+             fitBin = COALESCE(NULLIF(TRIM(fitBin), ''), 'unsure'),
+             fitBinTouched = COALESCE(fitBinTouched, 0)
+         WHERE id = ?;`,
+        sizeRaw || null,
+        normalized || null,
+        sizeType,
+        sizeSystem,
+        sizeScheme,
+        row.id,
+      );
+    }
+
+    await db.execAsync(`UPDATE items SET fitBin = COALESCE(NULLIF(TRIM(fitBin), ''), 'unsure');`);
+    await db.execAsync(`UPDATE items SET fitBinTouched = COALESCE(fitBinTouched, 0);`);
+
+    await db.execAsync('PRAGMA user_version = 28;');
+    currentVersion = 28;
   }
 
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');

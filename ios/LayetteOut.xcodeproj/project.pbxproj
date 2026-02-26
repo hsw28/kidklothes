@@ -473,7 +473,7 @@
 				CODE_SIGN_ENTITLEMENTS = LayetteOut/LayetteOut.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 6GQ6TNN7UP;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -496,7 +496,7 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
 				PRODUCT_BUNDLE_IDENTIFIER = com.anonymous.layetteout;
-				PRODUCT_NAME = "LayetteOut";
+				PRODUCT_NAME = LayetteOut;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "LayetteOut/LayetteOut-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -515,7 +515,7 @@
 				CODE_SIGN_ENTITLEMENTS = LayetteOut/LayetteOut.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 6GQ6TNN7UP;
 				INFOPLIST_FILE = LayetteOut/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Layette Out";
@@ -533,7 +533,7 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
 				PRODUCT_BUNDLE_IDENTIFIER = com.anonymous.layetteout;
-				PRODUCT_NAME = "LayetteOut";
+				PRODUCT_NAME = LayetteOut;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "LayetteOut/LayetteOut-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;

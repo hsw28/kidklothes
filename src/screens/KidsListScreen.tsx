@@ -161,7 +161,6 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
     (navigation.getParent() as any)?.navigate('Closet', {
       screen: 'AddItem',
       params: {
-        quick: true,
         prefillStatus: 'owned',
         prefillChildId: childId,
         prefillCategory: category,

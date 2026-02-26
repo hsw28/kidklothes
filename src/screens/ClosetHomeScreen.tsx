@@ -33,7 +33,10 @@ import { formatPieceCount } from '@/utils/formatCounts';
 import { formatItemCategoryLabel, getBrandShortLabel } from '@/utils/itemLabels';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
 import { showActionMenu } from '@/utils/actionSheets';
+import { compareSizeLabels, getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
+import { getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
+import { buildEmptyCategoryLabel } from '@/utils/closetEmptyLabel';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'ClosetHome'>;
 
@@ -61,6 +64,7 @@ type TileProps = {
   category: ClosetCategory;
   count: number;
   thumbs: string[];
+  emptyLabel?: string;
   hasUps: boolean;
   hasDupes: boolean;
   activeBrandLabel?: string;
@@ -76,6 +80,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
   category,
   count,
   thumbs,
+  emptyLabel,
   hasUps,
   hasDupes,
   activeBrandLabel,
@@ -106,7 +111,8 @@ const ClosetTileComponent: React.FC<TileProps> = ({
     }).start();
   }, [badgeOpacity, hasBadge]);
 
-  const pressIn = () =>
+  const pressIn = () => {
+    if (isReorderMode) return;
     Animated.parallel([
       Animated.timing(scale, {
         toValue: 0.98,
@@ -119,8 +125,10 @@ const ClosetTileComponent: React.FC<TileProps> = ({
         useNativeDriver: true,
       }),
     ]).start();
+  };
 
-  const pressOut = () =>
+  const pressOut = () => {
+    if (isReorderMode) return;
     Animated.parallel([
       Animated.timing(scale, {
         toValue: 1,
@@ -133,6 +141,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
         useNativeDriver: true,
       }),
     ]).start();
+  };
 
 
 
@@ -359,14 +368,16 @@ const ClosetTileComponent: React.FC<TileProps> = ({
   return (
     <Animated.View style={styles.tileShell} {...(isReorderMode ? panHandlers : {})}>
       <Pressable
+        pointerEvents={isReorderMode ? 'none' : 'auto'}
         onPress={() => {
+          if (isReorderMode) return;
           if (heroDidDragRef.current) {
             heroDidDragRef.current = false;
             return;
           }
           onPress();
         }}
-        onLongPress={onLongPress}
+        onLongPress={() => { if (isReorderMode) return; onLongPress?.(); }}
         onPressIn={pressIn}
         onPressOut={pressOut}
         disabled={isReorderMode}
@@ -443,7 +454,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               <View style={styles.heroPlaceholderStackBack} />
               <View style={styles.heroPlaceholderStackFront}>
                 <Text style={styles.heroPlaceholderGlyph}>{categoryGlyph[category]}</Text>
-                <Text numberOfLines={2} style={styles.heroPlaceholderCopy}>{getCategoryEmptyMicrocopy(category, count)}</Text>
+                <Text numberOfLines={2} style={styles.heroPlaceholderCopy}>{emptyLabel || getCategoryEmptyMicrocopy(category, count)}</Text>
               </View>
             </>
           )}
@@ -488,6 +499,7 @@ const shallowEqualThumbs = (a: string[], b: string[]) =>
 const ClosetTile = React.memo(ClosetTileComponent, (prev, next) =>
   prev.category === next.category
   && prev.count === next.count
+  && prev.emptyLabel === next.emptyLabel
   && prev.hasUps === next.hasUps
   && prev.hasDupes === next.hasDupes
   && prev.activeBrandLabel === next.activeBrandLabel
@@ -581,7 +593,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const { children, items, childItems, storageLocations, settings, logEvent, updateChild, updateSettings, canCreateAnotherKid } = useData();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [sizeMode, setSizeMode] = useState<ClosetSizeMode>('now');
-  const [specificSizes, setSpecificSizes] = useState<string[]>([]);
+  const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
   const [brandId, setBrandId] = useState<string>('All');
   const [seasonFilter, setSeasonFilter] = useState<string>('All');
   const [closetSearch, setClosetSearch] = useState('');
@@ -656,7 +668,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [selectedChild?.id, selectedChild?.usesMixedSizes]);
 
   useEffect(() => {
-    setSpecificSizes((prev) => (prev.length ? [] : prev));
+    setSelectedSizeChip(null);
   }, [selectedChild?.id]);
 
   const styles = StyleSheet.create({
@@ -1081,18 +1093,67 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const sizeAnchors = useMemo(() => getSizeAnchors(ownedItems, selectedChild), [ownedItems, selectedChild]);
 
   const normalize = (value: string) => value.toLowerCase().trim();
-  const matchesSizeMode = (item: (typeof ownedItems)[number]) => {
-    if (specificSizes.length > 0) {
-      const itemSize = normalize(item.size);
-      return specificSizes.some((value) => normalize(value) === itemSize);
-    }
+  const currentSizeLabel = getChildCurrentSizeText(selectedChild);
+  const nextSizeLabel = getChildNextSizeText(selectedChild);
+  const currentSizeNormalized = normalizeSizeLabel(currentSizeLabel || '');
+  const nextSizeNormalized = normalizeSizeLabel(nextSizeLabel || '');
+
+  const activeSizeEntries = useMemo(
+    () => uniqueSortedSizeEntries([currentSizeLabel, nextSizeLabel]),
+    [currentSizeLabel, nextSizeLabel],
+  );
+
+  const presentSizeEntries = useMemo(
+    () => uniqueSortedSizeEntries(ownedItems.map((item) => item.sizeNormalized || item.size)),
+    [ownedItems],
+  );
+
+  const visibleSizeChipEntries = useMemo(() => {
+    if (sizeMode === 'both') return presentSizeEntries;
+    return activeSizeEntries.length > 0 ? activeSizeEntries : presentSizeEntries;
+  }, [sizeMode, activeSizeEntries, presentSizeEntries]);
+
+  const activeSizesNormalized = useMemo(() => activeSizeEntries.map((entry) => entry.normalized), [activeSizeEntries]);
+  const activeSizesNormalizedSet = useMemo(() => new Set(activeSizesNormalized), [activeSizesNormalized]);
+
+  const itemSizeKey = useCallback((item: (typeof ownedItems)[number]) => normalizeSizeLabel(item.sizeNormalized || item.size || ''), []);
+
+  const matchesSizeMode = useCallback((item: (typeof ownedItems)[number]) => {
+    const itemSize = itemSizeKey(item);
+    if (!itemSize) return sizeMode === 'both' && !selectedSizeChip;
+
+    if (selectedSizeChip) return itemSize === selectedSizeChip;
+
     if (sizeMode === 'both') return true;
-    const category = closetCategoryForItem(item);
-    const current = sizeAnchors.currentByCategory.get(category);
-    const next = sizeAnchors.nextByCategory.get(category);
-    if (sizeMode === 'now') return Boolean(current && normalize(item.size) === normalize(current));
-    return Boolean(next && normalize(item.size) === normalize(next));
-  };
+
+    if (sizeMode === 'now') {
+      if (item.fitBin) return item.fitBin === 'current';
+      if (selectedChild?.usesMixedSizes && activeSizesNormalizedSet.size > 0) {
+        return activeSizesNormalizedSet.has(itemSize);
+      }
+      return Boolean(currentSizeNormalized && itemSize === currentSizeNormalized);
+    }
+
+    if (item.fitBin) return item.fitBin === 'next';
+    return Boolean(nextSizeNormalized && itemSize === nextSizeNormalized);
+  }, [itemSizeKey, sizeMode, selectedSizeChip, selectedChild?.usesMixedSizes, activeSizesNormalizedSet, currentSizeNormalized, nextSizeNormalized]);
+
+  useEffect(() => {
+    if (!selectedSizeChip) return;
+    const allowed = new Set([...presentSizeEntries, ...activeSizeEntries].map((entry) => entry.normalized));
+    if (!allowed.has(selectedSizeChip)) setSelectedSizeChip(null);
+  }, [selectedSizeChip, presentSizeEntries, activeSizeEntries]);
+
+  useEffect(() => {
+    if (sizeMode === 'now') {
+      setSelectedSizeChip(currentSizeNormalized || null);
+      return;
+    }
+    if (sizeMode === 'next') {
+      setSelectedSizeChip(nextSizeNormalized || null);
+    }
+  }, [sizeMode, currentSizeNormalized, nextSizeNormalized]);
+
   const matchesBrand = (item: (typeof ownedItems)[number], selectedBrand: string) => {
     if (selectedBrand === 'All') return true;
     if ((item.brand ?? '').toLowerCase().trim() === selectedBrand.toLowerCase().trim()) return true;
@@ -1103,29 +1164,23 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     return item.seasonTags.some((tag) => tag.toLowerCase().trim() === selectedSeason.toLowerCase().trim());
   };
 
-  const sizeScopedItems = useMemo(() => ownedItems.filter(matchesSizeMode), [ownedItems, sizeMode, sizeAnchors, specificSizes]);
+  const matchesClosetSearch = useCallback((item: (typeof ownedItems)[number], rawQuery: string) => {
+    const q = rawQuery.trim().toLowerCase();
+    if (!q) return true;
+    const haystack = [
+      item.title,
+      item.printName,
+      item.brand,
+      ...(item.brandTags ?? []),
+      ...(item.tags ?? []),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(q);
+  }, []);
 
-  const availableSpecificSizes = useMemo(() => {
-    const labels = new Map<string, string>();
-    for (const item of ownedItems) {
-      const raw = (item.size || '').trim();
-      if (!raw) continue;
-      const key = raw.toLowerCase();
-      const current = labels.get(key);
-      if (!current || (current === current.toLowerCase() && raw !== raw.toLowerCase())) labels.set(key, raw);
-    }
-    return Array.from(labels.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [ownedItems]);
-
-  useEffect(() => {
-    if (!specificSizes.length) return;
-    const allowed = new Set(availableSpecificSizes.map((v) => v.toLowerCase()));
-    setSpecificSizes((prev) => {
-      const next = prev.filter((v) => allowed.has(v.toLowerCase()));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [availableSpecificSizes]);
-
+  const sizeScopedItems = useMemo(() => ownedItems.filter(matchesSizeMode), [ownedItems, matchesSizeMode]);
   const seasonOptions = useMemo(() => {
     const values = new Set<string>();
     sizeScopedItems
@@ -1163,8 +1218,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [sizeScopedItems, seasonFilter]);
 
   const filteredOwnedItems = useMemo(
-    () => sizeScopedItems.filter((item) => matchesBrand(item, brandId)).filter((item) => matchesSeason(item, seasonFilter)),
-    [sizeScopedItems, brandId, seasonFilter],
+    () => sizeScopedItems.filter((item) => matchesBrand(item, brandId)).filter((item) => matchesSeason(item, seasonFilter)).filter((item) => matchesClosetSearch(item, closetSearch)),
+    [sizeScopedItems, brandId, seasonFilter, matchesClosetSearch, closetSearch],
   );
 
   useEffect(() => {
@@ -1232,6 +1287,32 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [visibleCategories, ownedItems, brandId, seasonFilter, sizeAnchors]);
 
   const totalFilteredCount = useMemo(() => visibleCategories.reduce((sum, category) => sum + (counts[category] ?? 0), 0), [visibleCategories, counts]);
+  const selectedSizeChipLabel = useMemo(
+    () =>
+      (visibleSizeChipEntries.find((entry) => entry.normalized === selectedSizeChip)?.label
+        ?? presentSizeEntries.find((entry) => entry.normalized === selectedSizeChip)?.label
+        ?? activeSizeEntries.find((entry) => entry.normalized === selectedSizeChip)?.label
+        ?? selectedSizeChip
+        ?? ''),
+    [visibleSizeChipEntries, presentSizeEntries, activeSizeEntries, selectedSizeChip],
+  );
+  const emptyLabelByCategory = useMemo(() => {
+    const labels = new Map<ClosetCategory, string>();
+    const sizeScope = sizeMode === 'both' ? 'All' : sizeMode === 'now' ? 'Now' : 'Next';
+    visibleCategories.forEach((category) => {
+      labels.set(
+        category,
+        buildEmptyCategoryLabel({
+          categoryName: closetLabel[category],
+          brandFilter: brandId,
+          sizeScope,
+          selectedSizes: selectedSizeChipLabel ? [selectedSizeChipLabel] : [],
+          query: closetSearch,
+        }),
+      );
+    });
+    return labels;
+  }, [visibleCategories, brandId, sizeMode, selectedSizeChipLabel, closetSearch]);
 
   const newThisWeek = useMemo(() => (selectedChild ? getNewThisWeek(selectedChild.id, items, childItems).slice(0, 12) : []), [selectedChild, items, childItems]);
   const sizeUpsStash = useMemo(
@@ -1272,27 +1353,32 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [closetSearch, navigation, selectedChild?.id]);
 
   const toggleClosetSizeSelection = useCallback((key: 'now' | 'next') => {
-    setSpecificSizes([]);
     const current = sizeModeToSelection(sizeMode);
     const nextSelection = { ...current, [key]: !current[key] };
     const nextMode = selectionToSizeMode(nextSelection, 'both');
     setSizeMode(nextMode);
+    if (nextMode === 'now') setSelectedSizeChip(currentSizeNormalized || null);
+    else if (nextMode === 'next') setSelectedSizeChip(nextSizeNormalized || null);
+    else setSelectedSizeChip(null);
     if (selectedChild?.id) sizeModeOverridesRef.current[selectedChild.id] = nextMode;
-  }, [sizeMode, selectedChild?.id]);
+  }, [sizeMode, selectedChild?.id, currentSizeNormalized, nextSizeNormalized]);
 
   const selectAllClosetSizes = useCallback(() => {
-    setSpecificSizes([]);
+    setSelectedSizeChip(null);
     setSizeMode('both');
     if (selectedChild?.id) sizeModeOverridesRef.current[selectedChild.id] = 'both';
   }, [selectedChild?.id]);
 
-  const toggleSpecificClosetSize = useCallback((value: string) => {
-    setSpecificSizes((prev) => {
-      const exists = prev.some((entry) => entry.toLowerCase() === value.toLowerCase());
-      if (exists) return prev.filter((entry) => entry.toLowerCase() !== value.toLowerCase());
-      return [...prev, value];
+  const selectClosetSizeChip = useCallback((value: string) => {
+    const transition = getSizeChipTransitionOnTap({
+      tapped: value,
+      currentSize: currentSizeNormalized,
+      nextSize: nextSizeNormalized,
     });
-  }, []);
+    setSelectedSizeChip(transition.selectedSizeChip || null);
+    setSizeMode(transition.mode);
+    if (selectedChild?.id) sizeModeOverridesRef.current[selectedChild.id] = transition.mode;
+  }, [currentSizeNormalized, nextSizeNormalized, selectedChild?.id]);
 
   const moveCategoryInList = useCallback((list: ClosetCategory[], from: number, to: number): ClosetCategory[] => {
     if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return list;
@@ -1356,9 +1442,12 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         },
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (_, gesture) => {
           tileDragStateRef.current = null;
           void persistVisibleCategoryOrder([...tileOrderRef.current]);
+          if (Math.abs(gesture.dx) < 4 && Math.abs(gesture.dy) < 4) {
+            setShowTileGridReorderMode(false);
+          }
         },
         onPanResponderTerminate: () => {
           tileDragStateRef.current = null;
@@ -1367,7 +1456,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       });
       return tilePanRespondersRef.current[category];
     },
-    [moveCategoryInList, persistVisibleCategoryOrder, showTileGridReorderMode],
+    [moveCategoryInList, persistVisibleCategoryOrder, showTileGridReorderMode, setShowTileGridReorderMode],
   );
 
   if (!selectedChild) {
@@ -1442,11 +1531,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   };
   async function openAddItem() {
     await handleActionClick('quick_add');
-    navigation.navigate('AddItem', { quick: true, shoppingMode: true });
+    navigation.navigate('AddItem', { shoppingMode: true });
   }
   const openClosetFabMenu = () => {
     const actions = [
-      { label: 'Quick Add', onPress: () => void openAddItem() },
+      { label: 'Add Item', onPress: () => void openAddItem() },
       { label: 'Add From Link', onPress: () => navigation.navigate('AddItem', { quick: false, shoppingMode: true }) },
       { label: 'Drawer Scan', onPress: () => navigation.navigate('DrawerScan') },
       { label: 'Batch Add', onPress: () => navigation.navigate('BatchAdd') },
@@ -1531,9 +1620,9 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             </View>
           ) : null}
           <FloatingActionButton
-            onPress={() => navigation.navigate('AddItem', { quick: true, prefillStatus: 'owned', shoppingMode: true })}
+            onPress={() => navigation.navigate('AddItem', { prefillStatus: 'owned', shoppingMode: true })}
             onLongPress={openClosetFabMenu}
-            accessibilityLabel="Quick add item"
+            accessibilityLabel="Add item"
             testID="closet-fab-add"
           />
         </>
@@ -1569,23 +1658,23 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={[styles.sizeToggleChipText, sizeModeToSelection(sizeMode).next ? styles.sizeToggleChipTextActive : null]}>Next</Text>
             </Pressable>
             <Pressable
-              style={[styles.sizeToggleChip, sizeMode === 'both' && specificSizes.length === 0 ? styles.sizeToggleChipActive : null]}
+              style={[styles.sizeToggleChip, sizeMode === 'both' && !selectedSizeChip ? styles.sizeToggleChipActive : null]}
               onPress={selectAllClosetSizes}
             >
-              <Text style={[styles.sizeToggleChipText, sizeMode === 'both' && specificSizes.length === 0 ? styles.sizeToggleChipTextActive : null]}>All</Text>
+              <Text style={[styles.sizeToggleChipText, sizeMode === 'both' && !selectedSizeChip ? styles.sizeToggleChipTextActive : null]}>All</Text>
             </Pressable>
           </View>
-          {availableSpecificSizes.length > 0 ? (
+          {visibleSizeChipEntries.length > 0 ? (
             <View style={styles.sizeToggleRow}>
-              {availableSpecificSizes.slice(0, 12).map((value) => {
-                const active = specificSizes.some((entry) => entry.toLowerCase() === value.toLowerCase());
+              {visibleSizeChipEntries.slice(0, 16).map((entry) => {
+                const active = selectedSizeChip === entry.normalized;
                 return (
                   <Pressable
-                    key={`closet-size-${value}`}
+                    key={`closet-size-${entry.normalized}`}
                     style={[styles.sizeToggleChip, active ? styles.sizeToggleChipActive : null]}
-                    onPress={() => toggleSpecificClosetSize(value)}
+                    onPress={() => selectClosetSizeChip(entry.label)}
                   >
-                    <Text style={[styles.sizeToggleChipText, active ? styles.sizeToggleChipTextActive : null]}>{value}</Text>
+                    <Text style={[styles.sizeToggleChipText, active ? styles.sizeToggleChipTextActive : null]}>{entry.label}</Text>
                   </Pressable>
                 );
               })}
@@ -1683,6 +1772,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               category={category}
               count={count}
               thumbs={thumbs}
+              emptyLabel={emptyLabelByCategory.get(category)}
               hasUps={signals.hasUps}
               hasDupes={signals.hasDupes}
               activeBrandLabel={activeBrandShortLabel}
@@ -1695,7 +1785,6 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                 if (showTileGridReorderMode) return;
                 if (count === 0) {
                   navigation.navigate('AddItem', {
-                    quick: true,
                     shoppingMode: true,
                     prefillStatus: 'owned',
                     prefillChildId: selectedChild.id,

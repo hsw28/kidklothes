@@ -1,4 +1,4 @@
-import { BrandFit, Condition, ItemStatus, KidFit, PrintAlias } from '@/models';
+import { BrandFit, Condition, ItemStatus, KidFit, PrintAlias, ItemSizeScheme, ItemSizeSystem, ItemSizeType, FitBin } from '@/models';
 import { ClosetCategory, closetCategoryToClothingType, closetLabel } from '@/utils/categories';
 import { resolveOutboundLink } from '@/utils/outbound';
 import { resolvePrintName } from '@/utils/printName';
@@ -16,6 +16,12 @@ type ItemPayloadFormInput = {
   clothingTypeLabelFallback: string;
   size: string;
   sizeNormalized: string;
+  sizeType?: ItemSizeType;
+  sizeSystem?: ItemSizeSystem;
+  sizeScheme?: ItemSizeScheme;
+  sizeRaw?: string;
+  fitBin?: FitBin;
+  fitBinTouched?: boolean;
   category?: ClosetCategory;
   storageLocationId: string;
   brandFit?: BrandFit;
@@ -48,6 +54,12 @@ export type NormalizedItemPayload = {
   clothingType: ReturnType<typeof closetCategoryToClothingType>;
   size: string;
   sizeNormalized?: string;
+  sizeType?: ItemSizeType;
+  sizeSystem?: ItemSizeSystem;
+  sizeScheme?: ItemSizeScheme;
+  sizeRaw?: string;
+  fitBin?: FitBin;
+  fitBinTouched?: boolean;
   category?: ClosetCategory;
   storageLocationId?: string;
   brandFit?: BrandFit;
@@ -102,6 +114,12 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
     clothingType: derivedType,
     size: input.size,
     sizeNormalized: input.sizeNormalized || undefined,
+    sizeType: input.sizeType,
+    sizeSystem: input.sizeSystem,
+    sizeScheme: input.sizeScheme,
+    sizeRaw: input.sizeRaw || input.size || undefined,
+    fitBin: input.fitBin,
+    fitBinTouched: input.fitBinTouched,
     category: input.category,
     storageLocationId: input.storageLocationId || undefined,
     brandFit: input.brandFit,
@@ -139,4 +157,3 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
     outboundUrl: resolved.outboundUrl || undefined,
   };
 };
-

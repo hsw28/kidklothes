@@ -8,6 +8,7 @@ import { validateNewItemInput } from '@/utils/itemValidation';
 import { sanitizeCategoryOrder, sanitizeHiddenCategories, sanitizeCategoryOrder as sanitizeOrder } from '@/utils/categories';
 import { getMaxKidsAllowed } from '@/config/betaLimits';
 import { makeId } from '@/utils/id';
+import { inferSizeScheme, isShoeCategory, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
 import { getDb, initDatabase } from './sqlite';
 
 export interface NewChildInput {
@@ -20,6 +21,11 @@ export interface NewChildInput {
   currentSizeOther?: string;
   nextSizeCode?: Child['nextSize']['code'];
   nextSizeOther?: string;
+  apparelSizeCurrent?: string;
+  apparelSizeNext?: string;
+  shoeSizeCurrent?: string;
+  shoeSizeNext?: string;
+  shoeSizeSystem?: Child['shoeSizeSystem'];
 }
 
 export interface NewItemInput {
@@ -49,6 +55,10 @@ export interface NewItemInput {
   listedAt?: string;
   bundleId?: string;
   sizeNormalized?: string;
+  sizeType?: Item['sizeType'];
+  sizeSystem?: Item['sizeSystem'];
+  sizeScheme?: Item['sizeScheme'];
+  sizeRaw?: string;
   category?: Item['category'];
   brandFit?: Item['brandFit'];
   kidFit?: Item['kidFit'];
@@ -60,6 +70,8 @@ export interface NewItemInput {
   seasonTags?: string[];
   lastWornAt?: number;
   wornCount?: number;
+  fitBin?: Item['fitBin'];
+  fitBinTouched?: boolean;
   statusForChild?: Item['status'];
   sizeAtTime?: string;
   notesForChild?: string;
@@ -144,6 +156,11 @@ type ChildRow = {
   notes: string | null;
   hiddenClosetCategories: string | null;
   usesMixedSizes: number | null;
+  apparelSizeCurrent: string | null;
+  apparelSizeNext: string | null;
+  shoeSizeCurrent: string | null;
+  shoeSizeNext: string | null;
+  shoeSizeSystem: string | null;
   currentSizeCode: Child['currentSize']['code'] | null;
   currentSizeOther: string | null;
   nextSizeCode: Child['nextSize']['code'] | null;
@@ -181,6 +198,10 @@ type ItemRow = {
   updatedAt: number;
   deletedAt: number | null;
   sizeNormalized: string | null;
+  sizeType: string | null;
+  sizeSystem: string | null;
+  sizeScheme: string | null;
+  sizeRaw: string | null;
   category: string | null;
   brandFit: string | null;
   kidFit: string | null;
@@ -192,6 +213,8 @@ type ItemRow = {
   seasonTags: string | null;
   lastWornAt: number | null;
   wornCount: number | null;
+  fitBin: string | null;
+  fitBinTouched: number | null;
 };
 
 type ChildItemRow = {
@@ -250,6 +273,7 @@ type OutfitTagRow = { outfitId: string; tagName: string };
 type SettingsRow = {
   id: string;
   detailPromptMode: string;
+  closetAddDefaultView: string | null;
   notificationsEnabled: number;
   notifyWeeklyTidy: number;
   notifyOutgrow: number;
@@ -300,6 +324,7 @@ type PurchaseStateRow = {
 
 const defaultSettings: AppSettings = {
   detailPromptMode: 'sometimes',
+  closetAddDefaultView: 'detailed',
   notificationsEnabled: false,
   notifyWeeklyTidy: false,
   notifyOutgrow: false,
@@ -337,6 +362,36 @@ const normalizeImageUrls = (imageUrl?: string, imageUrls?: string[]): string[] =
   return Array.from(new Set(merged));
 };
 
+const deriveItemSizingFields = (input: {
+  clothingType?: string | null;
+  category?: string | null;
+  size?: string | null;
+  sizeRaw?: string | null;
+  sizeNormalized?: string | null;
+  sizeType?: Item['sizeType'];
+  sizeSystem?: Item['sizeSystem'];
+  sizeScheme?: Item['sizeScheme'];
+  fitBin?: Item['fitBin'];
+  fitBinTouched?: boolean | null;
+}) => {
+  const sizeRaw = normalizeWhitespace(String(input.sizeRaw ?? input.size ?? ''));
+  const sizeType: NonNullable<Item['sizeType']> =
+    input.sizeType ?? (isShoeCategory(String(input.category ?? input.clothingType ?? '')) ? 'shoe' : 'apparel');
+  const sizeNormalized = trimOrNull(input.sizeNormalized) ?? (normalizeStructuredSize(sizeRaw) || undefined);
+  const sizeScheme = (input.sizeScheme ?? (sizeRaw ? inferSizeScheme(sizeRaw) : 'CUSTOM')) as NonNullable<Item['sizeScheme']>;
+  const sizeSystem: NonNullable<Item['sizeSystem']> = input.sizeSystem ?? (sizeType === 'shoe' ? 'US_SHOE' : 'APPAREL');
+  return {
+    legacySize: sizeRaw,
+    sizeRaw: sizeRaw || undefined,
+    sizeNormalized,
+    sizeType,
+    sizeSystem,
+    sizeScheme,
+    fitBin: (input.fitBin ?? 'unsure') as NonNullable<Item['fitBin']>,
+    fitBinTouched: Boolean(input.fitBinTouched),
+  };
+};
+
 const mapChild = (row: ChildRow): Child => ({
   id: row.id,
   name: row.name,
@@ -344,6 +399,11 @@ const mapChild = (row: ChildRow): Child => ({
   notes: row.notes ?? undefined,
   usesMixedSizes: Boolean(row.usesMixedSizes ?? 0),
   hiddenClosetCategories: parseStringList(row.hiddenClosetCategories),
+  apparelSizeCurrent: row.apparelSizeCurrent ?? undefined,
+  apparelSizeNext: row.apparelSizeNext ?? undefined,
+  shoeSizeCurrent: row.shoeSizeCurrent ?? undefined,
+  shoeSizeNext: row.shoeSizeNext ?? undefined,
+  shoeSizeSystem: (row.shoeSizeSystem as Child['shoeSizeSystem']) ?? 'US_SHOE',
   currentSize: {
     code: row.currentSizeCode ?? null,
     otherText: row.currentSizeOther ?? null,
@@ -419,6 +479,10 @@ const mapItem = (row: ItemRow, tags: string[], brandTags: string[], childIds: st
   updatedAt: row.updatedAt,
   deletedAt: row.deletedAt ?? undefined,
   sizeNormalized: row.sizeNormalized ?? undefined,
+  sizeType: (row.sizeType as Item['sizeType']) ?? undefined,
+  sizeSystem: (row.sizeSystem as Item['sizeSystem']) ?? undefined,
+  sizeScheme: (row.sizeScheme as Item['sizeScheme']) ?? undefined,
+  sizeRaw: row.sizeRaw ?? row.size ?? undefined,
   category: (row.category as Item['category']) ?? undefined,
   brandFit: (row.brandFit as Item['brandFit']) ?? undefined,
   kidFit: (row.kidFit as Item['kidFit']) ?? undefined,
@@ -430,6 +494,8 @@ const mapItem = (row: ItemRow, tags: string[], brandTags: string[], childIds: st
   seasonTags: parseStringList(row.seasonTags),
   lastWornAt: row.lastWornAt ?? undefined,
   wornCount: row.wornCount ?? 0,
+  fitBin: (row.fitBin as Item['fitBin']) ?? 'unsure',
+  fitBinTouched: row.fitBinTouched === 1,
   tags,
   childIds,
 });
@@ -452,6 +518,7 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
   if (!row) return defaultSettings;
   return {
     detailPromptMode: (row.detailPromptMode as AppSettings['detailPromptMode']) ?? 'sometimes',
+    closetAddDefaultView: row.closetAddDefaultView === 'simple' ? 'simple' : 'detailed',
     notificationsEnabled: row.notificationsEnabled === 1,
     notifyWeeklyTidy: row.notifyWeeklyTidy === 1,
     notifyOutgrow: row.notifyOutgrow === 1,
@@ -716,8 +783,9 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     await db.runAsync(
-      `UPDATE settings SET detailPromptMode = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, betaKidLimitBannerDismissed = ? WHERE id = ?;`,
+      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, betaKidLimitBannerDismissed = ? WHERE id = ?;`,
       next.detailPromptMode,
+      next.closetAddDefaultView,
       next.notificationsEnabled ? 1 : 0,
       next.notifyWeeklyTidy ? 1 : 0,
       next.notifyOutgrow ? 1 : 0,
@@ -818,6 +886,11 @@ export const repository = {
       notes: trimOrNull(input.notes) ?? undefined,
       usesMixedSizes: Boolean(input.usesMixedSizes),
       hiddenClosetCategories: normalizeStringArray(input.hiddenClosetCategories),
+      apparelSizeCurrent: trimOrNull(input.apparelSizeCurrent) ?? undefined,
+      apparelSizeNext: trimOrNull(input.apparelSizeNext) ?? undefined,
+      shoeSizeCurrent: trimOrNull(input.shoeSizeCurrent) ?? undefined,
+      shoeSizeNext: trimOrNull(input.shoeSizeNext) ?? undefined,
+      shoeSizeSystem: input.shoeSizeSystem ?? 'US_SHOE',
       currentSize: {
         code: input.currentSizeCode ?? null,
         otherText: trimOrNull(input.currentSizeOther),
@@ -831,13 +904,18 @@ export const repository = {
     };
 
     await db.runAsync(
-      'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
       child.id,
       child.name,
       child.photoUri ?? null,
       child.notes ?? null,
       JSON.stringify(child.hiddenClosetCategories),
       child.usesMixedSizes ? 1 : 0,
+      child.apparelSizeCurrent ?? null,
+      child.apparelSizeNext ?? null,
+      child.shoeSizeCurrent ?? null,
+      child.shoeSizeNext ?? null,
+      child.shoeSizeSystem ?? 'US_SHOE',
       child.currentSize.code ?? null,
       child.currentSize.otherText ?? null,
       child.nextSize.code ?? null,
@@ -867,6 +945,11 @@ export const repository = {
         patch.hiddenClosetCategories !== undefined
           ? normalizeStringArray(patch.hiddenClosetCategories)
           : parseStringList(row.hiddenClosetCategories),
+      apparelSizeCurrent: patch.apparelSizeCurrent !== undefined ? trimOrNull(patch.apparelSizeCurrent) ?? undefined : row.apparelSizeCurrent ?? undefined,
+      apparelSizeNext: patch.apparelSizeNext !== undefined ? trimOrNull(patch.apparelSizeNext) ?? undefined : row.apparelSizeNext ?? undefined,
+      shoeSizeCurrent: patch.shoeSizeCurrent !== undefined ? trimOrNull(patch.shoeSizeCurrent) ?? undefined : row.shoeSizeCurrent ?? undefined,
+      shoeSizeNext: patch.shoeSizeNext !== undefined ? trimOrNull(patch.shoeSizeNext) ?? undefined : row.shoeSizeNext ?? undefined,
+      shoeSizeSystem: patch.shoeSizeSystem !== undefined ? (patch.shoeSizeSystem ?? 'US_SHOE') : ((row.shoeSizeSystem as Child['shoeSizeSystem']) ?? 'US_SHOE'),
       currentSize: {
         code: patch.currentSizeCode !== undefined ? patch.currentSizeCode ?? null : row.currentSizeCode ?? null,
         otherText: patch.currentSizeOther !== undefined ? trimOrNull(patch.currentSizeOther) : row.currentSizeOther ?? null,
@@ -880,12 +963,17 @@ export const repository = {
     };
 
     await db.runAsync(
-      'UPDATE children SET name = ?, photoUri = ?, notes = ?, hiddenClosetCategories = ?, usesMixedSizes = ?, currentSizeCode = ?, currentSizeOther = ?, nextSizeCode = ?, nextSizeOther = ?, updatedAt = ? WHERE id = ?;',
+      'UPDATE children SET name = ?, photoUri = ?, notes = ?, hiddenClosetCategories = ?, usesMixedSizes = ?, apparelSizeCurrent = ?, apparelSizeNext = ?, shoeSizeCurrent = ?, shoeSizeNext = ?, shoeSizeSystem = ?, currentSizeCode = ?, currentSizeOther = ?, nextSizeCode = ?, nextSizeOther = ?, updatedAt = ? WHERE id = ?;',
       updated.name,
       updated.photoUri ?? null,
       updated.notes ?? null,
       JSON.stringify(updated.hiddenClosetCategories),
       updated.usesMixedSizes ? 1 : 0,
+      updated.apparelSizeCurrent ?? null,
+      updated.apparelSizeNext ?? null,
+      updated.shoeSizeCurrent ?? null,
+      updated.shoeSizeNext ?? null,
+      updated.shoeSizeSystem ?? 'US_SHOE',
       updated.currentSize.code ?? null,
       updated.currentSize.otherText ?? null,
       updated.nextSize.code ?? null,
@@ -940,6 +1028,7 @@ export const repository = {
       const normalizedBrandTags = Array.from(new Set([...(input.brandTags ?? []), input.brand ?? ''].map(normalizeBrandName).filter(Boolean)));
       const normalizedInputUrl = normalizeUrl(input.url);
       const normalizedCanonicalUrl = normalizeUrl(input.canonicalUrl);
+      const sizing = deriveItemSizingFields(input);
       const link = resolveOutboundLink(normalizedInputUrl || '', {
         canonicalUrl: normalizedCanonicalUrl || undefined,
         monetize: false,
@@ -961,7 +1050,7 @@ export const repository = {
       imageUrls: normalizedImageUrls,
       cachedImageUri: normalizeUrl(input.cachedImageUri) || undefined,
       clothingType: input.clothingType,
-      size: normalizeWhitespace(input.size ?? ''),
+      size: sizing.legacySize,
       status: (['wishlist', 'owned', 'for-sale', 'sold'] as const).includes(input.status as any) ? input.status : 'owned',
       notes: trimOrNull(input.notes) ?? undefined,
       purchasePrice: input.purchasePrice,
@@ -972,7 +1061,11 @@ export const repository = {
       bundleId: trimOrNull(input.bundleId) ?? undefined,
       createdAt: now,
       updatedAt: now,
-      sizeNormalized: trimOrNull(input.sizeNormalized) ?? undefined,
+      sizeNormalized: sizing.sizeNormalized,
+      sizeType: sizing.sizeType,
+      sizeSystem: sizing.sizeSystem,
+      sizeScheme: sizing.sizeScheme,
+      sizeRaw: sizing.sizeRaw,
       category: input.category,
       brandFit: input.brandFit,
       kidFit: input.kidFit,
@@ -984,13 +1077,15 @@ export const repository = {
       seasonTags: normalizeStringArray(input.seasonTags),
       lastWornAt: input.lastWornAt,
       wornCount: input.wornCount ?? 0,
+      fitBin: sizing.fitBin,
+      fitBinTouched: sizing.fitBinTouched,
       tags: normalizeStringArray(input.tags),
       childIds: input.childId ? [input.childId] : [],
     };
 
     const itemInsertColumns = [
       'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
-      'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount',
+      'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
     ] as const;
     const itemInsertValues: Array<string | number | null> = [
       item.id,
@@ -1022,6 +1117,10 @@ export const repository = {
       item.listedAt ?? null,
       item.bundleId ?? null,
       item.sizeNormalized ?? null,
+      item.sizeType ?? null,
+      item.sizeSystem ?? null,
+      item.sizeScheme ?? null,
+      item.sizeRaw ?? null,
       item.category ?? null,
       item.brandFit ?? null,
       item.kidFit ?? null,
@@ -1033,6 +1132,8 @@ export const repository = {
       JSON.stringify(item.seasonTags),
       item.lastWornAt ?? null,
       item.wornCount,
+      item.fitBin ?? 'unsure',
+      item.fitBinTouched ? 1 : 0,
     ];
       await runInTransaction(db, async () => {
         await db.runAsync(
@@ -1095,6 +1196,18 @@ export const repository = {
       const now = Date.now();
       const aliases = await getActivePrintAliases();
       const nextUrl = patch.url !== undefined ? normalizeUrl(patch.url) : existing.url ?? '';
+      const sizing = deriveItemSizingFields({
+        clothingType: patch.clothingType ?? existing.clothingType,
+        category: patch.category ?? existing.category,
+        size: patch.size ?? existing.size,
+        sizeRaw: patch.sizeRaw ?? existing.sizeRaw ?? existing.size,
+        sizeNormalized: patch.sizeNormalized ?? existing.sizeNormalized,
+        sizeType: patch.sizeType ?? existing.sizeType,
+        sizeSystem: patch.sizeSystem ?? existing.sizeSystem,
+        sizeScheme: patch.sizeScheme ?? existing.sizeScheme,
+        fitBin: patch.fitBin ?? existing.fitBin,
+        fitBinTouched: patch.fitBinTouched ?? existing.fitBinTouched,
+      });
       const link = resolveOutboundLink(nextUrl, {
         canonicalUrl: normalizeUrl(patch.canonicalUrl ?? existing.canonicalUrl ?? '') || undefined,
         monetize: false,
@@ -1135,7 +1248,7 @@ export const repository = {
           : existing.imageUrls,
       cachedImageUri: patch.cachedImageUri !== undefined ? normalizeUrl(patch.cachedImageUri) || undefined : existing.cachedImageUri,
       clothingType: patch.clothingType ?? existing.clothingType,
-      size: patch.size !== undefined ? normalizeWhitespace(patch.size) : existing.size,
+      size: sizing.legacySize || existing.size,
       status: (patch.status && (['wishlist', 'owned', 'for-sale', 'sold'] as const).includes(patch.status as any) ? patch.status : undefined) ?? existing.status,
       notes: patch.notes !== undefined ? trimOrNull(patch.notes) ?? undefined : existing.notes,
       purchasePrice: patch.purchasePrice !== undefined ? patch.purchasePrice : existing.purchasePrice,
@@ -1145,7 +1258,11 @@ export const repository = {
       listedAt: patch.listedAt !== undefined ? trimOrNull(patch.listedAt) ?? undefined : existing.listedAt,
       bundleId: patch.bundleId !== undefined ? trimOrNull(patch.bundleId) ?? undefined : existing.bundleId,
       updatedAt: now,
-      sizeNormalized: patch.sizeNormalized !== undefined ? trimOrNull(patch.sizeNormalized) ?? undefined : existing.sizeNormalized,
+      sizeNormalized: sizing.sizeNormalized,
+      sizeType: sizing.sizeType,
+      sizeSystem: sizing.sizeSystem,
+      sizeScheme: sizing.sizeScheme,
+      sizeRaw: sizing.sizeRaw,
       category: patch.category ?? existing.category,
       brandFit: patch.brandFit ?? existing.brandFit,
       kidFit: patch.kidFit ?? existing.kidFit,
@@ -1157,6 +1274,8 @@ export const repository = {
       seasonTags: patch.seasonTags !== undefined ? normalizeStringArray(patch.seasonTags) : existing.seasonTags,
       lastWornAt: patch.lastWornAt ?? existing.lastWornAt,
       wornCount: patch.wornCount ?? existing.wornCount,
+      fitBin: sizing.fitBin,
+      fitBinTouched: sizing.fitBinTouched,
       tags: patch.tags !== undefined ? normalizeStringArray(patch.tags) : existing.tags,
       childIds: patch.childId ? Array.from(new Set([...existing.childIds, patch.childId])) : existing.childIds,
     };
@@ -1190,6 +1309,10 @@ export const repository = {
         bundleId = ?,
         updatedAt = ?,
         sizeNormalized = ?,
+        sizeType = ?,
+        sizeSystem = ?,
+        sizeScheme = ?,
+        sizeRaw = ?,
         category = ?,
         brandFit = ?,
         kidFit = ?,
@@ -1200,7 +1323,9 @@ export const repository = {
         condition = ?,
         seasonTags = ?,
         lastWornAt = ?,
-        wornCount = ?
+        wornCount = ?,
+        fitBin = ?,
+        fitBinTouched = ?
       WHERE id = ?;`,
       patch.childId ?? existing.childIds[0] ?? null,
       updated.url ?? null,
@@ -1228,6 +1353,10 @@ export const repository = {
       updated.bundleId ?? null,
       updated.updatedAt,
       updated.sizeNormalized ?? null,
+      updated.sizeType ?? null,
+      updated.sizeSystem ?? null,
+      updated.sizeScheme ?? null,
+      updated.sizeRaw ?? null,
       updated.category ?? null,
       updated.brandFit ?? null,
       updated.kidFit ?? null,
@@ -1239,6 +1368,8 @@ export const repository = {
       JSON.stringify(updated.seasonTags),
       updated.lastWornAt ?? null,
       updated.wornCount,
+      updated.fitBin ?? 'unsure',
+      updated.fitBinTouched ? 1 : 0,
           id,
         );
 
@@ -1619,13 +1750,18 @@ export const repository = {
 
     for (const child of payload.children) {
       await db.runAsync(
-        'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
         child.id,
         child.name,
         child.photoUri ?? null,
         child.notes ?? null,
         JSON.stringify(child.hiddenClosetCategories ?? []),
         child.usesMixedSizes ? 1 : 0,
+        child.apparelSizeCurrent ?? null,
+        child.apparelSizeNext ?? null,
+        child.shoeSizeCurrent ?? null,
+        child.shoeSizeNext ?? null,
+        child.shoeSizeSystem ?? 'US_SHOE',
         child.currentSize?.code ?? null,
         child.currentSize?.otherText ?? null,
         child.nextSize?.code ?? null,
@@ -1637,9 +1773,21 @@ export const repository = {
     }
 
     for (const item of payload.items) {
+      const sizing = deriveItemSizingFields({
+        clothingType: item.clothingType,
+        category: item.category,
+        size: item.size,
+        sizeRaw: item.sizeRaw ?? item.size,
+        sizeNormalized: item.sizeNormalized,
+        sizeType: item.sizeType,
+        sizeSystem: item.sizeSystem,
+        sizeScheme: item.sizeScheme,
+        fitBin: item.fitBin,
+        fitBinTouched: item.fitBinTouched,
+      });
       const importItemColumns = [
         'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
-        'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount',
+        'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
       ] as const;
       const importItemValues: Array<string | number | null> = [
         item.id,
@@ -1657,7 +1805,7 @@ export const repository = {
         JSON.stringify(item.imageUrls),
         item.cachedImageUri ?? null,
         item.clothingType,
-        item.size,
+        sizing.legacySize || item.size,
         item.status,
         JSON.stringify(item.tags),
         item.notes ?? null,
@@ -1670,7 +1818,11 @@ export const repository = {
         item.soldDate ?? null,
         item.listedAt ?? null,
         item.bundleId ?? null,
-        item.sizeNormalized ?? null,
+        sizing.sizeNormalized ?? null,
+        sizing.sizeType ?? null,
+        sizing.sizeSystem ?? null,
+        sizing.sizeScheme ?? null,
+        sizing.sizeRaw ?? sizing.legacySize ?? null,
         item.category ?? null,
         item.brandFit ?? null,
         item.kidFit ?? null,
@@ -1682,6 +1834,8 @@ export const repository = {
         JSON.stringify(item.seasonTags),
         item.lastWornAt ?? null,
         item.wornCount ?? 0,
+        sizing.fitBin ?? 'unsure',
+        sizing.fitBinTouched ? 1 : 0,
       ];
       await db.runAsync(
         `INSERT INTO items (${importItemColumns.join(', ')}) VALUES (${importItemValues.map(() => '?').join(', ')});`,

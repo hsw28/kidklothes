@@ -53,6 +53,11 @@ export type BrandFit = 'tts' | 'small' | 'big';
 export type KidFit = 'fits' | 'big' | 'small' | 'unknown';
 export type Condition = 'new-with-tags' | 'like-new' | 'good' | 'play' | 'donate';
 export type DetailPromptMode = 'never' | 'sometimes' | 'always';
+export type AddItemDefaultViewMode = 'simple' | 'detailed';
+export type FitBin = 'current' | 'next' | 'later' | 'unsure';
+export type ItemSizeType = 'apparel' | 'shoe';
+export type ItemSizeSystem = 'APPAREL' | 'US_SHOE';
+export type ItemSizeScheme = 'AGE' | 'ALPHA' | 'CUSTOM' | 'SHOE';
 export const ITEM_STATUSES = ['wishlist', 'owned', 'for-sale', 'sold'] as const;
 export const CLOTHING_TYPES = ['sleeper', 'romper', 'top', 'bottom', 'dress', 'outerwear', 'shoes', 'accessory'] as const;
 
@@ -82,6 +87,11 @@ export interface Child {
   notes?: string;
   usesMixedSizes: boolean;
   hiddenClosetCategories: string[];
+  apparelSizeCurrent?: string;
+  apparelSizeNext?: string;
+  shoeSizeCurrent?: string;
+  shoeSizeNext?: string;
+  shoeSizeSystem?: ItemSizeSystem;
   currentSize: { code: SizeCode | null; otherText?: string | null };
   nextSize: { code: SizeCode | null; otherText?: string | null };
   createdAt: number;
@@ -103,6 +113,10 @@ export interface Item extends BaseItem {
   listedAt?: string;
   bundleId?: string;
   sizeNormalized?: string;
+  sizeType?: ItemSizeType;
+  sizeSystem?: ItemSizeSystem;
+  sizeScheme?: ItemSizeScheme;
+  sizeRaw?: string;
   brandFit?: BrandFit;
   kidFit?: KidFit;
   brandSizeNote?: string;
@@ -113,6 +127,8 @@ export interface Item extends BaseItem {
   seasonTags: string[];
   lastWornAt?: number;
   wornCount: number;
+  fitBin?: FitBin;
+  fitBinTouched?: boolean;
 
   tags: string[];
   childIds: ID[];
@@ -187,6 +203,7 @@ export interface FilterPreset {
 
 export interface AppSettings {
   detailPromptMode: DetailPromptMode;
+  closetAddDefaultView: AddItemDefaultViewMode;
   notificationsEnabled: boolean;
   notifyWeeklyTidy: boolean;
   notifyOutgrow: boolean;

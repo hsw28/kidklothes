@@ -61,6 +61,7 @@ interface DataContextValue {
 
 const defaultSettings: AppSettings = {
   detailPromptMode: 'sometimes',
+  closetAddDefaultView: 'detailed',
   notificationsEnabled: false,
   notifyWeeklyTidy: false,
   notifyOutgrow: false,

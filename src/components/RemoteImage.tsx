@@ -32,7 +32,7 @@ const RemoteImageComponent: React.FC<Props> = ({
   accessibilityLabel,
 }) => {
   const theme = useAppTheme();
-  const [isLoading, setIsLoading] = useState(Boolean(isSupportedImageUri(uri)));
+  const [isLoading, setIsLoading] = useState(Boolean(isSupportedImageUri(uri) && isRemoteHttpUri(uri)));
   const [failed, setFailed] = useState(false);
   const imageOpacity = useRef(new Animated.Value(0)).current;
 
@@ -53,6 +53,7 @@ const RemoteImageComponent: React.FC<Props> = ({
   }, [uri]);
 
   const showImage = isSupportedImageUri(normalizedUri) && !failed;
+  const isRemote = isRemoteHttpUri(normalizedUri);
   const showPlaceholder = !showImage || isLoading;
 
   return (
@@ -74,10 +75,12 @@ const RemoteImageComponent: React.FC<Props> = ({
           source={{ uri: normalizedUri }}
           resizeMode={resizeMode}
           style={[StyleSheet.absoluteFillObject, imageStyle, { opacity: imageOpacity }]}
-          onLoadStart={() => setIsLoading(true)}
+          onLoadStart={() => {
+            if (isRemote) setIsLoading(true);
+          }}
           onLoadEnd={() => {
             setIsLoading(false);
-            if (!isRemoteHttpUri(normalizedUri)) {
+            if (!isRemote) {
               imageOpacity.setValue(1);
               return;
             }
@@ -102,7 +105,7 @@ const RemoteImageComponent: React.FC<Props> = ({
           </Text>
         </View>
       ) : null}
-      {isLoading && showImage ? <View style={[styles.loadingVeil, { backgroundColor: theme.colors.surfaceMuted }]} /> : null}
+      {isLoading && showImage && isRemote ? <View style={[styles.loadingVeil, { backgroundColor: theme.colors.surfaceMuted }]} /> : null}
     </View>
   );
 };

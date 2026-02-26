@@ -8,7 +8,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { RemoteImage } from '@/components/RemoteImage';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
-import { BrandFit, ClothingType, Condition, Item, ItemStatus, KidFit } from '@/models';
+import { BrandFit, ClothingType, Condition, FitBin, Item, ItemSizeScheme, ItemSizeSystem, ItemSizeType, ItemStatus, KidFit } from '@/models';
 import { ItemsStackParamList } from '@/navigation/types';
 import { ADD_ITEM_CATEGORY_OPTIONS, ClosetCategory, closetCategoryToClothingType, closetLabel, normalizeItemCategoryToClosetCategory } from '@/utils/categories';
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
@@ -22,6 +22,7 @@ import { fetchLinkMetadata } from '@/utils/unfurlUrl';
 import { pickPhotoFromLibrary, takePhotoWithCamera } from '@/utils/photoPicker';
 import { validateNewItemInput } from '@/utils/itemValidation';
 import { cacheRemoteImage } from '@/utils/imageCache';
+import { APPAREL_AGE_SIZES, APPAREL_ALPHA_SIZES, US_SHOE_SIZES, computeDefaultFitBin, getSizeUIModel, inferSizeScheme, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
 
 const statusOptions: ItemStatus[] = ['wishlist', 'owned', 'for-sale', 'sold'];
 const conditionOptions: Condition[] = ['new-with-tags', 'like-new', 'good', 'play', 'donate'];
@@ -40,6 +41,13 @@ const kidFitOptions: Array<{ value: KidFit; label: string }> = [
 const brandFitLabels = brandFitOptions.map((option) => option.label);
 const kidFitLabels = kidFitOptions.map((option) => option.label);
 const commonSizeLabels = SIZE_OPTIONS.filter((entry) => entry.code !== 'OTHER').map((entry) => entry.code);
+const fitBinOptions: FitBin[] = ['current', 'next', 'later', 'unsure'];
+const fitBinLabels: Record<FitBin, string> = {
+  current: 'Current',
+  next: 'Next',
+  later: 'Later',
+  unsure: 'Unsure',
+};
 
 function useCategoryDefault(clothingType?: ClothingType): ClosetCategory | undefined {
   switch (clothingType) {
@@ -279,6 +287,12 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [extraImageUrls, setExtraImageUrls] = useState(existingExtraImages);
   const [size, setSize] = useState(sourceItem?.size ?? '');
   const [sizeNormalized, setSizeNormalized] = useState(sourceItem?.sizeNormalized ?? '');
+  const [sizeType, setSizeType] = useState<ItemSizeType | undefined>(sourceItem?.sizeType);
+  const [sizeSystem, setSizeSystem] = useState<ItemSizeSystem | undefined>(sourceItem?.sizeSystem);
+  const [sizeScheme, setSizeScheme] = useState<ItemSizeScheme | undefined>(sourceItem?.sizeScheme);
+  const [sizeRaw, setSizeRaw] = useState(sourceItem?.sizeRaw ?? sourceItem?.size ?? '');
+  const [fitBin, setFitBin] = useState<FitBin>(sourceItem?.fitBin ?? 'unsure');
+  const [fitBinTouched, setFitBinTouched] = useState(Boolean(sourceItem?.fitBinTouched));
   const [brandSizeNote, setBrandSizeNote] = useState(sourceItem?.brandSizeNote ?? '');
   const [fabric, setFabric] = useState(sourceItem?.fabric ?? '');
   const [brandFit, setBrandFit] = useState<BrandFit | undefined>(sourceItem?.brandFit);
@@ -306,7 +320,12 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [titleTouched, setTitleTouched] = useState(Boolean(sourceItem?.title));
   const [brandTouched, setBrandTouched] = useState(Boolean(sourceItem?.brand));
   const [imageTouched, setImageTouched] = useState(Boolean(sourceItem?.imageUrl || sourceItem?.cachedImageUri));
-  const [quickMode, setQuickMode] = useState(!editing && (route.params?.quick ?? false));
+  const [quickMode, setQuickMode] = useState(() => {
+    if (editing) return false;
+    if (typeof route.params?.quick === 'boolean') return route.params.quick;
+    const isClosetAddFlow = route.params?.shoppingMode === true || route.params?.prefillStatus === 'owned';
+    return isClosetAddFlow ? settings.closetAddDefaultView === 'simple' : false;
+  });
   const [duplicateCandidates, setDuplicateCandidates] = useState<SimilarCandidate[]>([]);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [showSizePickerModal, setShowSizePickerModal] = useState(false);
@@ -315,7 +334,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [didAutofillPrint, setDidAutofillPrint] = useState(Boolean(sourceItem?.printName));
   const [showPrintSuggestions, setShowPrintSuggestions] = useState(true);
   const [debouncedPrintQuery, setDebouncedPrintQuery] = useState((existing?.printName ?? '').trim());
+  const [sizePickerSection, setSizePickerSection] = useState<'AGE' | 'ALPHA' | 'CUSTOM' | 'SHOE'>(
+    (sourceItem?.sizeScheme === 'ALPHA' ? 'ALPHA' : sourceItem?.sizeScheme === 'SHOE' ? 'SHOE' : sourceItem?.sizeScheme === 'CUSTOM' ? 'CUSTOM' : 'AGE'),
+  );
   const deepLinkUrlRef = useRef(route.params?.url?.trim() || '');
+  const prevCategoryRef = useRef<string | undefined>(undefined);
   const autoUnfurlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestAutoRequestUrlRef = useRef('');
   const lastAutoSuccessUrlRef = useRef('');
@@ -344,6 +367,14 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     return Array.from(freq.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
   }, [quickMode, childId, childItems, items, clothingType]);
   const selectedChild = useMemo(() => children.find((entry) => entry.id === childId), [children, childId]);
+  const sizeUiModel = useMemo(
+    () => getSizeUIModel({ categoryIdOrName: category || clothingType, shoeSystem: selectedChild?.shoeSizeSystem ?? 'US_SHOE' }),
+    [category, clothingType, selectedChild?.shoeSizeSystem],
+  );
+  const sizePickerSectionOptions = useMemo(
+    () => sizeUiModel.sections.map((section) => ({ key: section.key, title: section.title, options: section.options ?? [] })),
+    [sizeUiModel],
+  );
   const childCurrentSizeText = useMemo(() => getChildCurrentSizeText(selectedChild), [selectedChild]);
   const childNextSizeText = useMemo(() => getChildNextSizeText(selectedChild), [selectedChild]);
   const suggestedSizeChoices = useMemo(() => {
@@ -375,6 +406,32 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => clearTimeout(handle);
   }, [printName, title]);
 
+  const applySizeValue = React.useCallback(
+    (rawValue: string, explicitScheme?: ItemSizeScheme) => {
+      const nextRaw = rawValue;
+      const nextNormalized = normalizeStructuredSize(nextRaw || '');
+      const nextType: ItemSizeType = sizeUiModel.sizeType;
+      const nextSystem: ItemSizeSystem = (sizeUiModel.sizeSystem === 'US_SHOE' ? 'US_SHOE' : 'APPAREL') as ItemSizeSystem;
+      const inferred = (explicitScheme ?? inferSizeScheme(nextRaw || '')) as ItemSizeScheme;
+      setSize(nextRaw);
+      setSizeRaw(nextRaw);
+      setSizeNormalized(nextNormalized);
+      setSizeType(nextType);
+      setSizeSystem(nextSystem);
+      setSizeScheme(inferred);
+      if (!fitBinTouched) {
+        setFitBin(
+          computeDefaultFitBin({
+            sizeType: nextType,
+            sizeNormalized: nextNormalized,
+            kid: selectedChild ?? {},
+          }),
+        );
+      }
+    },
+    [fitBinTouched, selectedChild, sizeUiModel.sizeSystem, sizeUiModel.sizeType],
+  );
+
   useEffect(() => {
     if (!category) setCategory(useCategoryDefault(clothingType));
   }, [category, clothingType]);
@@ -386,10 +443,37 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [category, clothingType]);
 
   useEffect(() => {
-    if (quickMode && !existing && !size.trim() && defaultWearingSize) {
-      setSize(defaultWearingSize);
+    const categoryKey = category || clothingType;
+    if (!categoryKey) return;
+    if (prevCategoryRef.current === undefined) {
+      prevCategoryRef.current = categoryKey;
+      return;
     }
-  }, [quickMode, existing, size, defaultWearingSize]);
+    if (prevCategoryRef.current === categoryKey) return;
+    prevCategoryRef.current = categoryKey;
+    setSize('');
+    setSizeRaw('');
+    setSizeNormalized('');
+    setSizeType(sizeUiModel.sizeType);
+    setSizeSystem((sizeUiModel.sizeSystem === 'US_SHOE' ? 'US_SHOE' : 'APPAREL') as ItemSizeSystem);
+    setSizeScheme(undefined);
+    if (!fitBinTouched) {
+      setFitBin('unsure');
+    }
+    const defaultSection = sizeUiModel.sizeType === 'shoe' ? 'SHOE' : 'AGE';
+    setSizePickerSection(defaultSection);
+  }, [category, clothingType, fitBinTouched, sizeUiModel.sizeSystem, sizeUiModel.sizeType]);
+
+  useEffect(() => {
+    if (sizeUiModel.sizeType === 'shoe' && !['SHOE', 'CUSTOM'].includes(sizePickerSection)) setSizePickerSection('SHOE');
+    if (sizeUiModel.sizeType === 'apparel' && sizePickerSection === 'SHOE') setSizePickerSection('AGE');
+  }, [sizeUiModel.sizeType, sizePickerSection]);
+
+  useEffect(() => {
+    if (quickMode && !existing && !size.trim() && defaultWearingSize) {
+      applySizeValue(defaultWearingSize);
+    }
+  }, [quickMode, existing, size, defaultWearingSize, applySizeValue]);
 
   useEffect(() => {
     if (!storageLocationId) return;
@@ -601,6 +685,12 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       clothingTypeLabelFallback: clothingType,
       size,
       sizeNormalized,
+      sizeType,
+      sizeSystem,
+      sizeScheme,
+      sizeRaw,
+      fitBin,
+      fitBinTouched,
       category,
       storageLocationId,
       brandFit,
@@ -718,6 +808,10 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     }
     if (existing) {
       await updateItem(existing.id, payload);
+      if (payload.imageUrl && !/^https?:\/\//i.test(payload.imageUrl.trim())) {
+        // Local photo/screenshot replacements should supersede any previously cached remote image.
+        await updateItemCachedImage(existing.id, '');
+      }
       await maybeCacheSavedImage(existing.id, payload.imageUrl);
       navigation.replace('ItemDetail', { itemId: existing.id });
       return;
@@ -787,7 +881,19 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     setImageTouched(false);
     setExtraImageUrls('');
     setSize(defaultWearingSize || '');
+    setSizeRaw(defaultWearingSize || '');
     setSizeNormalized('');
+    setSizeType(undefined);
+    setSizeSystem(undefined);
+    setSizeScheme(undefined);
+    setFitBinTouched(false);
+    setFitBin(
+      computeDefaultFitBin({
+        sizeType: sizeUiModel.sizeType,
+        sizeNormalized: normalizeStructuredSize(defaultWearingSize || ''),
+        kid: selectedChild ?? {},
+      }),
+    );
     setBrandSizeNote('');
     setFabric('');
     setBrandFit(undefined);
@@ -959,7 +1065,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     <Screen>
       {!existing ? (
         <Pressable onPress={() => setQuickMode((prev) => !prev)}>
-          <Text style={styles.modeSwitch}>{quickMode ? 'Switch to Full Details' : 'Switch to Ultra-Fast Add'}</Text>
+          <Text style={styles.modeSwitch}>{quickMode ? 'Switch to Detailed View' : 'Switch to Simple View'}</Text>
         </Pressable>
       ) : null}
 
@@ -1128,7 +1234,35 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         />
       ) : null}
 
-      <FormInput label="Size" value={size} onChangeText={setSize} placeholder={defaultWearingSize ? `e.g. ${defaultWearingSize}` : 'e.g. 5T'} />
+      <ChipSelector
+        label={sizeUiModel.sizeType === 'shoe' ? 'Shoe Size Type' : 'Size Type'}
+        options={sizePickerSectionOptions.map((section) => section.title)}
+        value={sizePickerSectionOptions.find((section) => section.key === sizePickerSection)?.title}
+        onChange={(title) => {
+          const next = sizePickerSectionOptions.find((section) => section.title === title);
+          if (!next) return;
+          setSizePickerSection(next.key);
+        }}
+      />
+      {sizePickerSection !== 'CUSTOM' && (
+        <View style={styles.sizeGrid}>
+          {(sizePickerSectionOptions.find((section) => section.key === sizePickerSection)?.options ?? []).slice(0, 20).map((choice) => (
+            <Pressable
+              key={`structured-size-${sizePickerSection}-${choice}`}
+              style={[styles.suggestionPill, normalizeText(size) === normalizeText(choice) ? styles.sizeChoiceActive : null]}
+              onPress={() => applySizeValue(choice, sizePickerSection === 'SHOE' ? 'SHOE' : sizePickerSection)}
+            >
+              <Text style={[styles.suggestionText, normalizeText(size) === normalizeText(choice) ? styles.sizeChoiceTextActive : null]}>{choice}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+      <FormInput
+        label={sizeUiModel.sizeType === 'shoe' ? 'Shoe size' : 'Size'}
+        value={size}
+        onChangeText={(value) => applySizeValue(value, sizePickerSection === 'SHOE' ? 'SHOE' : sizePickerSection === 'CUSTOM' ? 'CUSTOM' : undefined)}
+        placeholder={defaultWearingSize ? `e.g. ${defaultWearingSize}` : (sizeUiModel.sizeType === 'shoe' ? 'e.g. 10C' : 'e.g. 5T')}
+      />
       {(childCurrentSizeText || childNextSizeText || suggestedSizeChoices.length > 0) ? (
         <View style={styles.suggestionWrap}>
           {(childCurrentSizeText || childNextSizeText) ? (
@@ -1136,7 +1270,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
               {childCurrentSizeText ? (
                 <Pressable
                   style={[styles.suggestionPill, normalizeText(size) === normalizeText(childCurrentSizeText) ? styles.sizeChoiceActive : null]}
-                  onPress={() => setSize(childCurrentSizeText)}
+                  onPress={() => applySizeValue(childCurrentSizeText)}
                 >
                   <Text style={[styles.suggestionText, normalizeText(size) === normalizeText(childCurrentSizeText) ? styles.sizeChoiceTextActive : null]}>
                     Now: {childCurrentSizeText}
@@ -1146,7 +1280,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
               {childNextSizeText ? (
                 <Pressable
                   style={[styles.suggestionPill, normalizeText(size) === normalizeText(childNextSizeText) ? styles.sizeChoiceActive : null]}
-                  onPress={() => setSize(childNextSizeText)}
+                  onPress={() => applySizeValue(childNextSizeText)}
                 >
                   <Text style={[styles.suggestionText, normalizeText(size) === normalizeText(childNextSizeText) ? styles.sizeChoiceTextActive : null]}>
                     Next: {childNextSizeText}
@@ -1163,7 +1297,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                 <Pressable
                   key={`inline-size-${choice}`}
                   style={[styles.suggestionPill, normalizeText(size) === normalizeText(choice) ? styles.sizeChoiceActive : null]}
-                  onPress={() => setSize(choice)}
+                  onPress={() => applySizeValue(choice)}
                 >
                   <Text style={[styles.suggestionText, normalizeText(size) === normalizeText(choice) ? styles.sizeChoiceTextActive : null]}>{choice}</Text>
                 </Pressable>
@@ -1172,6 +1306,17 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         </View>
       ) : null}
       <PrimaryButton label="More Sizes" variant="secondary" onPress={() => setShowSizePickerModal(true)} />
+      <ChipSelector
+        label="Fit Bin"
+        options={fitBinOptions.map((option) => fitBinLabels[option])}
+        value={fitBinLabels[fitBin]}
+        onChange={(label) => {
+          const next = fitBinOptions.find((option) => fitBinLabels[option] === label);
+          if (!next) return;
+          setFitBin(next);
+          setFitBinTouched(true);
+        }}
+      />
 
       {!quickMode ? (
         <>
@@ -1282,7 +1427,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                   <Pressable
                     style={styles.suggestionPill}
                     onPress={() => {
-                      setSize(childCurrentSizeText);
+                      applySizeValue(childCurrentSizeText);
                       setShowSizePickerModal(false);
                     }}
                   >
@@ -1293,7 +1438,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                   <Pressable
                     style={styles.suggestionPill}
                     onPress={() => {
-                      setSize(childNextSizeText);
+                      applySizeValue(childNextSizeText);
                       setShowSizePickerModal(false);
                     }}
                   >
@@ -1309,7 +1454,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                     key={`size-${choice}`}
                     style={[styles.suggestionPill, normalizeText(size) === normalizeText(choice) ? styles.sizeChoiceActive : null]}
                     onPress={() => {
-                      setSize(choice);
+                      applySizeValue(choice);
                       setShowSizePickerModal(false);
                     }}
                   >
