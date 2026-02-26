@@ -75,7 +75,9 @@ export const DraggableCategoryPrefsEditor: React.FC<Props> = ({ title, ordered, 
   return (
     <View style={{ gap: 8 }}>
       <Text style={{ fontWeight: '700', color: theme.colors.textPrimary, fontFamily: theme.fonts.serif, fontSize: 18 }}>{title}</Text>
-      <Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>Drag the handle to reorder. Hide categories you do not use.</Text>
+      <Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>
+        Drag the handle to reorder. Use Hide/Show to hide or unhide categories.
+      </Text>
       {localOrder.map((category) => {
         const isHidden = hidden.has(category);
         const isDragging = draggingCategory === category;
@@ -126,4 +128,3 @@ export const DraggableCategoryPrefsEditor: React.FC<Props> = ({ title, ordered, 
     </View>
   );
 };
-

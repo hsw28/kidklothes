@@ -308,6 +308,30 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
       marginTop: 8,
       gap: 6,
     },
+    duplicateLinkRow: {
+      minHeight: 40,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceMuted,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    duplicateLinkText: {
+      flex: 1,
+      fontSize: 14,
+      color: theme.colors.textPrimary,
+      fontWeight: '600',
+    },
+    duplicateLinkChevron: {
+      fontSize: 14,
+      color: theme.colors.accentPeriwinkle,
+      fontWeight: '700',
+    },
   });
 
   if (!selectedChild || !summary) {
@@ -440,10 +464,15 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
                     }
                     accessibilityRole="button"
                     accessibilityLabel={`Open duplicate print group ${group.printName}`}
+                    style={({ pressed }) => [
+                      styles.duplicateLinkRow,
+                      pressed ? { opacity: 0.9 } : null,
+                    ]}
                   >
-                    <Text style={styles.meta}>
+                    <Text style={styles.duplicateLinkText}>
                       {group.printName}: {group.sizes.join(', ')}
                     </Text>
+                    <Text style={styles.duplicateLinkChevron}>›</Text>
                   </Pressable>
                 ))
               ) : (
@@ -480,10 +509,15 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
                     }
                     accessibilityRole="button"
                     accessibilityLabel={`Open duplicate style group ${group.label}`}
+                    style={({ pressed }) => [
+                      styles.duplicateLinkRow,
+                      pressed ? { opacity: 0.9 } : null,
+                    ]}
                   >
-                    <Text style={styles.meta}>
+                    <Text style={styles.duplicateLinkText}>
                       {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.join(', ')}
                     </Text>
+                    <Text style={styles.duplicateLinkChevron}>›</Text>
                   </Pressable>
                 ))
               ) : (

@@ -76,6 +76,14 @@ type TileProps = {
   isReorderMode?: boolean;
   panHandlers?: any;
   onTileLayout?: (category: ClosetCategory, x: number, y: number, width: number, height: number) => void;
+  canMoveLeft?: boolean;
+  canMoveRight?: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMoveLeft?: () => void;
+  onMoveRight?: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 };
 
 const ClosetTileComponent: React.FC<TileProps> = ({
@@ -93,6 +101,14 @@ const ClosetTileComponent: React.FC<TileProps> = ({
   isReorderMode = false,
   panHandlers,
   onTileLayout,
+  canMoveLeft = false,
+  canMoveRight = false,
+  canMoveUp = false,
+  canMoveDown = false,
+  onMoveLeft,
+  onMoveRight,
+  onMoveUp,
+  onMoveDown,
 }) => {
   const theme = useAppTheme();
   const scale = useRef(new Animated.Value(1)).current;
@@ -293,6 +309,36 @@ const ClosetTileComponent: React.FC<TileProps> = ({
       color: theme.colors.textSecondary,
       letterSpacing: 0.3,
     },
+    reorderControls: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      zIndex: 3,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      width: 58,
+      gap: 4,
+      justifyContent: 'center',
+    },
+    reorderCtrlBtn: {
+      width: 27,
+      height: 24,
+      borderRadius: 8,
+      backgroundColor: theme.colors.surfaceMuted,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    reorderCtrlBtnDisabled: {
+      opacity: 0.35,
+    },
+    reorderCtrlTxt: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
+      lineHeight: 14,
+    },
     heroDots: {
       position: 'absolute',
       alignSelf: 'center',
@@ -394,7 +440,47 @@ const ClosetTileComponent: React.FC<TileProps> = ({
       >
         {isReorderMode ? (
           <View style={styles.reorderBadge}>
-            <Text style={styles.reorderBadgeText}>Drag</Text>
+            <Text style={styles.reorderBadgeText}>Move</Text>
+          </View>
+        ) : null}
+        {isReorderMode ? (
+          <View style={styles.reorderControls}>
+            <Pressable
+              onPress={onMoveUp}
+              disabled={!canMoveUp}
+              style={[styles.reorderCtrlBtn, !canMoveUp ? styles.reorderCtrlBtnDisabled : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Move ${closetLabel[category]} up`}
+            >
+              <Text style={styles.reorderCtrlTxt}>↑</Text>
+            </Pressable>
+            <Pressable
+              onPress={onMoveLeft}
+              disabled={!canMoveLeft}
+              style={[styles.reorderCtrlBtn, !canMoveLeft ? styles.reorderCtrlBtnDisabled : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Move ${closetLabel[category]} left`}
+            >
+              <Text style={styles.reorderCtrlTxt}>←</Text>
+            </Pressable>
+            <Pressable
+              onPress={onMoveRight}
+              disabled={!canMoveRight}
+              style={[styles.reorderCtrlBtn, !canMoveRight ? styles.reorderCtrlBtnDisabled : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Move ${closetLabel[category]} right`}
+            >
+              <Text style={styles.reorderCtrlTxt}>→</Text>
+            </Pressable>
+            <Pressable
+              onPress={onMoveDown}
+              disabled={!canMoveDown}
+              style={[styles.reorderCtrlBtn, !canMoveDown ? styles.reorderCtrlBtnDisabled : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Move ${closetLabel[category]} down`}
+            >
+              <Text style={styles.reorderCtrlTxt}>↓</Text>
+            </Pressable>
           </View>
         ) : null}
         <Animated.View style={[styles.badges, { opacity: badgeOpacity }]}>
@@ -416,8 +502,8 @@ const ClosetTileComponent: React.FC<TileProps> = ({
         </Animated.View>
         <View
           style={styles.heroWrap}
-          onStartShouldSetResponderCapture={() => heroImages.length > 1}
-          onMoveShouldSetResponderCapture={() => heroImages.length > 1}
+          onStartShouldSetResponderCapture={() => false}
+          onMoveShouldSetResponderCapture={() => false}
           onLayout={(event) => {
             const nextWidth = Math.round(event.nativeEvent.layout.width);
             if (nextWidth && nextWidth !== heroWidth) setHeroWidth(nextWidth);
@@ -425,6 +511,15 @@ const ClosetTileComponent: React.FC<TileProps> = ({
         >
           <View style={styles.heroMatte} pointerEvents="none" />
           {heroImages.length > 0 ? (
+            isReorderMode ? (
+              <View style={[styles.heroPage, heroWidth ? { width: heroWidth } : { width: '100%' }]}>
+                <RemoteImage
+                  uri={heroImages[0]}
+                  style={[styles.heroImage, heroWidth ? { width: heroWidth } : { width: '100%' }]}
+                  fallbackLabel={closetLabel[category]}
+                />
+              </View>
+            ) : (
             <FlatList
               data={heroImages}
               keyExtractor={(uri, index) => `${category}-${uri}-${index}`}
@@ -439,9 +534,9 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               scrollEventThrottle={16}
               showsHorizontalScrollIndicator={false}
               style={styles.heroPager}
-              onTouchStart={(event) => { heroDidDragRef.current = false; event.stopPropagation(); }}
-              onTouchMove={(event) => { heroDidDragRef.current = true; event.stopPropagation(); }}
-              onTouchEnd={(event) => event.stopPropagation()}
+              scrollEnabled={!isReorderMode && heroImages.length > 1}
+              onTouchStart={() => { heroDidDragRef.current = false; }}
+              onScrollBeginDrag={() => { heroDidDragRef.current = true; }}
               onMomentumScrollEnd={(event) => {
                 const width = heroWidth || event.nativeEvent.layoutMeasurement.width || 1;
                 const nextIndex = Math.round(event.nativeEvent.contentOffset.x / width);
@@ -457,6 +552,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
                 </View>
               )}
             />
+            )
           ) : (
             <>
               <View style={styles.heroPlaceholderStackBack} />
@@ -466,7 +562,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               </View>
             </>
           )}
-          {heroImages.length > 1 ? (
+          {heroImages.length > 1 && !isReorderMode ? (
             <>
               <View style={styles.heroDots} pointerEvents="none">
                 {heroImages.slice(0, 5).map((_, index) => (
@@ -518,6 +614,14 @@ const ClosetTile = React.memo(ClosetTileComponent, (prev, next) =>
   && prev.isReorderMode === next.isReorderMode
   && prev.panHandlers === next.panHandlers
   && prev.onTileLayout === next.onTileLayout
+  && prev.canMoveLeft === next.canMoveLeft
+  && prev.canMoveRight === next.canMoveRight
+  && prev.canMoveUp === next.canMoveUp
+  && prev.canMoveDown === next.canMoveDown
+  && prev.onMoveLeft === next.onMoveLeft
+  && prev.onMoveRight === next.onMoveRight
+  && prev.onMoveUp === next.onMoveUp
+  && prev.onMoveDown === next.onMoveDown
   && shallowEqualThumbs(prev.thumbs, next.thumbs),
 );
 
@@ -720,6 +824,30 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     meta: {
       fontSize: 13,
       color: theme.colors.textSecondary,
+    },
+    duplicateLinkRow: {
+      minHeight: 40,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceMuted,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    duplicateLinkText: {
+      flex: 1,
+      fontSize: 14,
+      color: theme.colors.textPrimary,
+      fontWeight: '600',
+    },
+    duplicateLinkChevron: {
+      fontSize: 14,
+      color: theme.colors.accentPeriwinkle,
+      fontWeight: '700',
     },
     headerAction: {
       color: theme.colors.accentPeriwinkle,
@@ -1450,6 +1578,27 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     return next;
   }, []);
 
+  const moveCategoryByDirection = useCallback((category: ClosetCategory, direction: 'left' | 'right' | 'up' | 'down') => {
+    const current = tileOrderRef.current;
+    const from = current.indexOf(category);
+    if (from < 0) return;
+    const row = Math.floor(from / CLOSET_GRID_COLUMNS);
+    const col = from % CLOSET_GRID_COLUMNS;
+    let targetRow = row;
+    let targetCol = col;
+    if (direction === 'left') targetCol -= 1;
+    if (direction === 'right') targetCol += 1;
+    if (direction === 'up') targetRow -= 1;
+    if (direction === 'down') targetRow += 1;
+    if (targetCol < 0 || targetCol >= CLOSET_GRID_COLUMNS || targetRow < 0) return;
+    const to = targetRow * CLOSET_GRID_COLUMNS + targetCol;
+    if (to < 0 || to >= current.length) return;
+    const next = moveCategoryInList(current, from, to);
+    if (next === current) return;
+    tileOrderRef.current = next;
+    setTileGridOrder(next);
+  }, [moveCategoryInList]);
+
   const persistVisibleCategoryOrder = useCallback(
     async (nextVisible: ClosetCategory[]) => {
       const full = sanitizeCategoryOrder(settings.closetCategoryOrder, { includeOther: true, fallback: closetCategories });
@@ -1802,19 +1951,32 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       {showTileGridReorderMode ? (
         <Card>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <Text style={styles.meta}>Drag tiles to reorder categories</Text>
-            <Pressable
-              onPress={() => {
-                setShowTileGridReorderMode(false);
-                tileOrderRef.current = visibleCategories;
-                setTileGridOrder(visibleCategories);
-              }}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Done reordering categories"
-            >
-              <Text style={{ color: theme.colors.accentPeriwinkle, fontSize: 12, fontWeight: '700' }}>Done</Text>
-            </Pressable>
+            <Text style={styles.meta}>Use arrows on tiles to reorder categories</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Pressable
+                onPress={() => {
+                  const resetVisible = closetCategories.filter((entry) => visibleCategories.includes(entry));
+                  tileOrderRef.current = resetVisible;
+                  setTileGridOrder(resetVisible);
+                }}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Reset category order"
+              >
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: '700' }}>Reset Order</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  void persistVisibleCategoryOrder([...tileOrderRef.current]);
+                  setShowTileGridReorderMode(false);
+                }}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Done reordering categories"
+              >
+                <Text style={{ color: theme.colors.accentPeriwinkle, fontSize: 12, fontWeight: '700' }}>Done</Text>
+              </Pressable>
+            </View>
           </View>
         </Card>
       ) : null}
@@ -1824,6 +1986,13 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           const count = counts[category] ?? 0;
           const thumbs = thumbnailsByCategory.get(category) ?? [];
           const signals = tileSignals.get(category) ?? { hasUps: false, hasDupes: false, hasStyleDupes: false };
+          const reorderIndex = showTileGridReorderMode ? renderedCategories.indexOf(category) : -1;
+          const row = reorderIndex >= 0 ? Math.floor(reorderIndex / CLOSET_GRID_COLUMNS) : -1;
+          const col = reorderIndex >= 0 ? reorderIndex % CLOSET_GRID_COLUMNS : -1;
+          const canMoveLeft = reorderIndex >= 0 && col > 0;
+          const canMoveRight = reorderIndex >= 0 && col < CLOSET_GRID_COLUMNS - 1 && reorderIndex + 1 < renderedCategories.length;
+          const canMoveUp = reorderIndex >= CLOSET_GRID_COLUMNS;
+          const canMoveDown = reorderIndex >= 0 && (row + 1) * CLOSET_GRID_COLUMNS + col < renderedCategories.length;
 
           return (
             <ClosetTile
@@ -1839,8 +2008,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               activeBrandName={activeBrandName}
               onLongPress={showTileGridReorderMode ? undefined : () => openCategoryTileMenu(category)}
               isReorderMode={showTileGridReorderMode}
-              panHandlers={showTileGridReorderMode ? getTileResponder(category).panHandlers : undefined}
-              onTileLayout={showTileGridReorderMode ? onTileLayout : undefined}
+              panHandlers={undefined}
+              onTileLayout={undefined}
+              canMoveLeft={canMoveLeft}
+              canMoveRight={canMoveRight}
+              canMoveUp={canMoveUp}
+              canMoveDown={canMoveDown}
+              onMoveLeft={canMoveLeft ? () => moveCategoryByDirection(category, 'left') : undefined}
+              onMoveRight={canMoveRight ? () => moveCategoryByDirection(category, 'right') : undefined}
+              onMoveUp={canMoveUp ? () => moveCategoryByDirection(category, 'up') : undefined}
+              onMoveDown={canMoveDown ? () => moveCategoryByDirection(category, 'down') : undefined}
               onPress={() => {
                 if (showTileGridReorderMode) return;
                 if (count === 0) {
@@ -1948,7 +2125,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               accessibilityLabel="Edit closet categories"
             >
               <Text style={{ color: theme.colors.accentPeriwinkle, fontSize: 12, fontWeight: '700' }}>
-                {showCategoryLayoutEditor ? 'Done Editing' : 'Edit Categories'}
+                {showCategoryLayoutEditor ? 'Done Editing' : 'Edit Categories (Hide/Show)'}
               </Text>
             </Pressable>
         </View>
@@ -2132,10 +2309,15 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={`Open duplicate print group ${group.printName}`}
+                    style={({ pressed }) => [
+                      styles.duplicateLinkRow,
+                      pressed ? { opacity: 0.9 } : null,
+                    ]}
                   >
-                    <Text style={styles.meta}>
+                    <Text style={styles.duplicateLinkText}>
                       {group.printName}: {group.sizes.join(', ')}
                     </Text>
+                    <Text style={styles.duplicateLinkChevron}>›</Text>
                   </Pressable>
                 ))
               ) : (
@@ -2174,10 +2356,15 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={`Open duplicate style group ${group.label}`}
+                    style={({ pressed }) => [
+                      styles.duplicateLinkRow,
+                      pressed ? { opacity: 0.9 } : null,
+                    ]}
                   >
-                    <Text style={styles.meta}>
+                    <Text style={styles.duplicateLinkText}>
                       {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.join(', ')}
                     </Text>
+                    <Text style={styles.duplicateLinkChevron}>›</Text>
                   </Pressable>
                 ))
               ) : (
