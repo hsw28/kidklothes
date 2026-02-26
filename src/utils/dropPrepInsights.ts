@@ -41,8 +41,8 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
   const typeCountsNow = initCategoryCounts();
   const typeCountsNext = initCategoryCounts();
 
-  const printGroups = new Map<string, Set<string>>();
-  const styleGroups = new Map<string, Set<string>>();
+  const printGroups = new Map<string, number>();
+  const styleGroups = new Map<string, number>();
 
   owned.forEach((item) => {
     const category = closetCategoryForItem(item);
@@ -56,17 +56,13 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
     const canonicalPrint = item.printNameNorm || normalizePrintName(item.printName ?? '');
     if (canonicalPrint) {
       const key = canonicalPrint;
-      const sizes = printGroups.get(key) ?? new Set<string>();
-      sizes.add(normalize(item.size));
-      printGroups.set(key, sizes);
+      printGroups.set(key, (printGroups.get(key) ?? 0) + 1);
     }
 
     const styleKey = normalize(item.styleName || item.title || '');
     if (styleKey) {
       const key = `${styleKey}|${normalize(item.brand ?? '')}|${category}`;
-      const sizes = styleGroups.get(key) ?? new Set<string>();
-      sizes.add(normalize(item.size));
-      styleGroups.set(key, sizes);
+      styleGroups.set(key, (styleGroups.get(key) ?? 0) + 1);
     }
   });
 
@@ -79,8 +75,8 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
   }).length;
 
   const sizeUpsTotal = closetCategories.reduce((sum, category) => sum + typeCountsNext[category], 0);
-  const printDupGroupCount = Array.from(printGroups.values()).filter((sizes) => sizes.size > 1).length;
-  const styleDupGroupCount = Array.from(styleGroups.values()).filter((sizes) => sizes.size > 1).length;
+  const printDupGroupCount = Array.from(printGroups.values()).filter((count) => count > 1).length;
+  const styleDupGroupCount = Array.from(styleGroups.values()).filter((count) => count > 1).length;
 
   return {
     typeCountsNow,

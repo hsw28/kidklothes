@@ -14,6 +14,7 @@ import { ClosetCategory, closetCategoryToClothingType, closetLabel } from '@/uti
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { categoryForItem, getChildItems, getDuplicateAdjacentGroups, getSizeUpCounts, getWearingNowByCategory, sizeToNumber } from '@/utils/fitInsights';
 import { normalizePrintName } from '@/utils/printName';
+import { normalizeStyleName } from '@/utils/styleName';
 import { formatSizeDisplay, getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
 import { useAppTheme } from '@/theme';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
@@ -278,7 +279,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       ? brandFiltered.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : brandFiltered;
     const styleFiltered = styleFilter !== 'All'
-      ? seasonFiltered.filter((item) => (item.styleName ?? '').toLowerCase().trim() === styleFilter.toLowerCase().trim())
+      ? seasonFiltered.filter((item) => normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter))
       : seasonFiltered;
     const wearingNowAll = getWearingNowByCategory(childData.items.filter((item) => item.status === 'owned'), child);
     const currentSize = wearingNowAll.get(category);
@@ -324,7 +325,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     childData.items
       .filter((item) => item.status === 'owned' && closetCategoryForItem(item) === category && (item.printNameNorm || item.printName?.trim()))
       .filter((item) => (brandFilter === 'All' ? true : item.brandTags.includes(brandFilter) || (item.brand ?? '').toLowerCase().trim() === brandFilter.toLowerCase().trim()))
-      .filter((item) => (styleFilter === 'All' ? true : (item.styleName ?? '').toLowerCase().trim() === styleFilter.toLowerCase().trim()))
+      .filter((item) => (styleFilter === 'All' ? true : normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter)))
       .filter((item) => (season ? item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()) : true))
       .forEach((item) => {
         const key = item.printNameNorm || normalizePrintName(item.printName ?? '');

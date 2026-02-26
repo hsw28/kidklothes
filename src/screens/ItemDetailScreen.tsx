@@ -110,7 +110,6 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <Text style={styles.label}>Size: {item.size || 'N/A'}</Text>
         <Text style={styles.label}>Status: {item.status}</Text>
         {item.brand ? <Text style={styles.label}>Brand: {item.brand}</Text> : null}
-        {item.brandTags.length > 0 ? <Text style={styles.label}>Brand tags: {item.brandTags.join(', ')}</Text> : null}
         {item.sourceDomain ? <Text style={styles.label}>Source: {item.sourceDomain}</Text> : null}
         {item.clickCount > 0 ? <Text style={styles.label}>Outbound clicks: {item.clickCount}</Text> : null}
         {brandFitLabel(item.brandFit) ? <Text style={styles.label}>Runs: {brandFitLabel(item.brandFit)}</Text> : null}

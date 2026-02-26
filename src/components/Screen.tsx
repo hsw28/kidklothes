@@ -11,9 +11,10 @@ interface ScreenProps {
   style?: ViewStyle;
   disableDataStateGate?: boolean;
   overlay?: React.ReactNode;
+  scrollRef?: React.RefObject<ScrollView | null>;
 }
 
-export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, scrollEnabled = true, style, disableDataStateGate = false, overlay }) => {
+export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, scrollEnabled = true, style, disableDataStateGate = false, overlay, scrollRef }) => {
   const theme = useAppTheme();
   const data = useData();
   const styles = StyleSheet.create({
@@ -92,7 +93,7 @@ export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, scrollE
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.root}>
-          <ScrollView scrollEnabled={scrollEnabled} contentContainerStyle={[styles.content, style]}>{children}</ScrollView>
+          <ScrollView ref={scrollRef} scrollEnabled={scrollEnabled} contentContainerStyle={[styles.content, style]}>{children}</ScrollView>
           {overlay}
         </View>
       </SafeAreaView>

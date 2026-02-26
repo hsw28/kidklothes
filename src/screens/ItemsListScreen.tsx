@@ -121,7 +121,6 @@ const ItemListRowComponent: React.FC<ItemListRowProps> = ({
               {selectionMode ? <Text style={rowStyles.selectionText}>{isSelected ? 'Selected' : 'Tap to select'}</Text> : null}
             </View>
             {!!brand ? <Text style={rowStyles.brand}>Brand: {brand}</Text> : null}
-            {brandTags.length > 0 ? <Text style={rowStyles.meta}>Brand tags: {brandTags.join(', ')}</Text> : null}
             <View style={rowStyles.row}>
               <Text style={rowStyles.meta}>{childName}</Text>
               <Text style={rowStyles.meta}>Size {sizeLabel}</Text>
@@ -183,6 +182,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
   const [brandFilter, setBrandFilter] = useState<string>(route.params?.initialBrandId ?? 'All');
   const [wearFilter, setWearFilter] = useState<WearFilter>('All');
   const [query, setQuery] = useState(route.params?.initialQuery ?? '');
+  const [itemIdsFilter, setItemIdsFilter] = useState<string[] | undefined>(route.params?.initialItemIds);
   const [debouncedQuery, setDebouncedQuery] = useState('');
 
   const [captureUrl, setCaptureUrl] = useState('');
@@ -255,6 +255,10 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
     if (route.params?.initialQuery === undefined) return;
     setQuery(route.params.initialQuery);
   }, [route.params?.initialQuery]);
+  useEffect(() => {
+    if (route.params?.initialItemIds === undefined) return;
+    setItemIdsFilter(route.params.initialItemIds);
+  }, [route.params?.initialItemIds]);
 
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedQuery(query), 250);
@@ -340,6 +344,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [sizeBucketFilter, currentSizeText, nextSizeText]);
 
   const filtered = useMemo(() => items.filter((item) => {
+    if (itemIdsFilter && itemIdsFilter.length > 0 && !itemIdsFilter.includes(item.id)) return false;
     const links = linksByItem.get(item.id) ?? [];
     const childSpecificLink = childId ? links.find((link) => link.childId === childId) : undefined;
     const itemCategory = closetCategoryForItem(item);
@@ -388,6 +393,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
     dayEnd,
     sinceHoursStart,
     sizeFilter,
+    itemIdsFilter,
     debouncedQuery,
   ]);
 

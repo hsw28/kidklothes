@@ -1,5 +1,6 @@
 import { BrandFit, Condition, ItemStatus, KidFit, PrintAlias, ItemSizeScheme, ItemSizeSystem, ItemSizeType, FitBin } from '@/models';
 import { ClosetCategory, closetCategoryToClothingType, closetLabel } from '@/utils/categories';
+import { normalizeWhitespace } from '@/utils/normalize';
 import { resolveOutboundLink } from '@/utils/outbound';
 import { resolvePrintName } from '@/utils/printName';
 
@@ -95,6 +96,8 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
   );
 
   const printNameNorm = resolvePrintName(input.printName || '', input.printAliases);
+  const styleNameDisplay = input.styleName.trim() ? normalizeWhitespace(input.styleName) : '';
+  const printNameDisplay = input.printName.trim() ? normalizeWhitespace(input.printName) : '';
   const derivedType = closetCategoryToClothingType(input.category);
   const baseTitle = input.quickMode
     ? `${input.size.trim() || 'New'} ${input.category ? closetLabel[input.category] : input.clothingTypeLabelFallback}`
@@ -105,8 +108,8 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
     title: baseTitle,
     url: input.url || undefined,
     brand: (input.brandOverride ?? input.brand) || undefined,
-    styleName: input.styleName.trim() || undefined,
-    printName: input.printName || undefined,
+    styleName: styleNameDisplay || undefined,
+    printName: printNameDisplay || undefined,
     printNameNorm: printNameNorm || undefined,
     brandTags: input.brandTags
       .split(',')

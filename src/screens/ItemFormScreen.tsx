@@ -339,6 +339,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     (sourceItem?.sizeScheme === 'ALPHA' ? 'ALPHA' : sourceItem?.sizeScheme === 'SHOE' ? 'SHOE' : sourceItem?.sizeScheme === 'CUSTOM' ? 'CUSTOM' : 'AGE'),
   );
   const deepLinkUrlRef = useRef(route.params?.url?.trim() || '');
+  const imageTouchedRef = useRef(Boolean(sourceItem?.imageUrl || sourceItem?.cachedImageUri));
+  const imageUrlRef = useRef(existingPrimaryImage);
   const prevCategoryRef = useRef<string | undefined>(undefined);
   const autoUnfurlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestAutoRequestUrlRef = useRef('');
@@ -352,6 +354,12 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         .map((location) => ({ id: location.id, label: location.name })),
     [storageLocations, childId],
   );
+  useEffect(() => {
+    imageTouchedRef.current = imageTouched;
+  }, [imageTouched]);
+  useEffect(() => {
+    imageUrlRef.current = imageUrl;
+  }, [imageUrl]);
 
   const defaultWearingSize = useMemo(() => {
     if (!quickMode || !childId) return '';
@@ -590,8 +598,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     if (!preview.imageUrl && previewImages[0] && (preview.canonicalUrl || url || '').includes('katequinn.com')) {
       void logEvent('unfurl_kq_fallback_used', { kind: 'image', url: preview.canonicalUrl || url || '' });
     }
-    if (primaryImage && (!imageTouched || !imageUrl.trim() || imageUrl.trim() === autofillMetaRef.current.imageAutoValue)) {
+    const currentImageTouched = imageTouchedRef.current;
+    const currentImageUrl = imageUrlRef.current.trim();
+    if (primaryImage && (!currentImageTouched || !currentImageUrl || currentImageUrl === autofillMetaRef.current.imageAutoValue)) {
       setImageUrl(primaryImage);
+      imageUrlRef.current = primaryImage;
       autofillMetaRef.current.imageAutoValue = primaryImage;
       const extras = previewImages.filter((entry) => entry !== primaryImage).slice(0, 5);
       if (extras.length > 0) setExtraImageUrls(extras.join(', '));
@@ -681,7 +692,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       brand,
       styleName,
       printName,
-      brandTags,
+      brandTags: brand,
       imageUrl,
       extraImageUrls,
       clothingTypeLabelFallback: clothingType,
@@ -756,10 +767,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         if (!candidate.childIds.includes(childId)) return false;
         const candidateCanonical = candidate.printNameNorm || resolvePrintName(candidate.printName ?? '', printAliases);
         if (candidateCanonical !== normalizedPrint) return false;
-        return candidate.clothingType === clothingType;
+        return true;
       })
       .map((candidate) => {
         const reasons = ['Same print name'];
+        if (candidate.clothingType === clothingType) reasons.push('Same category');
         const candidateSize = sizeToNumber(candidate.size);
         if (normalizeText(candidate.size) === normalizeText(size)) {
           reasons.push('Same size');
@@ -851,7 +863,6 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             tags.trim() ||
             seasonTags.trim() ||
             extraImageUrls.trim() ||
-            (brandTags.trim() && normalizeText(brandTags) !== normalizeText(brand || '')) ||
             (url.trim() && titleTouched) ||
             (brand.trim() && brandTouched) ||
             imageTouched,
@@ -1012,6 +1023,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             const asset = await pickPhotoFromLibrary();
             if (!asset?.uri) return;
             if (__DEV__) console.log('[ItemForm] picked photo', asset);
+            imageTouchedRef.current = true;
+            imageUrlRef.current = asset.uri;
             setImageTouched(true);
             setImageUrl(asset.uri);
           })();
@@ -1024,6 +1037,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             const asset = await takePhotoWithCamera();
             if (!asset?.uri) return;
             if (__DEV__) console.log('[ItemForm] captured photo', asset);
+            imageTouchedRef.current = true;
+            imageUrlRef.current = asset.uri;
             setImageTouched(true);
             setImageUrl(asset.uri);
           })();
@@ -1187,7 +1202,6 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
               ))}
             </View>
           ) : null}
-          <FormInput label="Brand tags (comma-separated)" value={brandTags} onChangeText={setBrandTags} placeholder="hanna andersson, gap" />
           <Pressable onPress={() => setShowAdvancedMediaFields((prev) => !prev)}>
             <Text style={styles.modeSwitch}>{showAdvancedMediaFields ? 'Hide Advanced Image Fields' : 'Show Advanced Image Fields'}</Text>
           </Pressable>
@@ -1197,6 +1211,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                 label="Image URL"
                 value={imageUrl}
                 onChangeText={(value) => {
+                  imageTouchedRef.current = true;
+                  imageUrlRef.current = value;
                   setImageTouched(true);
                   setImageUrl(value);
                 }}
@@ -1217,7 +1233,17 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       </>
 
       {(quickMode || status !== 'wishlist') ? (
-        <PrimaryButton label="Replace Image from Photos/Screenshot" variant="secondary" onPress={chooseImageFromLibrary} />
+        <PrimaryButton
+          label={url.trim() ? 'Replace Photo' : 'Add Photo'}
+          variant="secondary"
+          onPress={chooseImageFromLibrary}
+        />
+      ) : null}
+      {imageUrl.trim() ? (
+        <Card>
+          <Text style={styles.previewDomain}>Selected Image</Text>
+          <RemoteImage uri={imageUrl.trim()} style={styles.previewImage} fallbackLabel={title || 'Item'} />
+        </Card>
       ) : null}
 
       <ChipSelector

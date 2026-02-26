@@ -23,6 +23,7 @@ export type ItemsStackParamList = {
         initialSizeBucket?: 'All' | 'now' | 'next';
         initialStorageLocationId?: ID;
         initialQuery?: string;
+        initialItemIds?: ID[];
       }
     | undefined;
   AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
@@ -60,6 +61,7 @@ export type ClosetStackParamList = {
         initialSizeBucket?: 'All' | 'now' | 'next';
         initialStorageLocationId?: ID;
         initialQuery?: string;
+        initialItemIds?: ID[];
       }
     | undefined;
   SellBin: undefined;

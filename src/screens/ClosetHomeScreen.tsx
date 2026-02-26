@@ -29,6 +29,7 @@ import {
 } from '@/utils/closetViewInsights';
 import { ClosetCategory, categoryGlyph, closetCategories, closetCategoryToClothingType, closetLabel, getCategoryEmptyMicrocopy, getConfiguredClosetCategories, sanitizeCategoryOrder, sanitizeHiddenCategories } from '@/utils/categories';
 import { normalizePrintName } from '@/utils/printName';
+import { normalizeStyleName } from '@/utils/styleName';
 import { formatPieceCount } from '@/utils/formatCounts';
 import { formatItemCategoryLabel, getBrandShortLabel } from '@/utils/itemLabels';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
@@ -1296,25 +1297,21 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       const scoped = ownedItems.filter((item) => closetCategoryForItem(item) === category).filter((item) => matchesBrand(item, brandId)).filter((item) => matchesSeason(item, seasonFilter));
       const next = sizeAnchors.nextByCategory.get(category);
       const hasUps = next ? scoped.some((item) => normalize(item.size) === normalize(next)) : false;
-      const printGroups = new Map<string, Set<string>>();
-      const styleGroups = new Map<string, Set<string>>();
+      const printGroups = new Map<string, number>();
+      const styleGroups = new Map<string, number>();
       scoped.forEach((item) => {
         const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
         if (!key) return;
-        const sizes = printGroups.get(key) ?? new Set<string>();
-        sizes.add(normalize(item.size));
-        printGroups.set(key, sizes);
+        printGroups.set(key, (printGroups.get(key) ?? 0) + 1);
       });
       scoped.forEach((item) => {
-        const styleKey = normalize(item.styleName || item.title || '');
+        const styleKey = normalizeStyleName(item.styleName || item.title || '');
         if (!styleKey) return;
         const key = `${styleKey}|${normalize(item.brand ?? '')}`;
-        const sizes = styleGroups.get(key) ?? new Set<string>();
-        sizes.add(normalize(item.size));
-        styleGroups.set(key, sizes);
+        styleGroups.set(key, (styleGroups.get(key) ?? 0) + 1);
       });
-      const hasDupes = Array.from(printGroups.values()).some((sizes) => sizes.size > 1);
-      const hasStyleDupes = Array.from(styleGroups.values()).some((sizes) => sizes.size > 1);
+      const hasDupes = Array.from(printGroups.values()).some((count) => count > 1);
+      const hasStyleDupes = Array.from(styleGroups.values()).some((count) => count > 1);
       result.set(category, { hasUps, hasDupes, hasStyleDupes });
     });
     return result;
@@ -1353,24 +1350,30 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     () => (selectedChild ? getSizeUpsStash(selectedChild.id, items, childItems, storageLocations, selectedChild).slice(0, 12) : []),
     [selectedChild, items, childItems, storageLocations],
   );
-  const duplicatePrints = useMemo(
-    () =>
-      (selectedChild ? getDuplicatePrintGroups(selectedChild.id, items, childItems, 40) : [])
-        .filter((group) =>
-          filteredOwnedItems.some((item) => {
-            const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
-            return key === normalizePrintName(group.printName);
-          }),
-        )
-        .slice(0, 8),
-    [selectedChild, items, childItems, filteredOwnedItems],
-  );
+  const duplicatePrints = useMemo(() => {
+    const groups = new Map<string, { printName: string; sizes: Set<string>; count: number }>();
+    filteredOwnedItems
+      .filter((item) => item.printNameNorm || item.printName?.trim())
+      .forEach((item) => {
+        const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
+        if (!key) return;
+        const prev = groups.get(key) ?? { printName: item.printName?.trim() || key, sizes: new Set<string>(), count: 0 };
+        prev.sizes.add(item.size);
+        prev.count += 1;
+        groups.set(key, prev);
+      });
+    return Array.from(groups.values())
+      .filter((entry) => entry.count > 1)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8)
+      .map((entry) => ({ printName: entry.printName, sizes: Array.from(entry.sizes), count: entry.count }));
+  }, [filteredOwnedItems]);
   const duplicateStyles = useMemo(() => {
     const groups = new Map<string, { label: string; brand?: string; sizes: Set<string>; count: number }>();
     filteredOwnedItems.forEach((item) => {
       const styleLabel = (item.styleName || item.title || '').trim();
       if (!styleLabel) return;
-      const styleKey = normalize(styleLabel);
+      const styleKey = normalizeStyleName(styleLabel);
       if (!styleKey) return;
       const brandLabel = (item.brand || item.brandTags[0] || '').trim();
       const key = `${styleKey}|${normalize(brandLabel)}`;
@@ -1380,7 +1383,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       groups.set(key, prev);
     });
     return Array.from(groups.values())
-      .filter((entry) => entry.sizes.size > 1)
+      .filter((entry) => entry.count > 1)
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
       .slice(0, 8)
       .map((entry) => ({
@@ -2108,9 +2111,32 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             {showDupes ? (
               duplicatePrints.length ? (
                 duplicatePrints.map((group) => (
-                  <Text key={`${group.printName}-${group.sizes.join('|')}`} style={styles.meta}>
-                    {group.printName}: {group.sizes.join(', ')}
-                  </Text>
+                  <Pressable
+                    key={`${group.printName}-${group.sizes.join('|')}`}
+                    onPress={() => {
+                      const groupKey = normalizePrintName(group.printName ?? '');
+                      const itemIds = filteredOwnedItems
+                        .filter((item) => {
+                          const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
+                          if (!key || key !== groupKey) return false;
+                          return group.sizes.some((size) => normalize(size) === normalize(item.size));
+                        })
+                        .map((item) => item.id);
+                      navigation.navigate('ItemsList', {
+                        hideInbox: true,
+                        initialChildId: selectedChild.id,
+                        initialStatus: 'owned',
+                        initialBrandId: brandId === 'All' ? undefined : brandId,
+                        initialItemIds: itemIds,
+                      });
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open duplicate print group ${group.printName}`}
+                  >
+                    <Text style={styles.meta}>
+                      {group.printName}: {group.sizes.join(', ')}
+                    </Text>
+                  </Pressable>
                 ))
               ) : (
                 <Text style={styles.meta}>No duplicate print groups yet.</Text>
@@ -2125,9 +2151,34 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             {showStyleDupesList ? (
               duplicateStyles.length ? (
                 duplicateStyles.map((group) => (
-                  <Text key={`${group.brand ?? ''}|${group.label}|${group.sizes.join('|')}`} style={styles.meta}>
-                    {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.join(', ')}
-                  </Text>
+                  <Pressable
+                    key={`${group.brand ?? ''}|${group.label}|${group.sizes.join('|')}`}
+                    onPress={() => {
+                      const styleKey = normalizeStyleName(group.label);
+                      const brandKey = normalize(group.brand ?? '');
+                      const itemIds = filteredOwnedItems
+                        .filter((item) => {
+                          const itemStyleKey = normalizeStyleName(item.styleName || item.title || '');
+                          if (!itemStyleKey || itemStyleKey !== styleKey) return false;
+                          const itemBrandKey = normalize(item.brand || item.brandTags[0] || '');
+                          return itemBrandKey === brandKey && group.sizes.some((size) => normalize(size) === normalize(item.size));
+                        })
+                        .map((item) => item.id);
+                      navigation.navigate('ItemsList', {
+                        hideInbox: true,
+                        initialChildId: selectedChild.id,
+                        initialStatus: 'owned',
+                        initialBrandId: brandId === 'All' ? undefined : brandId,
+                        initialItemIds: itemIds,
+                      });
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open duplicate style group ${group.label}`}
+                  >
+                    <Text style={styles.meta}>
+                      {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.join(', ')}
+                    </Text>
+                  </Pressable>
                 ))
               ) : (
                 <Text style={styles.meta}>No duplicate style groups yet.</Text>

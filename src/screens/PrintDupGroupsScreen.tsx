@@ -7,6 +7,7 @@ import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
 import { ClosetStackParamList } from '@/navigation/types';
 import { getDuplicatePrintGroups } from '@/utils/closetViewInsights';
+import { normalizePrintName } from '@/utils/printName';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'PrintDupGroups'>;
 
@@ -22,7 +23,8 @@ export const PrintDupGroupsScreen: React.FC<Props> = ({ navigation, route }) => 
     if (!brandId) return raw;
     const brand = normalize(brandId);
     return raw.filter((group) => {
-      return items.some((item) => normalize(item.printName ?? '') === normalize(group.printName) && item.childIds.includes(childId) && (
+      const groupKey = normalizePrintName(group.printName ?? '');
+      return items.some((item) => (item.printNameNorm || normalizePrintName(item.printName ?? '')) === groupKey && item.childIds.includes(childId) && (
         normalize(item.brand ?? '') === brand || item.brandTags.some((tag) => normalize(tag) === brand)
       ));
     });
@@ -41,13 +43,33 @@ export const PrintDupGroupsScreen: React.FC<Props> = ({ navigation, route }) => 
       {groups.map((group) => (
         <Pressable
           key={`${group.printName}-${group.sizes.join('|')}`}
-          onPress={() =>
+          onPress={() => {
+            if (!childId) return;
+            const canonical = normalizePrintName(group.printName ?? '');
+            const itemIds = items
+              .filter((item) => item.childIds.includes(childId))
+              .filter((item) => item.status === 'owned')
+              .filter((item) => {
+                if (brandId) {
+                  const brand = normalize(brandId);
+                  const brandMatch =
+                    normalize(item.brand ?? '') === brand
+                    || item.brandTags.some((tag) => normalize(tag) === brand);
+                  if (!brandMatch) return false;
+                }
+                const itemCanonical = item.printNameNorm || normalizePrintName(item.printName ?? '');
+                if (!itemCanonical || itemCanonical !== canonical) return false;
+                return group.sizes.some((size) => normalize(size) === normalize(item.size));
+              })
+              .map((item) => item.id);
+
             navigation.navigate('ItemsList', {
               hideInbox: true,
               initialChildId: childId,
               initialStatus: 'owned',
-            })
-          }
+              initialItemIds: itemIds,
+            });
+          }}
         >
           <Card>
             <Text style={styles.title}>{group.printName}</Text>

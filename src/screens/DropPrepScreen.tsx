@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
@@ -13,11 +13,13 @@ import { appConfig } from '@/config';
 import { useData } from '@/db/DataContext';
 import { ClosetStackParamList } from '@/navigation/types';
 import { useAppTheme } from '@/theme';
-import { categoryCounts, getVisibleClosetCategories, topBrands } from '@/utils/closetViewInsights';
+import { categoryCounts, getOwnedItemsForChild, getVisibleClosetCategories, topBrands } from '@/utils/closetViewInsights';
 import { closetCategories, closetCategoryToClothingType, closetLabel } from '@/utils/categories';
 import { getDropPrepSummary } from '@/utils/dropPrepInsights';
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { formatPieceCount } from '@/utils/formatCounts';
+import { normalizePrintName } from '@/utils/printName';
+import { normalizeStyleName } from '@/utils/styleName';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'DropPrep'>;
 
@@ -29,11 +31,15 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
   const [brandId, setBrandId] = useState<string>('All');
   const [dropName, setDropName] = useState('');
   const [showUpsell, setShowUpsell] = useState(false);
+  const [showDupPrints, setShowDupPrints] = useState(false);
+  const [showDupStyles, setShowDupStyles] = useState(false);
   const [usageCount, setUsageCount] = useState(0);
   const didLogBrandChangeRef = useRef(false);
   const didLogSizeBucketChangeRef = useRef(false);
   const sizeBucketOverridesRef = useRef<Record<string, 'now' | 'next' | 'both'>>({});
   const lastDefaultedChildRef = useRef<string>('');
+  const screenScrollRef = useRef<ScrollView | null>(null);
+  const sectionYRef = useRef<{ dupPrints?: number; dupStyles?: number }>({});
   const theme = useAppTheme();
 
   const selectedChild = children.find((child) => child.id === childId) ?? children[0];
@@ -56,6 +62,57 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
     [selectedChild, sizeBucket, brandId, items, childItems],
   );
   const visibleCategories = useMemo(() => getVisibleClosetCategories(selectedChild), [selectedChild]);
+  const ownedForDupes = useMemo(() => {
+    if (!selectedChild) return [];
+    const normalize = (value: string) => value.toLowerCase().trim();
+    const target = brandId === 'All' ? '' : normalize(brandId);
+    return getOwnedItemsForChild(selectedChild.id, items, childItems).filter((item) => {
+      if (!target) return true;
+      if (normalize(item.brand ?? '') === target) return true;
+      return item.brandTags.some((tag) => normalize(tag) === target);
+    });
+  }, [selectedChild, items, childItems, brandId]);
+  const duplicatePrintGroups = useMemo(() => {
+    const groups = new Map<string, { printName: string; sizes: Set<string>; count: number; itemIds: Set<string> }>();
+    ownedForDupes
+      .filter((item) => item.printNameNorm || item.printName?.trim())
+      .forEach((item) => {
+        const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
+        if (!key) return;
+        const prev = groups.get(key) ?? { printName: item.printName?.trim() || key, sizes: new Set<string>(), count: 0, itemIds: new Set<string>() };
+        prev.sizes.add(item.size);
+        prev.count += 1;
+        prev.itemIds.add(item.id);
+        groups.set(key, prev);
+      });
+    return Array.from(groups.values())
+      .filter((entry) => entry.count > 1)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12)
+      .map((entry) => ({ printName: entry.printName, sizes: Array.from(entry.sizes), count: entry.count, itemIds: Array.from(entry.itemIds) }));
+  }, [ownedForDupes]);
+  const duplicateStyleGroups = useMemo(() => {
+    const normalize = (value: string) => value.toLowerCase().trim();
+    const groups = new Map<string, { label: string; brand?: string; sizes: Set<string>; count: number; itemIds: Set<string> }>();
+    ownedForDupes.forEach((item) => {
+      const styleLabel = (item.styleName || item.title || '').trim();
+      if (!styleLabel) return;
+      const styleKey = normalizeStyleName(styleLabel);
+      if (!styleKey) return;
+      const brandLabel = (item.brand || item.brandTags[0] || '').trim();
+      const key = `${styleKey}|${normalize(brandLabel)}|${item.clothingType}`;
+      const prev = groups.get(key) ?? { label: styleLabel, brand: brandLabel || undefined, sizes: new Set<string>(), count: 0, itemIds: new Set<string>() };
+      prev.sizes.add(item.size);
+      prev.count += 1;
+      prev.itemIds.add(item.id);
+      groups.set(key, prev);
+    });
+    return Array.from(groups.values())
+      .filter((entry) => entry.count > 1)
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, 12)
+      .map((entry) => ({ label: entry.label, brand: entry.brand, sizes: Array.from(entry.sizes), count: entry.count, itemIds: Array.from(entry.itemIds) }));
+  }, [ownedForDupes]);
 
   useEffect(() => {
     if (!selectedChild) return;
@@ -118,6 +175,18 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
     }
     void logEvent('drop_prep_size_bucket_changed', { childId: selectedChild.id, sizeBucket });
   }, [sizeBucket, selectedChild?.id]);
+
+  const jumpToDupSection = useCallback((section: 'prints' | 'styles') => {
+    if (section === 'prints') setShowDupPrints(true);
+    if (section === 'styles') setShowDupStyles(true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const y = section === 'prints' ? sectionYRef.current.dupPrints : sectionYRef.current.dupStyles;
+        if (typeof y !== 'number') return;
+        screenScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+      });
+    });
+  }, []);
 
   const styles = StyleSheet.create({
     title: {
@@ -225,6 +294,20 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
       fontWeight: '600',
       color: theme.colors.textSecondary,
     },
+    sectionToggle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.serif,
+    },
+    meta: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+    },
+    sectionContent: {
+      marginTop: 8,
+      gap: 6,
+    },
   });
 
   if (!selectedChild || !summary) {
@@ -236,7 +319,7 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
   }
 
   return (
-    <Screen>
+    <Screen scrollRef={screenScrollRef}>
       <Card>
         <Text style={styles.title}>Drop Prep</Text>
         <FormInput label="Preparing for (optional)" value={dropName} onChangeText={setDropName} placeholder="Saturday drop" />
@@ -287,14 +370,14 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={styles.summaryLabel}>Size-Ups Owned</Text>
           <Text style={styles.summaryValue}>{summary.sizeUpsTotal}</Text>
         </Pressable>
-        <Pressable onPress={() => navigation.navigate('PrintDupGroups', { childId: selectedChild.id, brandId: brandId === 'All' ? undefined : brandId })} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`Print Duplicates, ${summary.printDupGroupCount}`}>
+        <Pressable onPress={() => jumpToDupSection('prints')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`Print Duplicates, ${summary.printDupGroupCount}. Jump to duplicate prints section`}>
           <Text style={styles.summaryLabel}>Print Duplicates</Text>
           <Text style={styles.summaryValue}>{summary.printDupGroupCount}</Text>
         </Pressable>
-        <View style={styles.summaryCard} accessible accessibilityLabel={`Style Duplicates, ${summary.styleDupGroupCount}`}>
+        <Pressable onPress={() => jumpToDupSection('styles')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`Style Duplicates, ${summary.styleDupGroupCount}. Jump to duplicate styles section`}>
           <Text style={styles.summaryLabel}>Style Duplicates</Text>
           <Text style={styles.summaryValue}>{summary.styleDupGroupCount}</Text>
-        </View>
+        </Pressable>
         <Pressable onPress={() => navigation.navigate('SellBin')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`For-Sale Bin, ${summary.forSaleCount}`}>
           <Text style={styles.summaryLabel}>For-Sale Bin</Text>
           <Text style={styles.summaryValue}>{summary.forSaleCount}</Text>
@@ -330,6 +413,86 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
           })}
         </View>
       </Card>
+
+      <View
+        onLayout={(event) => {
+          sectionYRef.current.dupPrints = event.nativeEvent.layout.y;
+        }}
+      >
+        <Card>
+          <Pressable onPress={() => setShowDupPrints((prev) => !prev)} accessibilityRole="button" accessibilityLabel="Toggle duplicate prints across sizes">
+            <Text style={styles.sectionToggle}>Duplicate prints across sizes {showDupPrints ? '▾' : '▸'}</Text>
+          </Pressable>
+          {showDupPrints ? (
+            <View style={styles.sectionContent}>
+              {duplicatePrintGroups.length ? (
+                duplicatePrintGroups.map((group) => (
+                  <Pressable
+                    key={`${group.printName}-${group.sizes.join('|')}`}
+                    onPress={() =>
+                      navigation.navigate('ItemsList', {
+                        hideInbox: true,
+                        initialChildId: selectedChild.id,
+                        initialStatus: 'owned',
+                        initialBrandId: brandId === 'All' ? undefined : brandId,
+                        initialItemIds: group.itemIds,
+                      })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open duplicate print group ${group.printName}`}
+                  >
+                    <Text style={styles.meta}>
+                      {group.printName}: {group.sizes.join(', ')}
+                    </Text>
+                  </Pressable>
+                ))
+              ) : (
+                <Text style={styles.meta}>No duplicate print groups yet.</Text>
+              )}
+            </View>
+          ) : null}
+        </Card>
+      </View>
+
+      <View
+        onLayout={(event) => {
+          sectionYRef.current.dupStyles = event.nativeEvent.layout.y;
+        }}
+      >
+        <Card>
+          <Pressable onPress={() => setShowDupStyles((prev) => !prev)} accessibilityRole="button" accessibilityLabel="Toggle duplicate styles across sizes">
+            <Text style={styles.sectionToggle}>Duplicate styles across sizes {showDupStyles ? '▾' : '▸'}</Text>
+          </Pressable>
+          {showDupStyles ? (
+            <View style={styles.sectionContent}>
+              {duplicateStyleGroups.length ? (
+                duplicateStyleGroups.map((group) => (
+                  <Pressable
+                    key={`${group.brand ?? ''}|${group.label}|${group.sizes.join('|')}`}
+                    onPress={() =>
+                      navigation.navigate('ItemsList', {
+                        hideInbox: true,
+                        initialChildId: selectedChild.id,
+                        initialStatus: 'owned',
+                        initialBrandId: brandId === 'All' ? undefined : brandId,
+                        initialItemIds: group.itemIds,
+                      })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open duplicate style group ${group.label}`}
+                  >
+                    <Text style={styles.meta}>
+                      {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.join(', ')}
+                    </Text>
+                  </Pressable>
+                ))
+              ) : (
+                <Text style={styles.meta}>No duplicate style groups yet.</Text>
+              )}
+            </View>
+          ) : null}
+        </Card>
+      </View>
 
       <Card>
         <Text style={styles.categoryTitle}>Quick Actions</Text>
