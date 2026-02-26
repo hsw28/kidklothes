@@ -36,6 +36,7 @@ export interface NewItemInput {
   outboundUrl?: string;
   clickCount?: number;
   brand?: string;
+  styleName?: string;
   printName?: string;
   printNameNorm?: string;
   brandTags?: string[];
@@ -178,6 +179,7 @@ type ItemRow = {
   outboundUrl: string | null;
   clickCount: number | null;
   brand: string | null;
+  styleName: string | null;
   printName: string | null;
   printNameNorm: string | null;
   title: string | null;
@@ -458,6 +460,7 @@ const mapItem = (row: ItemRow, tags: string[], brandTags: string[], childIds: st
   outboundUrl: row.outboundUrl ?? undefined,
   clickCount: row.clickCount ?? 0,
   brand: row.brand ?? undefined,
+  styleName: row.styleName ?? undefined,
   printName: row.printName ?? undefined,
   printNameNorm: row.printNameNorm ?? undefined,
   brandTags,
@@ -1042,6 +1045,7 @@ export const repository = {
       outboundUrl: normalizeUrl(input.outboundUrl) || link.outboundUrl || undefined,
       clickCount: input.clickCount ?? 0,
       brand: trimOrNull(input.brand) ?? undefined,
+      styleName: trimOrNull(input.styleName) ?? undefined,
       printName: trimOrNull(input.printName) ?? undefined,
       printNameNorm: trimOrNull(input.printNameNorm) ?? (resolvePrintName(trimOrNull(input.printName) ?? '', aliases) || normalizePrintKey(input.printName) || undefined),
       brandTags: normalizedBrandTags,
@@ -1084,7 +1088,7 @@ export const repository = {
     };
 
     const itemInsertColumns = [
-      'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
+      'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'styleName', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
       'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
     ] as const;
     const itemInsertValues: Array<string | number | null> = [
@@ -1096,6 +1100,7 @@ export const repository = {
       item.outboundUrl ?? null,
       item.clickCount,
       item.brand ?? null,
+      item.styleName ?? null,
       item.printName ?? null,
       item.printNameNorm ?? null,
       item.title,
@@ -1227,6 +1232,7 @@ export const repository = {
       outboundUrl: patch.outboundUrl !== undefined ? normalizeUrl(patch.outboundUrl) || undefined : link.outboundUrl || existing.outboundUrl,
       clickCount: patch.clickCount ?? existing.clickCount,
       brand: nextBrand,
+      styleName: patch.styleName !== undefined ? trimOrNull(patch.styleName) ?? undefined : existing.styleName,
       printName: patch.printName !== undefined ? trimOrNull(patch.printName) ?? undefined : existing.printName,
       printNameNorm:
         patch.printNameNorm !== undefined
@@ -1290,6 +1296,7 @@ export const repository = {
         outboundUrl = ?,
         clickCount = ?,
         brand = ?,
+        styleName = ?,
         printName = ?,
         printNameNorm = ?,
         title = ?,
@@ -1334,6 +1341,7 @@ export const repository = {
       updated.outboundUrl ?? null,
       updated.clickCount,
       updated.brand ?? null,
+      updated.styleName ?? null,
       updated.printName ?? null,
       updated.printNameNorm ?? null,
       updated.title,
@@ -1786,7 +1794,7 @@ export const repository = {
         fitBinTouched: item.fitBinTouched,
       });
       const importItemColumns = [
-        'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
+        'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'styleName', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
         'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
       ] as const;
       const importItemValues: Array<string | number | null> = [
@@ -1798,6 +1806,7 @@ export const repository = {
         item.outboundUrl ?? null,
         item.clickCount ?? 0,
         item.brand ?? null,
+        item.styleName ?? null,
         item.printName ?? null,
         item.printNameNorm ?? null,
         item.title,

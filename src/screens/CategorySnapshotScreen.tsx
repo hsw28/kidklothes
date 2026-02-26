@@ -62,6 +62,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const [sizeModeFilter, setSizeModeFilter] = useState<ClosetSizeMode>(route.params.sizeMode ?? 'both');
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
   const [brandFilter, setBrandFilter] = useState<string>(route.params.brandId ?? 'All');
+  const [styleFilter, setStyleFilter] = useState<string>('All');
   const season = route.params.season;
   const [binType, setBinType] = useState<ClothingType>('bottom');
   const [binSize, setBinSize] = useState('3T');
@@ -223,6 +224,39 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     }
   }, [availableBrandOptions, brandFilter]);
 
+  const availableStyleOptions = useMemo(() => {
+    if (!categoryBaseItems || !child) return ['All'];
+    const scopedByLocation = categoryBaseItems.owned.filter((item) => {
+      if (locationFilter === 'All') return true;
+      const locationId = categoryBaseItems.linkMap.get(item.id) ?? '';
+      if (locationFilter === 'Unassigned') return !locationId;
+      const location = childLocations.find((entry) => entry.id === locationId);
+      return location?.name === locationFilter;
+    });
+    const scopedBySize = scopedByLocation.filter((item) => matchesSnapshotSizeFilter(item));
+    const scopedBySeason = season
+      ? scopedBySize.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
+      : scopedBySize;
+    const scopedByBrand = brandFilter !== 'All'
+      ? scopedBySeason.filter((item) => item.brandTags.includes(brandFilter) || (item.brand ?? '').toLowerCase().trim() === brandFilter.toLowerCase().trim())
+      : scopedBySeason;
+    const names = new Map<string, string>();
+    scopedByBrand.forEach((item) => {
+      const candidate = (item.styleName ?? '').trim();
+      if (!candidate) return;
+      const key = candidate.toLowerCase();
+      const current = names.get(key);
+      if (!current || (current === current.toLowerCase() && candidate !== candidate.toLowerCase())) names.set(key, candidate);
+    });
+    return ['All', ...Array.from(names.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
+  }, [categoryBaseItems, child, childLocations, locationFilter, season, brandFilter, matchesSnapshotSizeFilter]);
+
+  useEffect(() => {
+    if (!availableStyleOptions.includes(styleFilter)) {
+      setStyleFilter('All');
+    }
+  }, [availableStyleOptions, styleFilter]);
+
   const summary = useMemo(() => {
     if (!child || !categoryBaseItems) return undefined;
     const { childData, linkMap } = categoryBaseItems;
@@ -243,23 +277,26 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const seasonFiltered = season
       ? brandFiltered.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : brandFiltered;
+    const styleFiltered = styleFilter !== 'All'
+      ? seasonFiltered.filter((item) => (item.styleName ?? '').toLowerCase().trim() === styleFilter.toLowerCase().trim())
+      : seasonFiltered;
     const wearingNowAll = getWearingNowByCategory(childData.items.filter((item) => item.status === 'owned'), child);
     const currentSize = wearingNowAll.get(category);
     const nextSize = anchors.nextByCategory.get(category);
-    const currentCount = currentSize ? seasonFiltered.filter((item) => item.size === currentSize).length : 0;
+    const currentCount = currentSize ? styleFiltered.filter((item) => item.size === currentSize).length : 0;
     const sizeUpsCount = nextSize
-      ? seasonFiltered.filter((item) => item.size.toLowerCase().trim() === nextSize.toLowerCase().trim()).length
+      ? styleFiltered.filter((item) => item.size.toLowerCase().trim() === nextSize.toLowerCase().trim()).length
       : currentSize
-      ? seasonFiltered.filter((item) => {
+      ? styleFiltered.filter((item) => {
           const n = sizeToNumber(item.size);
           const c = sizeToNumber(currentSize);
           return n !== undefined && c !== undefined && n > c;
         }).length
       : 0;
-    const duplicates = getDuplicateAdjacentGroups(seasonFiltered);
-    const sortedByWorn = [...seasonFiltered].sort((a, b) => (b.wornCount ?? 0) - (a.wornCount ?? 0));
+    const duplicates = getDuplicateAdjacentGroups(styleFiltered);
+    const sortedByWorn = [...styleFiltered].sort((a, b) => (b.wornCount ?? 0) - (a.wornCount ?? 0));
     return {
-      items: seasonFiltered.slice().sort((a, b) => b.createdAt - a.createdAt),
+      items: styleFiltered.slice().sort((a, b) => b.createdAt - a.createdAt),
       currentSize: currentSize ?? 'N/A',
       currentCount,
       sizeUpsCount,
@@ -267,7 +304,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       mostWorn: sortedByWorn[0],
       leastWorn: sortedByWorn.length ? sortedByWorn[sortedByWorn.length - 1] : undefined,
     };
-  }, [child, categoryBaseItems, category, locationFilter, childLocations, brandFilter, season, matchesSnapshotSizeFilter]);
+  }, [child, categoryBaseItems, category, locationFilter, childLocations, brandFilter, styleFilter, season, matchesSnapshotSizeFilter]);
 
   if (!child || !summary) {
     return (
@@ -286,6 +323,8 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const groups = new Map<string, { printName: string; sizes: Set<string>; count: number }>();
     childData.items
       .filter((item) => item.status === 'owned' && closetCategoryForItem(item) === category && (item.printNameNorm || item.printName?.trim()))
+      .filter((item) => (brandFilter === 'All' ? true : item.brandTags.includes(brandFilter) || (item.brand ?? '').toLowerCase().trim() === brandFilter.toLowerCase().trim()))
+      .filter((item) => (styleFilter === 'All' ? true : (item.styleName ?? '').toLowerCase().trim() === styleFilter.toLowerCase().trim()))
       .filter((item) => (season ? item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()) : true))
       .forEach((item) => {
         const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
@@ -304,7 +343,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
         count: entry.count,
       }))
       .sort((a, b) => b.count - a.count);
-  }, [childData.items, category, season]);
+  }, [childData.items, category, brandFilter, styleFilter, season]);
 
   const gridItems = summary.items;
   const openItemDetail = useCallback((itemId: string) => {
@@ -360,6 +399,12 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
             value={brandFilter}
             onChange={setBrandFilter}
           />
+          <ChipSelector
+            label="Style"
+            options={availableStyleOptions}
+            value={styleFilter}
+            onChange={setStyleFilter}
+          />
           {showLocationUi ? <ChipSelector label="Location" options={locationOptions} value={locationFilter} onChange={setLocationFilter} /> : null}
         </View>
         {gridItems.length === 0 ? (
@@ -398,6 +443,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
           <View style={styles.sectionContent}>
             {child.currentSize.code ? <Text style={styles.meta}>Current Size (Profile): {formatSizeDisplay(child.currentSize.code, child.currentSize.otherText ?? null)}</Text> : null}
             {brandFilter !== 'All' ? <Text style={styles.meta}>Brand Filter: {brandFilter}</Text> : null}
+            {styleFilter !== 'All' ? <Text style={styles.meta}>Style Filter: {styleFilter}</Text> : null}
             {season ? <Text style={styles.meta}>Season: {season}</Text> : null}
             <Text style={styles.meta}>Items in Current Size ({summary.currentSize}): {summary.currentCount}</Text>
             <Text style={styles.meta}>Size-Ups Count: {summary.sizeUpsCount}</Text>

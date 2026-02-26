@@ -61,9 +61,9 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
       printGroups.set(key, sizes);
     }
 
-    const titleKey = normalize(item.title ?? '');
-    if (titleKey) {
-      const key = `${titleKey}|${normalize(item.brand ?? '')}|${category}`;
+    const styleKey = normalize(item.styleName || item.title || '');
+    if (styleKey) {
+      const key = `${styleKey}|${normalize(item.brand ?? '')}|${category}`;
       const sizes = styleGroups.get(key) ?? new Set<string>();
       sizes.add(normalize(item.size));
       styleGroups.set(key, sizes);

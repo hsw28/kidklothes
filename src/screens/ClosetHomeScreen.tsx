@@ -1295,9 +1295,9 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         printGroups.set(key, sizes);
       });
       scoped.forEach((item) => {
-        const titleKey = normalize(item.title ?? '');
-        if (!titleKey) return;
-        const key = `${titleKey}|${normalize(item.brand ?? '')}`;
+        const styleKey = normalize(item.styleName || item.title || '');
+        if (!styleKey) return;
+        const key = `${styleKey}|${normalize(item.brand ?? '')}`;
         const sizes = styleGroups.get(key) ?? new Set<string>();
         sizes.add(normalize(item.size));
         styleGroups.set(key, sizes);

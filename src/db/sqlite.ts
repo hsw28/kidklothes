@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { inferSizeScheme, isShoeCategory, normalizeSize } from '@/lib/sizing';
 
 const DB_NAME = 'layetteout.db';
-const LATEST_DB_VERSION = 28;
+const LATEST_DB_VERSION = 29;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let initPromise: Promise<void> | null = null;
@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS items (
   outboundUrl TEXT,
   clickCount INTEGER NOT NULL DEFAULT 0,
   brand TEXT,
+  styleName TEXT,
   printName TEXT,
   printNameNorm TEXT,
   title TEXT,
@@ -837,6 +838,15 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
 
     await db.execAsync('PRAGMA user_version = 28;');
     currentVersion = 28;
+  }
+
+  if (currentVersion < 29) {
+    const itemColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('items');`);
+    if (!itemColumns.some((column) => column.name === 'styleName')) {
+      await db.execAsync('ALTER TABLE items ADD COLUMN styleName TEXT;');
+    }
+    await db.execAsync('PRAGMA user_version = 29;');
+    currentVersion = 29;
   }
 
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');

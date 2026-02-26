@@ -9,6 +9,7 @@ type ItemPayloadFormInput = {
   title: string;
   url: string;
   brand: string;
+  styleName: string;
   printName: string;
   brandTags: string;
   imageUrl: string;
@@ -46,6 +47,7 @@ export type NormalizedItemPayload = {
   title: string;
   url?: string;
   brand?: string;
+  styleName?: string;
   printName?: string;
   printNameNorm?: string;
   brandTags: string[];
@@ -103,6 +105,7 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
     title: baseTitle,
     url: input.url || undefined,
     brand: (input.brandOverride ?? input.brand) || undefined,
+    styleName: input.styleName.trim() || undefined,
     printName: input.printName || undefined,
     printNameNorm: printNameNorm || undefined,
     brandTags: input.brandTags

@@ -101,6 +101,7 @@ export interface Child {
 
 export interface Item extends BaseItem {
   clickCount: number;
+  styleName?: string;
   printName?: string;
   printNameNorm?: string;
   brandTags: string[];

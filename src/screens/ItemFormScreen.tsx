@@ -277,6 +277,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [title, setTitle] = useState(sourceItem?.title ?? '');
   const [url, setUrl] = useState(sourceItem?.url ?? route.params?.url ?? '');
   const [brand, setBrand] = useState(sourceItem?.brand ?? route.params?.prefillBrand ?? '');
+  const [styleName, setStyleName] = useState(sourceItem?.styleName ?? '');
   const [printName, setPrintName] = useState(sourceItem?.printName ?? '');
   const [brandTags, setBrandTags] = useState(sourceItem?.brandTags.join(', ') ?? sourceItem?.brand ?? route.params?.prefillBrand ?? '');
   const existingPrimaryImage = sourceItem?.imageUrl ?? sourceItem?.imageUrls?.[0] ?? sourceItem?.cachedImageUri ?? '';
@@ -678,6 +679,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       title,
       url,
       brand,
+      styleName,
       printName,
       brandTags,
       imageUrl,
@@ -1147,6 +1149,12 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
               setBrand(value);
             }}
             placeholder="Auto-filled after preview"
+          />
+          <FormInput
+            label="Style Name (optional)"
+            value={styleName}
+            onChangeText={setStyleName}
+            placeholder="e.g. Pocket Tee"
           />
           <FormInput
             label="Print Name (optional)"
