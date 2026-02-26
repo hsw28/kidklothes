@@ -427,6 +427,17 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
         status: captureStatus,
       });
       const created = await addItem(draft);
+      if (created?.id) {
+        const previewThumb = getItemDisplayImageUri(created) || '';
+        if (/^https?:\/\//i.test(previewThumb)) {
+          try {
+            const cached = await cacheRemoteImage(created.id, previewThumb);
+            if (cached) await updateItemCachedImage(created.id, cached);
+          } catch {
+            // Best-effort cache so wishlist thumbnails appear immediately.
+          }
+        }
+      }
       await logEvent('item_created_via', {
         createdVia: 'quick_add',
         childId: captureChildId,

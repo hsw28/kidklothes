@@ -8,6 +8,7 @@ export type DropPrepSummary = {
   typeCountsNext: Record<ClosetCategory, number>;
   sizeUpsTotal: number;
   printDupGroupCount: number;
+  styleDupGroupCount: number;
   forSaleCount: number;
 };
 
@@ -40,7 +41,8 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
   const typeCountsNow = initCategoryCounts();
   const typeCountsNext = initCategoryCounts();
 
-  const printGroups = new Map<string, { hasNow: boolean; hasNext: boolean }>();
+  const printGroups = new Map<string, Set<string>>();
+  const styleGroups = new Map<string, Set<string>>();
 
   owned.forEach((item) => {
     const category = closetCategoryForItem(item);
@@ -54,10 +56,17 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
     const canonicalPrint = item.printNameNorm || normalizePrintName(item.printName ?? '');
     if (canonicalPrint) {
       const key = `${canonicalPrint}|${category}`;
-      const prev = printGroups.get(key) ?? { hasNow: false, hasNext: false };
-      if (isNow) prev.hasNow = true;
-      if (isNext) prev.hasNext = true;
-      printGroups.set(key, prev);
+      const sizes = printGroups.get(key) ?? new Set<string>();
+      sizes.add(normalize(item.size));
+      printGroups.set(key, sizes);
+    }
+
+    const titleKey = normalize(item.title ?? '');
+    if (titleKey) {
+      const key = `${titleKey}|${normalize(item.brand ?? '')}|${category}`;
+      const sizes = styleGroups.get(key) ?? new Set<string>();
+      sizes.add(normalize(item.size));
+      styleGroups.set(key, sizes);
     }
   });
 
@@ -70,13 +79,15 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
   }).length;
 
   const sizeUpsTotal = closetCategories.reduce((sum, category) => sum + typeCountsNext[category], 0);
-  const printDupGroupCount = Array.from(printGroups.values()).filter((group) => group.hasNow && group.hasNext).length;
+  const printDupGroupCount = Array.from(printGroups.values()).filter((sizes) => sizes.size > 1).length;
+  const styleDupGroupCount = Array.from(styleGroups.values()).filter((sizes) => sizes.size > 1).length;
 
   return {
     typeCountsNow,
     typeCountsNext,
     sizeUpsTotal,
     printDupGroupCount,
+    styleDupGroupCount,
     forSaleCount,
   };
 };

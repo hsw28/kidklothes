@@ -67,6 +67,7 @@ type TileProps = {
   emptyLabel?: string;
   hasUps: boolean;
   hasDupes: boolean;
+  hasStyleDupes: boolean;
   activeBrandLabel?: string;
   activeBrandName?: string;
   onPress: () => void;
@@ -83,6 +84,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
   emptyLabel,
   hasUps,
   hasDupes,
+  hasStyleDupes,
   activeBrandLabel,
   activeBrandName,
   onPress,
@@ -95,7 +97,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
   const scale = useRef(new Animated.Value(1)).current;
   const tileOpacity = useRef(new Animated.Value(1)).current;
   const badgeOpacity = useRef(new Animated.Value(0)).current;
-  const hasBadge = hasUps || hasDupes;
+  const hasBadge = hasUps || hasDupes || hasStyleDupes;
   const heroImages = thumbs.filter(Boolean);
   const [heroWidth, setHeroWidth] = useState(0);
   const [heroIndex, setHeroIndex] = useState(0);
@@ -400,6 +402,11 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               <Text style={[styles.badgeText, { color: theme.colors.accentPeriwinkle }]}>Dup prints</Text>
             </View>
           ) : null}
+          {hasStyleDupes ? (
+            <View style={[styles.badge, { backgroundColor: theme.colors.accentCoralSoft }]}>
+              <Text style={[styles.badgeText, { color: theme.colors.accentCoral }]}>Dup styles</Text>
+            </View>
+          ) : null}
           {hasUps ? (
             <View style={[styles.badge, { backgroundColor: theme.colors.accentSageSoft }]}>
               <Text style={[styles.badgeText, { color: theme.colors.accentSage }]}>Size-ups</Text>
@@ -502,6 +509,7 @@ const ClosetTile = React.memo(ClosetTileComponent, (prev, next) =>
   && prev.emptyLabel === next.emptyLabel
   && prev.hasUps === next.hasUps
   && prev.hasDupes === next.hasDupes
+  && prev.hasStyleDupes === next.hasStyleDupes
   && prev.activeBrandLabel === next.activeBrandLabel
   && prev.activeBrandName === next.activeBrandName
   && prev.onPress === next.onPress
@@ -1085,6 +1093,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     setTileGridOrder(visibleCategories);
     tileOrderRef.current = visibleCategories;
   }, [visibleCategories, showTileGridReorderMode]);
+  useEffect(() => {
+    if (!showTileGridReorderMode) return;
+    // Rebuild responders when entering reorder mode so gesture callbacks use fresh state.
+    tilePanRespondersRef.current = {};
+  }, [showTileGridReorderMode, visibleCategories]);
 
   const ownedItems = useMemo(() => {
     if (!selectedChild) return [];
@@ -1267,12 +1280,13 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [filteredOwnedItems]);
 
   const tileSignals = useMemo(() => {
-    const result = new Map<ClosetCategory, { hasUps: boolean; hasDupes: boolean }>();
+    const result = new Map<ClosetCategory, { hasUps: boolean; hasDupes: boolean; hasStyleDupes: boolean }>();
     visibleCategories.forEach((category) => {
       const scoped = ownedItems.filter((item) => closetCategoryForItem(item) === category).filter((item) => matchesBrand(item, brandId)).filter((item) => matchesSeason(item, seasonFilter));
       const next = sizeAnchors.nextByCategory.get(category);
       const hasUps = next ? scoped.some((item) => normalize(item.size) === normalize(next)) : false;
       const printGroups = new Map<string, Set<string>>();
+      const styleGroups = new Map<string, Set<string>>();
       scoped.forEach((item) => {
         const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
         if (!key) return;
@@ -1280,8 +1294,17 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         sizes.add(normalize(item.size));
         printGroups.set(key, sizes);
       });
+      scoped.forEach((item) => {
+        const titleKey = normalize(item.title ?? '');
+        if (!titleKey) return;
+        const key = `${titleKey}|${normalize(item.brand ?? '')}`;
+        const sizes = styleGroups.get(key) ?? new Set<string>();
+        sizes.add(normalize(item.size));
+        styleGroups.set(key, sizes);
+      });
       const hasDupes = Array.from(printGroups.values()).some((sizes) => sizes.size > 1);
-      result.set(category, { hasUps, hasDupes });
+      const hasStyleDupes = Array.from(styleGroups.values()).some((sizes) => sizes.size > 1);
+      result.set(category, { hasUps, hasDupes, hasStyleDupes });
     });
     return result;
   }, [visibleCategories, ownedItems, brandId, seasonFilter, sizeAnchors]);
@@ -1442,12 +1465,9 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         },
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
-        onPanResponderRelease: (_, gesture) => {
+        onPanResponderRelease: () => {
           tileDragStateRef.current = null;
           void persistVisibleCategoryOrder([...tileOrderRef.current]);
-          if (Math.abs(gesture.dx) < 4 && Math.abs(gesture.dy) < 4) {
-            setShowTileGridReorderMode(false);
-          }
         },
         onPanResponderTerminate: () => {
           tileDragStateRef.current = null;
@@ -1764,7 +1784,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         {renderedCategories.map((category) => {
           const count = counts[category] ?? 0;
           const thumbs = thumbnailsByCategory.get(category) ?? [];
-          const signals = tileSignals.get(category) ?? { hasUps: false, hasDupes: false };
+          const signals = tileSignals.get(category) ?? { hasUps: false, hasDupes: false, hasStyleDupes: false };
 
           return (
             <ClosetTile
@@ -1775,6 +1795,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               emptyLabel={emptyLabelByCategory.get(category)}
               hasUps={signals.hasUps}
               hasDupes={signals.hasDupes}
+              hasStyleDupes={signals.hasStyleDupes}
               activeBrandLabel={activeBrandShortLabel}
               activeBrandName={activeBrandName}
               onLongPress={showTileGridReorderMode ? undefined : () => openCategoryTileMenu(category)}

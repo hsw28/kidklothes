@@ -291,6 +291,10 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={styles.summaryLabel}>Print Duplicates</Text>
           <Text style={styles.summaryValue}>{summary.printDupGroupCount}</Text>
         </Pressable>
+        <View style={styles.summaryCard} accessible accessibilityLabel={`Style Duplicates, ${summary.styleDupGroupCount}`}>
+          <Text style={styles.summaryLabel}>Style Duplicates</Text>
+          <Text style={styles.summaryValue}>{summary.styleDupGroupCount}</Text>
+        </View>
         <Pressable onPress={() => navigation.navigate('SellBin')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`For-Sale Bin, ${summary.forSaleCount}`}>
           <Text style={styles.summaryLabel}>For-Sale Bin</Text>
           <Text style={styles.summaryValue}>{summary.forSaleCount}</Text>
