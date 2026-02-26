@@ -612,6 +612,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const [showNew, setShowNew] = useState(false);
   const [showStash, setShowStash] = useState(false);
   const [showDupes, setShowDupes] = useState(false);
+  const [showStyleDupesList, setShowStyleDupesList] = useState(false);
   const [showModesModal, setShowModesModal] = useState(false);
   const [showFirstKidAddedHint, setShowFirstKidAddedHint] = useState(false);
   const hasAutoPromptedGuidedRef = useRef(false);
@@ -1279,6 +1280,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     return map;
   }, [filteredOwnedItems]);
 
+  useEffect(() => {
+    const uris = Array.from(thumbnailsByCategory.values())
+      .flat()
+      .filter((uri) => /^https?:\/\//i.test(uri))
+      .slice(0, 24);
+    uris.forEach((uri) => {
+      void Image.prefetch(uri).catch(() => undefined);
+    });
+  }, [thumbnailsByCategory]);
+
   const tileSignals = useMemo(() => {
     const result = new Map<ClosetCategory, { hasUps: boolean; hasDupes: boolean; hasStyleDupes: boolean }>();
     visibleCategories.forEach((category) => {
@@ -1354,6 +1365,31 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         .slice(0, 8),
     [selectedChild, items, childItems, filteredOwnedItems],
   );
+  const duplicateStyles = useMemo(() => {
+    const groups = new Map<string, { label: string; brand?: string; sizes: Set<string>; count: number }>();
+    filteredOwnedItems.forEach((item) => {
+      const styleLabel = (item.styleName || item.title || '').trim();
+      if (!styleLabel) return;
+      const styleKey = normalize(styleLabel);
+      if (!styleKey) return;
+      const brandLabel = (item.brand || item.brandTags[0] || '').trim();
+      const key = `${styleKey}|${normalize(brandLabel)}`;
+      const prev = groups.get(key) ?? { label: styleLabel, brand: brandLabel || undefined, sizes: new Set<string>(), count: 0 };
+      prev.sizes.add(item.size);
+      prev.count += 1;
+      groups.set(key, prev);
+    });
+    return Array.from(groups.values())
+      .filter((entry) => entry.sizes.size > 1)
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, 8)
+      .map((entry) => ({
+        label: entry.label,
+        brand: entry.brand,
+        sizes: Array.from(entry.sizes),
+        count: entry.count,
+      }));
+  }, [filteredOwnedItems]);
   const recentlyAdded = useMemo(
     () => filteredOwnedItems.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 8),
     [filteredOwnedItems],
@@ -2078,6 +2114,23 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                 ))
               ) : (
                 <Text style={styles.meta}>No duplicate print groups yet.</Text>
+              )
+            ) : null}
+          </Card>
+
+          <Card>
+            <Pressable onPress={() => setShowStyleDupesList((prev) => !prev)}>
+              <Text style={styles.sectionToggle}>Duplicate styles across sizes {showStyleDupesList ? '▾' : '▸'}</Text>
+            </Pressable>
+            {showStyleDupesList ? (
+              duplicateStyles.length ? (
+                duplicateStyles.map((group) => (
+                  <Text key={`${group.brand ?? ''}|${group.label}|${group.sizes.join('|')}`} style={styles.meta}>
+                    {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.join(', ')}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.meta}>No duplicate style groups yet.</Text>
               )
             ) : null}
           </Card>

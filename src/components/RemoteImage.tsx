@@ -11,6 +11,10 @@ type Props = {
   accessibilityLabel?: string;
 };
 
+// Session-level cache of successfully loaded remote image URIs so rerenders/filter toggles
+// can skip showing the loading placeholder again for the same thumbnail.
+const loadedRemoteImageUris = new Set<string>();
+
 const isSupportedImageUri = (value?: string | null) => {
   if (!value) return false;
   const trimmed = value.trim();
@@ -40,8 +44,16 @@ const RemoteImageComponent: React.FC<Props> = ({
     setFailed(false);
     const supported = Boolean(isSupportedImageUri(uri));
     const remote = isRemoteHttpUri(uri);
-    setIsLoading(supported && remote);
-    imageOpacity.setValue(supported ? (remote ? 0 : 1) : 0);
+    const normalized = (() => {
+      if (!uri) return '';
+      const trimmed = uri.trim();
+      if (trimmed.startsWith('//')) return `https:${trimmed}`;
+      if (trimmed.startsWith('/')) return `file://${trimmed}`;
+      return trimmed;
+    })();
+    const alreadyLoaded = remote && normalized ? loadedRemoteImageUris.has(normalized) : false;
+    setIsLoading(supported && remote && !alreadyLoaded);
+    imageOpacity.setValue(supported ? (remote && !alreadyLoaded ? 0 : 1) : 0);
   }, [uri, imageOpacity]);
 
   const normalizedUri = useMemo(() => {
@@ -51,10 +63,19 @@ const RemoteImageComponent: React.FC<Props> = ({
     if (trimmed.startsWith('/')) return `file://${trimmed}`;
     return trimmed;
   }, [uri]);
+  const remoteAlreadyLoaded = isRemoteHttpUri(normalizedUri) && loadedRemoteImageUris.has(normalizedUri);
 
   const showImage = isSupportedImageUri(normalizedUri) && !failed;
   const isRemote = isRemoteHttpUri(normalizedUri);
-  const showPlaceholder = !showImage || isLoading;
+  const showPlaceholder = !showImage || (isLoading && !remoteAlreadyLoaded);
+
+  useEffect(() => {
+    if (!isRemote) return;
+    if (!normalizedUri) return;
+    if (!loadedRemoteImageUris.has(normalizedUri)) return;
+    setIsLoading(false);
+    imageOpacity.setValue(1);
+  }, [isRemote, normalizedUri, imageOpacity]);
 
   return (
     <View
@@ -76,9 +97,10 @@ const RemoteImageComponent: React.FC<Props> = ({
           resizeMode={resizeMode}
           style={[StyleSheet.absoluteFillObject, imageStyle, { opacity: imageOpacity }]}
           onLoadStart={() => {
-            if (isRemote) setIsLoading(true);
+            if (isRemote && !loadedRemoteImageUris.has(normalizedUri)) setIsLoading(true);
           }}
           onLoadEnd={() => {
+            if (isRemote && normalizedUri) loadedRemoteImageUris.add(normalizedUri);
             setIsLoading(false);
             if (!isRemote) {
               imageOpacity.setValue(1);

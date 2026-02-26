@@ -55,7 +55,7 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
 
     const canonicalPrint = item.printNameNorm || normalizePrintName(item.printName ?? '');
     if (canonicalPrint) {
-      const key = `${canonicalPrint}|${category}`;
+      const key = canonicalPrint;
       const sizes = printGroups.get(key) ?? new Set<string>();
       sizes.add(normalize(item.size));
       printGroups.set(key, sizes);
