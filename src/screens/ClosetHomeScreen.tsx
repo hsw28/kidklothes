@@ -1513,25 +1513,27 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     [selectedChild, items, childItems, storageLocations],
   );
   const duplicatePrints = useMemo(() => {
-    const groups = new Map<string, { printName: string; sizes: Set<string>; count: number }>();
+    const groups = new Map<string, { printName: string; sizes: Set<string>; count: number; sizeCounts: Record<string, number> }>();
     filteredOwnedItems
       .filter((item) => item.printNameNorm || item.printName?.trim())
       .forEach((item) => {
         const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
         if (!key) return;
-        const prev = groups.get(key) ?? { printName: item.printName?.trim() || key, sizes: new Set<string>(), count: 0 };
+        const sizeLabel = (item.size || '').trim() || 'N/A';
+        const prev = groups.get(key) ?? { printName: item.printName?.trim() || key, sizes: new Set<string>(), count: 0, sizeCounts: {} };
         prev.sizes.add(item.size);
         prev.count += 1;
+        prev.sizeCounts[sizeLabel] = (prev.sizeCounts[sizeLabel] ?? 0) + 1;
         groups.set(key, prev);
       });
     return Array.from(groups.values())
       .filter((entry) => entry.count > 1)
       .sort((a, b) => b.count - a.count)
       .slice(0, 8)
-      .map((entry) => ({ printName: entry.printName, sizes: Array.from(entry.sizes), count: entry.count }));
+      .map((entry) => ({ printName: entry.printName, sizes: Array.from(entry.sizes), count: entry.count, sizeCounts: entry.sizeCounts }));
   }, [filteredOwnedItems]);
   const duplicateStyles = useMemo(() => {
-    const groups = new Map<string, { label: string; brand?: string; sizes: Set<string>; count: number }>();
+    const groups = new Map<string, { label: string; brand?: string; sizes: Set<string>; count: number; sizeCounts: Record<string, number> }>();
     filteredOwnedItems.forEach((item) => {
       const styleLabel = (item.styleName || item.title || '').trim();
       if (!styleLabel) return;
@@ -1539,9 +1541,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       if (!styleKey) return;
       const brandLabel = (item.brand || item.brandTags[0] || '').trim();
       const key = `${styleKey}|${normalize(brandLabel)}`;
-      const prev = groups.get(key) ?? { label: styleLabel, brand: brandLabel || undefined, sizes: new Set<string>(), count: 0 };
+      const sizeLabel = (item.size || '').trim() || 'N/A';
+      const prev = groups.get(key) ?? { label: styleLabel, brand: brandLabel || undefined, sizes: new Set<string>(), count: 0, sizeCounts: {} };
       prev.sizes.add(item.size);
       prev.count += 1;
+      prev.sizeCounts[sizeLabel] = (prev.sizeCounts[sizeLabel] ?? 0) + 1;
       groups.set(key, prev);
     });
     return Array.from(groups.values())
@@ -1553,6 +1557,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         brand: entry.brand,
         sizes: Array.from(entry.sizes),
         count: entry.count,
+        sizeCounts: entry.sizeCounts,
       }));
   }, [filteredOwnedItems]);
   const recentlyAdded = useMemo(
@@ -2358,7 +2363,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                     ]}
                   >
                     <Text style={styles.duplicateLinkText}>
-                      {group.printName}: {group.sizes.join(', ')}
+                      {group.printName}: {group.sizes.map((size) => `${size} (${group.sizeCounts[(size || '').trim() || 'N/A'] ?? 0})`).join(', ')}
                     </Text>
                     <Text style={styles.duplicateLinkChevron}>›</Text>
                   </Pressable>
@@ -2406,7 +2411,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                     ]}
                   >
                     <Text style={styles.duplicateLinkText}>
-                      {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.join(', ')}
+                      {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.map((size) => `${size} (${group.sizeCounts[(size || '').trim() || 'N/A'] ?? 0})`).join(', ')}
                     </Text>
                     <Text style={styles.duplicateLinkChevron}>›</Text>
                   </Pressable>

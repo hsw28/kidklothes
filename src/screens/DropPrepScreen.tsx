@@ -73,27 +73,35 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
     });
   }, [selectedChild, items, childItems, brandId]);
   const duplicatePrintGroups = useMemo(() => {
-    const groups = new Map<string, { printName: string; sizes: Set<string>; count: number; itemIds: Set<string> }>();
+    const groups = new Map<string, { printName: string; sizes: Set<string>; count: number; itemIds: Set<string>; sizeCounts: Record<string, number> }>();
     ownedForDupes
       .filter((item) => item.printNameNorm || item.printName?.trim())
       .forEach((item) => {
         const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
         if (!key) return;
-        const prev = groups.get(key) ?? { printName: item.printName?.trim() || key, sizes: new Set<string>(), count: 0, itemIds: new Set<string>() };
+        const sizeLabel = (item.size || '').trim() || 'N/A';
+        const prev = groups.get(key) ?? { printName: item.printName?.trim() || key, sizes: new Set<string>(), count: 0, itemIds: new Set<string>(), sizeCounts: {} };
         prev.sizes.add(item.size);
         prev.count += 1;
         prev.itemIds.add(item.id);
+        prev.sizeCounts[sizeLabel] = (prev.sizeCounts[sizeLabel] ?? 0) + 1;
         groups.set(key, prev);
       });
     return Array.from(groups.values())
       .filter((entry) => entry.count > 1)
       .sort((a, b) => b.count - a.count)
       .slice(0, 12)
-      .map((entry) => ({ printName: entry.printName, sizes: Array.from(entry.sizes), count: entry.count, itemIds: Array.from(entry.itemIds) }));
+      .map((entry) => ({
+        printName: entry.printName,
+        sizes: Array.from(entry.sizes),
+        count: entry.count,
+        itemIds: Array.from(entry.itemIds),
+        sizeCounts: entry.sizeCounts,
+      }));
   }, [ownedForDupes]);
   const duplicateStyleGroups = useMemo(() => {
     const normalize = (value: string) => value.toLowerCase().trim();
-    const groups = new Map<string, { label: string; brand?: string; sizes: Set<string>; count: number; itemIds: Set<string> }>();
+    const groups = new Map<string, { label: string; brand?: string; sizes: Set<string>; count: number; itemIds: Set<string>; sizeCounts: Record<string, number> }>();
     ownedForDupes.forEach((item) => {
       const styleLabel = (item.styleName || item.title || '').trim();
       if (!styleLabel) return;
@@ -101,17 +109,26 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
       if (!styleKey) return;
       const brandLabel = (item.brand || item.brandTags[0] || '').trim();
       const key = `${styleKey}|${normalize(brandLabel)}|${item.clothingType}`;
-      const prev = groups.get(key) ?? { label: styleLabel, brand: brandLabel || undefined, sizes: new Set<string>(), count: 0, itemIds: new Set<string>() };
+      const sizeLabel = (item.size || '').trim() || 'N/A';
+      const prev = groups.get(key) ?? { label: styleLabel, brand: brandLabel || undefined, sizes: new Set<string>(), count: 0, itemIds: new Set<string>(), sizeCounts: {} };
       prev.sizes.add(item.size);
       prev.count += 1;
       prev.itemIds.add(item.id);
+      prev.sizeCounts[sizeLabel] = (prev.sizeCounts[sizeLabel] ?? 0) + 1;
       groups.set(key, prev);
     });
     return Array.from(groups.values())
       .filter((entry) => entry.count > 1)
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
       .slice(0, 12)
-      .map((entry) => ({ label: entry.label, brand: entry.brand, sizes: Array.from(entry.sizes), count: entry.count, itemIds: Array.from(entry.itemIds) }));
+      .map((entry) => ({
+        label: entry.label,
+        brand: entry.brand,
+        sizes: Array.from(entry.sizes),
+        count: entry.count,
+        itemIds: Array.from(entry.itemIds),
+        sizeCounts: entry.sizeCounts,
+      }));
   }, [ownedForDupes]);
 
   useEffect(() => {
@@ -470,7 +487,7 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
                     ]}
                   >
                     <Text style={styles.duplicateLinkText}>
-                      {group.printName}: {group.sizes.join(', ')}
+                      {group.printName}: {group.sizes.map((size) => `${size} (${group.sizeCounts[(size || '').trim() || 'N/A'] ?? 0})`).join(', ')}
                     </Text>
                     <Text style={styles.duplicateLinkChevron}>›</Text>
                   </Pressable>
@@ -515,7 +532,7 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
                     ]}
                   >
                     <Text style={styles.duplicateLinkText}>
-                      {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.join(', ')}
+                      {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.map((size) => `${size} (${group.sizeCounts[(size || '').trim() || 'N/A'] ?? 0})`).join(', ')}
                     </Text>
                     <Text style={styles.duplicateLinkChevron}>›</Text>
                   </Pressable>
