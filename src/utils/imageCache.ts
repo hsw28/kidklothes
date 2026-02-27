@@ -1,9 +1,9 @@
 import * as FileSystem from 'expo-file-system';
 
-const imageCacheDir = `${FileSystem.cacheDirectory ?? ''}layetteout-images/`;
+const imageCacheDir = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ''}layetteout-images/`;
 
 const ensureCacheDir = async () => {
-  if (!FileSystem.cacheDirectory) return;
+  if (!FileSystem.documentDirectory && !FileSystem.cacheDirectory) return;
   await FileSystem.makeDirectoryAsync(imageCacheDir, { intermediates: true });
 };
 
@@ -19,7 +19,7 @@ const extensionFromUrl = (url: string) => {
 };
 
 export const cacheRemoteImage = async (itemId: string, url: string): Promise<string | undefined> => {
-  if (!url.trim() || !FileSystem.cacheDirectory) return undefined;
+  if (!url.trim() || (!FileSystem.documentDirectory && !FileSystem.cacheDirectory)) return undefined;
   await ensureCacheDir();
   const ext = extensionFromUrl(url);
   const targetUri = `${imageCacheDir}${itemId}.${ext}`;

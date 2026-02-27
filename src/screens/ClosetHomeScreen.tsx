@@ -33,6 +33,7 @@ import { normalizeStyleName } from '@/utils/styleName';
 import { formatPieceCount } from '@/utils/formatCounts';
 import { formatItemCategoryLabel, getBrandShortLabel } from '@/utils/itemLabels';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
+import { cacheRemoteImage } from '@/utils/imageCache';
 import { showActionMenu } from '@/utils/actionSheets';
 import { compareSizeLabels, getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
@@ -417,7 +418,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
   return (
     <Animated.View style={styles.tileShell} {...(isReorderMode ? panHandlers : {})}>
       <Pressable
-        pointerEvents={isReorderMode ? 'none' : 'auto'}
+        pointerEvents="auto"
         onPress={() => {
           if (isReorderMode) return;
           if (heroDidDragRef.current) {
@@ -703,7 +704,7 @@ const RecentlyAddedItemCardComponent: React.FC<RecentlyAddedItemCardProps> = ({ 
 const RecentlyAddedItemCard = React.memo(RecentlyAddedItemCardComponent);
 
 export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { children, items, childItems, storageLocations, settings, logEvent, updateChild, updateSettings, canCreateAnotherKid } = useData();
+  const { children, items, childItems, storageLocations, settings, logEvent, updateChild, updateSettings, canCreateAnotherKid, updateItemCachedImage } = useData();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [sizeMode, setSizeMode] = useState<ClosetSizeMode>('now');
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
@@ -1364,6 +1365,31 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     () => sizeScopedItems.filter((item) => matchesBrand(item, brandId)).filter((item) => matchesSeason(item, seasonFilter)).filter((item) => matchesClosetSearch(item, closetSearch)),
     [sizeScopedItems, brandId, seasonFilter, matchesClosetSearch, closetSearch],
   );
+  useEffect(() => {
+    let cancelled = false;
+    const warmVisibleImages = async () => {
+      const candidates = filteredOwnedItems
+        .filter((item) => !item.cachedImageUri)
+        .map((item) => ({ id: item.id, url: getItemDisplayImageUri(item) || '' }))
+        .filter((entry) => /^https?:\/\//i.test(entry.url))
+        .slice(0, 16);
+
+      for (const candidate of candidates) {
+        if (cancelled) return;
+        try {
+          const uri = await cacheRemoteImage(candidate.id, candidate.url);
+          if (!uri || cancelled) continue;
+          await updateItemCachedImage(candidate.id, uri);
+        } catch {
+          // Best-effort cache warm for faster closet thumbnails.
+        }
+      }
+    };
+    void warmVisibleImages();
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredOwnedItems, updateItemCachedImage]);
 
   useEffect(() => {
     if (brandId !== 'All' && !brandOptions.includes(brandId)) setBrandId('All');
@@ -1950,9 +1976,9 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {showTileGridReorderMode ? (
         <Card>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <Text style={styles.meta}>Use arrows on tiles to reorder categories</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ gap: 8 }}>
+            <Text style={[styles.meta, { flexShrink: 1 }]}>Use arrows on tiles to reorder categories</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
               <Pressable
                 onPress={() => {
                   const resetVisible = closetCategories.filter((entry) => visibleCategories.includes(entry));

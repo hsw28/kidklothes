@@ -269,11 +269,16 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
     let cancelled = false;
 
     const cacheMissingImages = async () => {
+      const linkedItemIds = childId
+        ? new Set(childItems.filter((link) => link.childId === childId).map((link) => link.itemId))
+        : undefined;
       const candidates = items
+        .filter((item) => (linkedItemIds ? linkedItemIds.has(item.id) : true))
+        .filter((item) => (status === 'All' ? true : item.status === status))
         .filter((item) => !item.cachedImageUri)
         .map((item) => ({ id: item.id, url: getItemDisplayImageUri(item) || '' }))
         .filter((item) => item.url.startsWith('http'))
-        .slice(0, 6);
+        .slice(0, 18);
 
       for (const candidate of candidates) {
         if (cancelled) return;
@@ -291,7 +296,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [items, updateItemCachedImage]);
+  }, [items, childItems, childId, status, updateItemCachedImage]);
 
   const linksByItem = useMemo(() => {
     const map = new Map<string, typeof childItems>();
