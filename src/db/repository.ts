@@ -325,7 +325,6 @@ type PurchaseStateRow = {
 };
 
 const defaultSettings: AppSettings = {
-  detailPromptMode: 'sometimes',
   closetAddDefaultView: 'detailed',
   notificationsEnabled: false,
   notifyWeeklyTidy: false,
@@ -520,7 +519,6 @@ const mapOutfit = (row: OutfitRow, tags: string[]): Outfit => ({
 const mapSettings = (row?: SettingsRow | null): AppSettings => {
   if (!row) return defaultSettings;
   return {
-    detailPromptMode: (row.detailPromptMode as AppSettings['detailPromptMode']) ?? 'sometimes',
     closetAddDefaultView: row.closetAddDefaultView === 'simple' ? 'simple' : 'detailed',
     notificationsEnabled: row.notificationsEnabled === 1,
     notifyWeeklyTidy: row.notifyWeeklyTidy === 1,
@@ -787,7 +785,7 @@ export const repository = {
     const db = await getDb();
     await db.runAsync(
       `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, betaKidLimitBannerDismissed = ? WHERE id = ?;`,
-      next.detailPromptMode,
+      'never',
       next.closetAddDefaultView,
       next.notificationsEnabled ? 1 : 0,
       next.notifyWeeklyTidy ? 1 : 0,

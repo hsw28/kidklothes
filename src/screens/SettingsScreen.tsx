@@ -28,14 +28,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import Constants from 'expo-constants';
 import { PRIVACY_POLICY_URL } from '@/constants/legal';
 
-const promptModes: AppSettings['detailPromptMode'][] = ['never', 'sometimes', 'always'];
 const closetAddViewModes: AppSettings['closetAddDefaultView'][] = ['detailed', 'simple'];
 const DEV_SAMPLE_MARKER = '[DEV_SAMPLE_GENERATED]';
-const promptModeLabels: Record<AppSettings['detailPromptMode'], string> = {
-  never: 'Never',
-  sometimes: 'Sometimes',
-  always: 'Always',
-};
 const closetAddViewLabels: Record<AppSettings['closetAddDefaultView'], string> = {
   detailed: 'Detailed',
   simple: 'Simple',
@@ -320,20 +314,11 @@ export const SettingsScreen: React.FC = () => {
       <Card>
         <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Settings</Text>
         <Text style={{ color: '#4b5563' }}>
-          Data stays local. Configure inbox prompts, optional reminder nudges, and backup/export.
+          Data stays local. Configure optional reminder nudges and backup/export.
         </Text>
       </Card>
 
       <Card>
-        <ChipSelector
-          label="Prompt for Details After Save"
-          options={promptModes.map((mode) => promptModeLabels[mode])}
-          value={promptModeLabels[settings.detailPromptMode]}
-          onChange={(value) => {
-            const mode = promptModes.find((entry) => promptModeLabels[entry] === value) ?? settings.detailPromptMode;
-            updateSettings({ detailPromptMode: mode });
-          }}
-        />
         <ChipSelector
           label="Closet Add Default View"
           options={closetAddViewModes.map((mode) => closetAddViewLabels[mode])}
@@ -354,7 +339,7 @@ export const SettingsScreen: React.FC = () => {
       <Card>
         <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Category Layout</Text>
         <Text style={{ color: '#6b7280' }}>
-          Configure which categories appear on Kids cards. Closet and Wishlist category layout can be edited directly from those screens (long-press a category, then drag and drop).
+          Configure which categories appear on Kids cards. Closet and Wishlist category layout can be edited directly from those screens (long-press a category, then use the reorder controls).
         </Text>
         <KidsPreviewPrefsEditor
           ordered={sanitizeCategoryOrder(settings.kidsPreviewCategories, { includeOther: true, fallback: getConfiguredKidsPreviewCategories(settings) })}

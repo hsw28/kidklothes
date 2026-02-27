@@ -52,7 +52,6 @@ export type FitException = 'fits-small' | 'fits-big' | 'runs-true' | 'bamboo-str
 export type BrandFit = 'tts' | 'small' | 'big';
 export type KidFit = 'fits' | 'big' | 'small' | 'unknown';
 export type Condition = 'new-with-tags' | 'like-new' | 'good' | 'play' | 'donate';
-export type DetailPromptMode = 'never' | 'sometimes' | 'always';
 export type AddItemDefaultViewMode = 'simple' | 'detailed';
 export type FitBin = 'current' | 'next' | 'later' | 'unsure';
 export type ItemSizeType = 'apparel' | 'shoe';
@@ -203,7 +202,6 @@ export interface FilterPreset {
 }
 
 export interface AppSettings {
-  detailPromptMode: DetailPromptMode;
   closetAddDefaultView: AddItemDefaultViewMode;
   notificationsEnabled: boolean;
   notifyWeeklyTidy: boolean;

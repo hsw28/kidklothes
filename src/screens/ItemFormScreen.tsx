@@ -1051,6 +1051,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     if (quickMode || !showPrintSuggestions) return [];
     const query = debouncedPrintQuery;
     if (!query) return [];
+    const normalizedQuery = resolvePrintName(query, printAliases) || normalizePrintName(query);
 
     const candidatePool = items
       .filter((item) => item.id !== editing)
@@ -1072,6 +1073,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         canonical,
         score: jaccardTokenOverlap(query, canonical),
       }))
+      .filter((entry) => entry.canonical !== normalizedQuery)
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);

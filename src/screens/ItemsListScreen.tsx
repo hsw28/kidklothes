@@ -465,18 +465,6 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       setCaptureUrl('');
-      const mode = settings.detailPromptMode;
-      const shouldPrompt = mode === 'always' || (mode === 'sometimes' && Math.random() >= 0.5);
-
-      if (created && shouldPrompt) {
-        Alert.alert('Saved', 'Want to add details now?', [
-          { text: 'Later', style: 'cancel' },
-          {
-            text: 'Tidy now',
-            onPress: () => navigation.navigate('AddItem', { itemId: created.id }),
-          },
-        ]);
-      }
     } catch (error) {
       if (__DEV__) console.error('[ItemsList.quickSave] failed', {
         captureStatus,

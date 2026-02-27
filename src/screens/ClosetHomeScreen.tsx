@@ -1498,6 +1498,14 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     });
     return labels;
   }, [visibleCategories, brandId, sizeMode, selectedSizeChipLabel, closetSearch]);
+  const duplicateScopeLabel = useMemo(() => {
+    const sizePart = selectedSizeChipLabel || sizeModeLabels[sizeMode];
+    const parts = [`Size: ${sizePart}`];
+    if (brandId !== 'All') parts.push(`Brand: ${brandId}`);
+    if (seasonFilter !== 'All') parts.push(`Season: ${seasonFilter}`);
+    if (closetSearch.trim()) parts.push(`Search: "${closetSearch.trim()}"`);
+    return parts.join(' • ');
+  }, [selectedSizeChipLabel, sizeMode, brandId, seasonFilter, closetSearch]);
 
   const newThisWeek = useMemo(() => (selectedChild ? getNewThisWeek(selectedChild.id, items, childItems).slice(0, 12) : []), [selectedChild, items, childItems]);
   const sizeUpsStash = useMemo(
@@ -1817,7 +1825,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <Screen
       style={styles.screenContent}
-      scrollEnabled={!showTileGridReorderMode}
+      scrollEnabled
       overlay={(
         <>
           {showFirstKidAddedHint ? (
@@ -1878,26 +1886,34 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         />
         <View style={styles.sizeToggleWrap}>
           <Text style={styles.topBrandLabel}>Size</Text>
+          {(() => {
+            const selection = sizeModeToSelection(sizeMode);
+            const nowActive = selectedSizeChip ? Boolean(currentSizeNormalized && selectedSizeChip === currentSizeNormalized) : selection.now;
+            const nextActive = selectedSizeChip ? Boolean(nextSizeNormalized && selectedSizeChip === nextSizeNormalized) : selection.next;
+            const allActive = sizeMode === 'both' && !selectedSizeChip;
+            return (
           <View style={styles.sizeToggleRow}>
             <Pressable
-              style={[styles.sizeToggleChip, sizeModeToSelection(sizeMode).now ? styles.sizeToggleChipActive : null]}
+              style={[styles.sizeToggleChip, nowActive ? styles.sizeToggleChipActive : null]}
               onPress={() => toggleClosetSizeSelection('now')}
             >
-              <Text style={[styles.sizeToggleChipText, sizeModeToSelection(sizeMode).now ? styles.sizeToggleChipTextActive : null]}>Now</Text>
+              <Text style={[styles.sizeToggleChipText, nowActive ? styles.sizeToggleChipTextActive : null]}>Now</Text>
             </Pressable>
             <Pressable
-              style={[styles.sizeToggleChip, sizeModeToSelection(sizeMode).next ? styles.sizeToggleChipActive : null]}
+              style={[styles.sizeToggleChip, nextActive ? styles.sizeToggleChipActive : null]}
               onPress={() => toggleClosetSizeSelection('next')}
             >
-              <Text style={[styles.sizeToggleChipText, sizeModeToSelection(sizeMode).next ? styles.sizeToggleChipTextActive : null]}>Next</Text>
+              <Text style={[styles.sizeToggleChipText, nextActive ? styles.sizeToggleChipTextActive : null]}>Next</Text>
             </Pressable>
             <Pressable
-              style={[styles.sizeToggleChip, sizeMode === 'both' && !selectedSizeChip ? styles.sizeToggleChipActive : null]}
+              style={[styles.sizeToggleChip, allActive ? styles.sizeToggleChipActive : null]}
               onPress={selectAllClosetSizes}
             >
-              <Text style={[styles.sizeToggleChipText, sizeMode === 'both' && !selectedSizeChip ? styles.sizeToggleChipTextActive : null]}>All</Text>
+              <Text style={[styles.sizeToggleChipText, allActive ? styles.sizeToggleChipTextActive : null]}>All</Text>
             </Pressable>
           </View>
+            );
+          })()}
           {visibleSizeChipEntries.length > 0 ? (
             <View style={styles.sizeToggleRow}>
               {visibleSizeChipEntries.slice(0, 16).map((entry) => {
@@ -2311,6 +2327,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             <Pressable onPress={() => setShowDupes((prev) => !prev)}>
               <Text style={styles.sectionToggle}>Duplicate prints across sizes {showDupes ? '▾' : '▸'}</Text>
             </Pressable>
+            <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
             {showDupes ? (
               duplicatePrints.length ? (
                 duplicatePrints.map((group) => (
@@ -2356,6 +2373,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             <Pressable onPress={() => setShowStyleDupesList((prev) => !prev)}>
               <Text style={styles.sectionToggle}>Duplicate styles across sizes {showStyleDupesList ? '▾' : '▸'}</Text>
             </Pressable>
+            <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
             {showStyleDupesList ? (
               duplicateStyles.length ? (
                 duplicateStyles.map((group) => (
