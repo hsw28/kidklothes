@@ -17,6 +17,7 @@ import { normalizePrintName } from '@/utils/printName';
 import { normalizeStyleName } from '@/utils/styleName';
 import { formatSizeDisplay, getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
 import { useAppTheme } from '@/theme';
+import { cacheRemoteImage } from '@/utils/imageCache';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
 import { getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 
@@ -57,13 +58,14 @@ const CategoryGridCard = React.memo(CategoryGridCardComponent);
 
 export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) => {
   const theme = useAppTheme();
-  const { children, items, childItems, storageLocations, settings } = useData();
+  const { children, items, childItems, storageLocations, settings, updateItemCachedImage } = useData();
   const child = children.find((entry) => entry.id === route.params.childId);
   const category = route.params.category as ClosetCategory;
   const [sizeModeFilter, setSizeModeFilter] = useState<ClosetSizeMode>(route.params.sizeMode ?? 'both');
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
-  const [brandFilter, setBrandFilter] = useState<string>(route.params.brandId ?? 'All');
+  const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>(route.params.brandIds?.length ? route.params.brandIds : route.params.brandId ? [route.params.brandId] : []);
   const [styleFilter, setStyleFilter] = useState<string>('All');
+  const [warmedImageUris, setWarmedImageUris] = useState<Record<string, { source: string; cached: string }>>({});
   const season = route.params.season;
   const [binType, setBinType] = useState<ClothingType>('bottom');
   const [binSize, setBinSize] = useState('3T');
@@ -190,6 +192,27 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     }
     return Boolean(nextSizeNormalized && itemSize === nextSizeNormalized);
   }, [sizeModeFilter, selectedSizeChip, child?.usesMixedSizes, activeSizeNormalizedSet, currentSizeNormalized, nextSizeNormalized]);
+  const normalizeBrandFilterKey = useCallback((value: string) => value.toLowerCase().trim(), []);
+  const matchesSelectedBrands = useCallback((item: { brand?: string | null; brandTags: string[] }, brands: string[]) => {
+    if (brands.length === 0) return true;
+    const itemBrand = normalizeBrandFilterKey(item.brand ?? '');
+    const itemBrandTags = new Set(item.brandTags.map((tag) => normalizeBrandFilterKey(tag)));
+    return brands.some((brand) => {
+      const key = normalizeBrandFilterKey(brand);
+      return itemBrand === key || itemBrandTags.has(key);
+    });
+  }, [normalizeBrandFilterKey]);
+  const toggleBrandSelection = useCallback((option: string) => {
+    if (option === 'All') {
+      setSelectedBrandIds([]);
+      return;
+    }
+    setSelectedBrandIds((current) => {
+      const exists = current.some((entry) => normalizeBrandFilterKey(entry) === normalizeBrandFilterKey(option));
+      if (exists) return current.filter((entry) => normalizeBrandFilterKey(entry) !== normalizeBrandFilterKey(option));
+      return [...current, option];
+    });
+  }, [normalizeBrandFilterKey]);
 
   const availableBrandOptions = useMemo(() => {
     if (!categoryBaseItems || !child) return ['All'];
@@ -220,10 +243,8 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   }, [categoryBaseItems, child, childLocations, locationFilter, sizeModeFilter, category, season, matchesSnapshotSizeFilter]);
 
   useEffect(() => {
-    if (!availableBrandOptions.includes(brandFilter)) {
-      setBrandFilter('All');
-    }
-  }, [availableBrandOptions, brandFilter]);
+    setSelectedBrandIds((current) => current.filter((brand) => availableBrandOptions.includes(brand)));
+  }, [availableBrandOptions]);
 
   const availableStyleOptions = useMemo(() => {
     if (!categoryBaseItems || !child) return ['All'];
@@ -238,9 +259,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const scopedBySeason = season
       ? scopedBySize.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : scopedBySize;
-    const scopedByBrand = brandFilter !== 'All'
-      ? scopedBySeason.filter((item) => item.brandTags.includes(brandFilter) || (item.brand ?? '').toLowerCase().trim() === brandFilter.toLowerCase().trim())
-      : scopedBySeason;
+    const scopedByBrand = scopedBySeason.filter((item) => matchesSelectedBrands(item, selectedBrandIds));
     const names = new Map<string, string>();
     scopedByBrand.forEach((item) => {
       const candidate = (item.styleName ?? '').trim();
@@ -250,7 +269,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       if (!current || (current === current.toLowerCase() && candidate !== candidate.toLowerCase())) names.set(key, candidate);
     });
     return ['All', ...Array.from(names.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
-  }, [categoryBaseItems, child, childLocations, locationFilter, season, brandFilter, matchesSnapshotSizeFilter]);
+  }, [categoryBaseItems, child, childLocations, locationFilter, season, selectedBrandIds, matchesSnapshotSizeFilter, matchesSelectedBrands]);
 
   useEffect(() => {
     if (!availableStyleOptions.includes(styleFilter)) {
@@ -272,9 +291,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     });
     const anchors = getSizeAnchors(owned, child);
     const sizeFiltered = owned.filter((item) => matchesSnapshotSizeFilter(item));
-    const brandFiltered = brandFilter !== 'All'
-      ? sizeFiltered.filter((item) => item.brandTags.includes(brandFilter) || (item.brand ?? '').toLowerCase().trim() === brandFilter.toLowerCase().trim())
-      : sizeFiltered;
+    const brandFiltered = sizeFiltered.filter((item) => matchesSelectedBrands(item, selectedBrandIds));
     const seasonFiltered = season
       ? brandFiltered.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : brandFiltered;
@@ -305,7 +322,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       mostWorn: sortedByWorn[0],
       leastWorn: sortedByWorn.length ? sortedByWorn[sortedByWorn.length - 1] : undefined,
     };
-  }, [child, categoryBaseItems, category, locationFilter, childLocations, brandFilter, styleFilter, season, matchesSnapshotSizeFilter]);
+  }, [child, categoryBaseItems, category, locationFilter, childLocations, selectedBrandIds, styleFilter, season, matchesSnapshotSizeFilter, matchesSelectedBrands]);
 
   if (!child || !summary) {
     return (
@@ -324,7 +341,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const groups = new Map<string, { printName: string; sizes: Set<string>; count: number }>();
     childData.items
       .filter((item) => item.status === 'owned' && closetCategoryForItem(item) === category && (item.printNameNorm || item.printName?.trim()))
-      .filter((item) => (brandFilter === 'All' ? true : item.brandTags.includes(brandFilter) || (item.brand ?? '').toLowerCase().trim() === brandFilter.toLowerCase().trim()))
+      .filter((item) => matchesSelectedBrands(item, selectedBrandIds))
       .filter((item) => (styleFilter === 'All' ? true : normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter)))
       .filter((item) => (season ? item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()) : true))
       .forEach((item) => {
@@ -344,9 +361,39 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
         count: entry.count,
       }))
       .sort((a, b) => b.count - a.count);
-  }, [childData.items, category, brandFilter, styleFilter, season]);
+  }, [childData.items, category, selectedBrandIds, styleFilter, season, matchesSelectedBrands]);
 
   const gridItems = summary.items;
+  useEffect(() => {
+    let cancelled = false;
+    const warmVisibleImages = async () => {
+      const candidates = gridItems
+        .filter((item) => !item.cachedImageUri)
+        .map((item) => ({ id: item.id, source: getItemDisplayImageUri(item) || '' }))
+        .filter((entry) => /^https?:\/\//i.test(entry.source))
+        .filter((entry) => {
+          const warmed = warmedImageUris[entry.id];
+          return !warmed || warmed.source !== entry.source;
+        })
+        .slice(0, 18);
+
+      for (const candidate of candidates) {
+        if (cancelled) return;
+        try {
+          const cached = await cacheRemoteImage(candidate.id, candidate.source);
+          if (!cached || cancelled) continue;
+          setWarmedImageUris((current) => ({ ...current, [candidate.id]: { source: candidate.source, cached } }));
+          await updateItemCachedImage(candidate.id, cached);
+        } catch {
+          // Best-effort warm cache for faster category images.
+        }
+      }
+    };
+    void warmVisibleImages();
+    return () => {
+      cancelled = true;
+    };
+  }, [gridItems, warmedImageUris, updateItemCachedImage]);
   const openItemDetail = useCallback((itemId: string) => {
     navigation.navigate('ItemDetail', { itemId });
   }, [navigation]);
@@ -397,8 +444,9 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
           <ChipSelector
             label="Brand"
             options={availableBrandOptions}
-            value={brandFilter}
-            onChange={setBrandFilter}
+            value={selectedBrandIds.length === 0 ? 'All' : undefined}
+            selectedValues={selectedBrandIds}
+            onChange={toggleBrandSelection}
           />
           <ChipSelector
             label="Style"
@@ -420,13 +468,16 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
         ) : (
           <View style={[styles.grid, compactGrid ? styles.gridCompact : null]}>
             {gridItems.map((item) => {
+              const sourceUri = getItemDisplayImageUri(item) ?? '';
+              const warmed = warmedImageUris[item.id];
+              const displayUri = warmed && warmed.source === sourceUri ? warmed.cached : sourceUri || undefined;
               return (
                 <CategoryGridCard
-                  key={`${item.id}:${getItemDisplayImageUri(item) ?? ''}`}
+                  key={item.id}
                   itemId={item.id}
                   title={item.title}
                   size={item.size}
-                  uri={getItemDisplayImageUri(item)}
+                  uri={displayUri}
                   compact={compactGrid}
                   onPress={openItemDetail}
                 />
@@ -443,7 +494,8 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
         {showInsights ? (
           <View style={styles.sectionContent}>
             {child.currentSize.code ? <Text style={styles.meta}>Current Size (Profile): {formatSizeDisplay(child.currentSize.code, child.currentSize.otherText ?? null)}</Text> : null}
-            {brandFilter !== 'All' ? <Text style={styles.meta}>Brand Filter: {brandFilter}</Text> : null}
+            {selectedBrandIds.length === 1 ? <Text style={styles.meta}>Brand Filter: {selectedBrandIds[0]}</Text> : null}
+            {selectedBrandIds.length > 1 ? <Text style={styles.meta}>Brand Filter: {selectedBrandIds.length} brands</Text> : null}
             {styleFilter !== 'All' ? <Text style={styles.meta}>Style Filter: {styleFilter}</Text> : null}
             {season ? <Text style={styles.meta}>Season: {season}</Text> : null}
             <Text style={styles.meta}>Items in Current Size ({summary.currentSize}): {summary.currentCount}</Text>

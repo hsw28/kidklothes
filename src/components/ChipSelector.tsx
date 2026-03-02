@@ -6,6 +6,7 @@ interface ChipSelectorProps<T extends string> {
   label: string;
   options: T[];
   value?: T;
+  selectedValues?: T[];
   onChange: (value: T) => void;
   onOptionLongPress?: (value: T) => void;
   accent?: AccentName;
@@ -15,6 +16,7 @@ export const ChipSelector = <T extends string>({
   label,
   options,
   value,
+  selectedValues,
   onChange,
   onOptionLongPress,
   accent = 'coral',
@@ -59,7 +61,7 @@ export const ChipSelector = <T extends string>({
       <Text style={styles.label}>{label}</Text>
       <View style={styles.row}>
         {options.map((option) => {
-          const active = value === option;
+          const active = value === option || Boolean(selectedValues?.includes(option));
           const colors = getAccentColors(theme, accent, active);
           return (
             <Pressable

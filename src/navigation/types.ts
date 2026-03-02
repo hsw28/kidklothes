@@ -65,7 +65,7 @@ export type ClosetStackParamList = {
       }
     | undefined;
   SellBin: undefined;
-  CategorySnapshot: { childId: ID; category: string; sizeMode?: ClosetSizeMode; brandId?: string; season?: string };
+  CategorySnapshot: { childId: ID; category: string; sizeMode?: ClosetSizeMode; brandId?: string; brandIds?: string[]; season?: string };
   OutfitsList: undefined;
   OutfitBuilder: { outfitId?: ID } | undefined;
   ItemDetail: { itemId: ID };

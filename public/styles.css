@@ -286,21 +286,40 @@ a:hover {
   font-size: clamp(1.06rem, 2.5vw, 1.3rem);
   letter-spacing: -0.015em;
   font-weight: 630;
-  margin-bottom: clamp(18px, 3vw, 26px);
+}
+
+.screenshots-subtext {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-bottom: clamp(16px, 2.4vw, 22px);
 }
 
 .screenshots-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: clamp(24px, 3vw, 32px);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: clamp(16px, 2.2vw, 20px);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 2px 10px;
 }
 
-.screenshots-grid img {
+.screenshot-card {
+  margin: 0;
+  flex: 0 0 min(82vw, 300px);
+  width: min(82vw, 300px);
+  max-width: 320px;
+  scroll-snap-align: start;
+}
+
+.screenshot-card img {
+  display: block;
   width: 100%;
   height: auto;
   object-fit: contain;
-  border-radius: 24px;
-  box-shadow: 0 10px 28px rgba(20, 17, 13, 0.08);
+  border-radius: 16px;
+  box-shadow: 0 8px 22px rgba(20, 17, 13, 0.07);
 }
 
 .feature-statements {
@@ -468,11 +487,15 @@ a:hover {
   gap: 10px;
 }
 
-@media (min-width: 560px) {
-  .screenshots-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (min-width: 600px) {
+  .screenshot-card {
+    flex: 0 0 calc((100% - 18px) / 2);
+    width: calc((100% - 18px) / 2);
+    max-width: 320px;
   }
+}
 
+@media (min-width: 560px) {
   .feature-line {
     grid-template-columns: 154px 1fr;
     gap: 10px;
@@ -489,8 +512,10 @@ a:hover {
 }
 
 @media (min-width: 900px) {
-  .screenshots-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .screenshot-card {
+    flex: 0 0 calc((100% - 40px) / 3);
+    width: calc((100% - 40px) / 3);
+    max-width: 320px;
   }
 
   .hero {

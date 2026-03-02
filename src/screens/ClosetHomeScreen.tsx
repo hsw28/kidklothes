@@ -708,7 +708,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [sizeMode, setSizeMode] = useState<ClosetSizeMode>('now');
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
-  const [brandId, setBrandId] = useState<string>('All');
+  const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>([]);
   const [seasonFilter, setSeasonFilter] = useState<string>('All');
   const [closetSearch, setClosetSearch] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -761,7 +761,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       console.warn('[ClosetHomeScreen] high render count in short window', {
         childId: selectedChild?.id ?? null,
         sizeMode,
-        brandId,
+        brandId: selectedBrandIds.join(','),
         seasonFilter,
       });
     }
@@ -1298,10 +1298,15 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [sizeMode, currentSizeNormalized, nextSizeNormalized]);
 
-  const matchesBrand = (item: (typeof ownedItems)[number], selectedBrand: string) => {
-    if (selectedBrand === 'All') return true;
-    if ((item.brand ?? '').toLowerCase().trim() === selectedBrand.toLowerCase().trim()) return true;
-    return item.brandTags.some((tag) => tag.toLowerCase().trim() === selectedBrand.toLowerCase().trim());
+  const normalizeBrandFilterKey = (value: string) => value.toLowerCase().trim();
+  const matchesBrand = (item: (typeof ownedItems)[number], selectedBrands: string[]) => {
+    if (selectedBrands.length === 0) return true;
+    const itemBrand = normalizeBrandFilterKey(item.brand ?? '');
+    const itemBrandTags = new Set(item.brandTags.map((tag) => normalizeBrandFilterKey(tag)));
+    return selectedBrands.some((selectedBrand) => {
+      const key = normalizeBrandFilterKey(selectedBrand);
+      return itemBrand === key || itemBrandTags.has(key);
+    });
   };
   const matchesSeason = (item: (typeof ownedItems)[number], selectedSeason: string) => {
     if (selectedSeason === 'All') return true;
@@ -1328,10 +1333,10 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const seasonOptions = useMemo(() => {
     const values = new Set<string>();
     sizeScopedItems
-      .filter((item) => matchesBrand(item, brandId))
+      .filter((item) => matchesBrand(item, selectedBrandIds))
       .forEach((item) => item.seasonTags.forEach((tag) => tag.trim() && values.add(tag.trim())));
     return ['All', ...Array.from(values).sort((a, b) => a.localeCompare(b))];
-  }, [sizeScopedItems, brandId]);
+  }, [sizeScopedItems, selectedBrandIds]);
 
   const brandOptions = useMemo(() => {
     const values = new Map<string, { count: number; label: string }>();
@@ -1362,8 +1367,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [sizeScopedItems, seasonFilter]);
 
   const filteredOwnedItems = useMemo(
-    () => sizeScopedItems.filter((item) => matchesBrand(item, brandId)).filter((item) => matchesSeason(item, seasonFilter)).filter((item) => matchesClosetSearch(item, closetSearch)),
-    [sizeScopedItems, brandId, seasonFilter, matchesClosetSearch, closetSearch],
+    () => sizeScopedItems.filter((item) => matchesBrand(item, selectedBrandIds)).filter((item) => matchesSeason(item, seasonFilter)).filter((item) => matchesClosetSearch(item, closetSearch)),
+    [sizeScopedItems, selectedBrandIds, seasonFilter, matchesClosetSearch, closetSearch],
   );
   useEffect(() => {
     let cancelled = false;
@@ -1392,8 +1397,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [filteredOwnedItems, updateItemCachedImage]);
 
   useEffect(() => {
-    if (brandId !== 'All' && !brandOptions.includes(brandId)) setBrandId('All');
-  }, [brandId, brandOptions]);
+    setSelectedBrandIds((current) => current.filter((brand) => brandOptions.includes(brand)));
+  }, [brandOptions]);
   useEffect(() => {
     if (seasonFilter !== 'All' && !seasonOptions.includes(seasonFilter)) setSeasonFilter('All');
   }, [seasonFilter, seasonOptions]);
@@ -1403,8 +1408,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       loggedBrandChangeRef.current = true;
       return;
     }
-    void logEvent('closet_brand_filter_changed', { brandId: brandId === 'All' ? 'all' : brandId });
-  }, [brandId]);
+    void logEvent('closet_brand_filter_changed', { brandId: selectedBrandIds.length ? selectedBrandIds.join(',') : 'all' });
+  }, [selectedBrandIds]);
   useEffect(() => {
     if (!loggedSeasonChangeRef.current) {
       loggedSeasonChangeRef.current = true;
@@ -1448,7 +1453,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const tileSignals = useMemo(() => {
     const result = new Map<ClosetCategory, { hasUps: boolean; hasDupes: boolean; hasStyleDupes: boolean }>();
     visibleCategories.forEach((category) => {
-      const scoped = ownedItems.filter((item) => closetCategoryForItem(item) === category).filter((item) => matchesBrand(item, brandId)).filter((item) => matchesSeason(item, seasonFilter));
+      const scoped = ownedItems.filter((item) => closetCategoryForItem(item) === category).filter((item) => matchesBrand(item, selectedBrandIds)).filter((item) => matchesSeason(item, seasonFilter));
       const next = sizeAnchors.nextByCategory.get(category);
       const hasUps = next ? scoped.some((item) => normalize(item.size) === normalize(next)) : false;
       const printGroups = new Map<string, number>();
@@ -1469,8 +1474,27 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       result.set(category, { hasUps, hasDupes, hasStyleDupes });
     });
     return result;
-  }, [visibleCategories, ownedItems, brandId, seasonFilter, sizeAnchors]);
+  }, [visibleCategories, ownedItems, selectedBrandIds, seasonFilter, sizeAnchors]);
 
+  const toggleBrandSelection = useCallback((option: string) => {
+    if (option === 'All') {
+      setSelectedBrandIds([]);
+      return;
+    }
+    setSelectedBrandIds((current) => {
+      const exists = current.some((entry) => entry.toLowerCase().trim() === option.toLowerCase().trim());
+      if (exists) return current.filter((entry) => entry.toLowerCase().trim() !== option.toLowerCase().trim());
+      return [...current, option];
+    });
+  }, []);
+  const activeBrandName = selectedBrandIds.length === 1 ? selectedBrandIds[0] : undefined;
+  const activeBrandSummaryLabel = selectedBrandIds.length === 0
+    ? 'All brands'
+    : selectedBrandIds.length === 1
+      ? selectedBrandIds[0]
+      : `${selectedBrandIds.length} brands`;
+  const activeBrandShortLabel = activeBrandName ? getBrandShortLabel(activeBrandName) : undefined;
+  const primaryBrandId = selectedBrandIds.length === 1 ? selectedBrandIds[0] : undefined;
   const totalFilteredCount = useMemo(() => visibleCategories.reduce((sum, category) => sum + (counts[category] ?? 0), 0), [visibleCategories, counts]);
   const selectedSizeChipLabel = useMemo(
     () =>
@@ -1489,7 +1513,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         category,
         buildEmptyCategoryLabel({
           categoryName: closetLabel[category],
-          brandFilter: brandId,
+          brandFilter: selectedBrandIds.length === 1 ? selectedBrandIds[0] : 'All',
           sizeScope,
           selectedSizes: selectedSizeChipLabel ? [selectedSizeChipLabel] : [],
           query: closetSearch,
@@ -1497,15 +1521,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       );
     });
     return labels;
-  }, [visibleCategories, brandId, sizeMode, selectedSizeChipLabel, closetSearch]);
+  }, [visibleCategories, selectedBrandIds, sizeMode, selectedSizeChipLabel, closetSearch]);
   const duplicateScopeLabel = useMemo(() => {
     const sizePart = selectedSizeChipLabel || sizeModeLabels[sizeMode];
     const parts = [`Size: ${sizePart}`];
-    if (brandId !== 'All') parts.push(`Brand: ${brandId}`);
+    if (selectedBrandIds.length === 1) parts.push(`Brand: ${selectedBrandIds[0]}`);
+    else if (selectedBrandIds.length > 1) parts.push(`Brands: ${selectedBrandIds.length}`);
     if (seasonFilter !== 'All') parts.push(`Season: ${seasonFilter}`);
     if (closetSearch.trim()) parts.push(`Search: "${closetSearch.trim()}"`);
     return parts.join(' • ');
-  }, [selectedSizeChipLabel, sizeMode, brandId, seasonFilter, closetSearch]);
+  }, [selectedSizeChipLabel, sizeMode, selectedBrandIds, seasonFilter, closetSearch]);
 
   const newThisWeek = useMemo(() => (selectedChild ? getNewThisWeek(selectedChild.id, items, childItems).slice(0, 12) : []), [selectedChild, items, childItems]);
   const sizeUpsStash = useMemo(
@@ -1770,9 +1795,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   };
 
-  const filtersSummary = `${brandId === 'All' ? 'All brands' : brandId} • ${seasonFilter === 'All' ? 'All seasons' : seasonFilter}`;
-  const activeBrandName = brandId === 'All' ? undefined : brandId;
-  const activeBrandShortLabel = activeBrandName ? getBrandShortLabel(activeBrandName) : undefined;
+  const filtersSummary = `${activeBrandSummaryLabel} • ${seasonFilter === 'All' ? 'All seasons' : seasonFilter}`;
   const handleActionClick = async (action: 'before_you_buy' | 'drop_prep' | 'quick_add' | 'drawer_scan' | 'brands') => {
     await logEvent('closet_action_clicked', { action, childId: selectedChild.id });
   };
@@ -1885,7 +1908,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           onChange={(name) => {
             const nextId = children.find((child) => child.name === name)?.id ?? selectedChild.id;
             setChildId(nextId);
-            setBrandId('All');
+            setSelectedBrandIds([]);
           }}
           accent="coral"
         />
@@ -1951,16 +1974,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.topBrandRowWrap}>
             <View style={styles.topBrandHeader}>
               <Text style={styles.topBrandLabel}>Brand Filter</Text>
-              <Text style={styles.topBrandModeText}>{activeBrandName ? `Filtering: ${activeBrandName}` : 'All brands'}</Text>
+              <Text style={styles.topBrandModeText}>{selectedBrandIds.length ? `Filtering: ${activeBrandSummaryLabel}` : 'All brands'}</Text>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroller} contentContainerStyle={styles.chipRow}>
               {['All', ...brandOptions.filter((b) => b !== 'All').slice(0, 5)].map((option) => {
-                const active = brandId === option;
+                const active = option === 'All' ? selectedBrandIds.length === 0 : selectedBrandIds.includes(option);
                 return (
                   <Pressable
                     key={`top-brand-${option}`}
                     style={[styles.topBrandChip, active ? styles.topBrandChipActive : null]}
-                    onPress={() => setBrandId(option)}
+                    onPress={() => toggleBrandSelection(option)}
                   >
                     <Text style={[styles.topBrandChipText, active ? styles.topBrandChipTextActive : null]}>{option}</Text>
                   </Pressable>
@@ -2081,7 +2104,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                   childId: selectedChild.id,
                   category,
                   sizeMode,
-                  brandId: brandId === 'All' ? undefined : brandId,
+                  brandId: primaryBrandId,
+                  brandIds: selectedBrandIds.length ? selectedBrandIds : undefined,
                   season: seasonFilter === 'All' ? undefined : seasonFilter,
                 });
               }}
@@ -2184,12 +2208,12 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.meta}>Brand</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroller} contentContainerStyle={styles.chipRow}>
             {brandOptions.map((option) => {
-              const active = brandId === option;
+              const active = option === 'All' ? selectedBrandIds.length === 0 : selectedBrandIds.includes(option);
               return (
                 <Pressable
                   key={`brand-${option}`}
                   style={[styles.filterChip, active ? styles.filterChipActive : null]}
-                  onPress={() => setBrandId(option)}
+                  onPress={() => toggleBrandSelection(option)}
                 >
                   <Text style={[styles.filterChipText, active ? styles.filterChipTextActiveCoral : null]}>{option}</Text>
                 </Pressable>
@@ -2351,7 +2375,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                         hideInbox: true,
                         initialChildId: selectedChild.id,
                         initialStatus: 'owned',
-                        initialBrandId: brandId === 'All' ? undefined : brandId,
+                        initialBrandId: primaryBrandId,
                         initialItemIds: itemIds,
                       });
                     }}
@@ -2399,7 +2423,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                         hideInbox: true,
                         initialChildId: selectedChild.id,
                         initialStatus: 'owned',
-                        initialBrandId: brandId === 'All' ? undefined : brandId,
+                        initialBrandId: primaryBrandId,
                         initialItemIds: itemIds,
                       });
                     }}
