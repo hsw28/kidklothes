@@ -301,7 +301,7 @@ export const BeforeYouBuyScreen: React.FC<Props> = ({ route, navigation }) => {
     <Screen>
       <Card>
         <Text style={styles.title}>Going Shopping?</Text>
-        <Text style={styles.subtitle}>Save now, add details later, and avoid duplicates while shopping.</Text>
+        <Text style={styles.subtitle}>Check what fits now or next, and catch duplicate prints or styles before you buy.</Text>
         {selectedChild?.currentSize?.code ? (
           <Text style={styles.subtitle}>
             Wearing now: {formatSizeDisplay(selectedChild.currentSize.code, selectedChild.currentSize.otherText ?? null)}

@@ -1899,8 +1899,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       )}
     >
       <Card>
-        <Text style={styles.headerTitle}>Closet View</Text>
-        <Text style={styles.headerTagline}>See what you have so you know what to buy.</Text>
+        <Text style={styles.headerTitle}>What Fits Now</Text>
+        <Text style={styles.headerTagline}>Track current, next, later, and avoid duplicate buys.</Text>
         <ChipSelector
           label="Child"
           options={children.map((child) => child.name)}

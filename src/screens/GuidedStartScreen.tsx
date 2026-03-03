@@ -123,7 +123,7 @@ export const GuidedStartScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <Screen scroll={false} style={styles.screen}>
       <View style={styles.content}>
-        <Text style={styles.title}>How Layette Out works</Text>
+        <Text style={styles.title}>Organize by What Fits</Text>
 
         {renderInfoCard('🧺', 'Closet', 'Track what fits now and next.', goCloset, 'Open Closet')}
         {renderInfoCard('🛍️', 'Wishlist', 'Save links from any store.', goWishlist, 'Open Wishlist')}

@@ -2,6 +2,7 @@
   "expo": {
     "name": "Layette Out",
     "slug": "layetteout",
+    "icon": "ios/LayetteOut/Images.xcassets/AppIcon.appiconset/iconrecenter.png",
     "scheme": [
       "layetteout",
       "layetteout"
@@ -9,18 +10,27 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "ios/LayetteOut/Images.xcassets/AppIcon.appiconset/iconrecenter.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F5F2EF"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.layetteout",
+      "bundleIdentifier": "com.layetteout.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.anonymous.layetteout"
+      "package": "com.layetteout.app",
+      "adaptiveIcon": {
+        "foregroundImage": "ios/LayetteOut/Images.xcassets/AppIcon.appiconset/iconrecenter.png",
+        "backgroundColor": "#F5F2EF"
+      }
     },
     "plugins": [
       [
