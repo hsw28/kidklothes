@@ -20,13 +20,13 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.layetteout.app",
+      "bundleIdentifier": "com.anonymous.layetteout",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.layetteout.app",
+      "package": "com.anonymous.layetteout",
       "adaptiveIcon": {
         "foregroundImage": "ios/LayetteOut/Images.xcassets/AppIcon.appiconset/iconrecenter.png",
         "backgroundColor": "#F5F2EF"
