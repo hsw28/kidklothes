@@ -9,6 +9,7 @@ import { sanitizeCategoryOrder, sanitizeHiddenCategories, sanitizeCategoryOrder 
 import { getMaxKidsAllowed } from '@/config/betaLimits';
 import { makeId } from '@/utils/id';
 import { inferSizeScheme, isShoeCategory, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
+import { normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
 import { getDb, initDatabase } from './sqlite';
 
 export interface NewChildInput {
@@ -341,7 +342,7 @@ const defaultSettings: AppSettings = {
   wishlistCategoryOrder: undefined,
   hiddenWishlistCategories: [],
   kidsPreviewCategories: undefined,
-  inventoryRealityCheckOwnedThreshold: 4,
+  inventoryRealityCheckOwnedThreshold: 5,
   developerModeEnabled: false,
   betaKidLimitBannerDismissed: false,
 };
@@ -539,7 +540,7 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
       const raw = parseStringList(row.kidsPreviewCategories);
       return sanitizeCategoryOrder(raw, { includeOther: true, fallback: raw as any });
     })(),
-    inventoryRealityCheckOwnedThreshold: row.inventoryRealityCheckOwnedThreshold ?? defaultSettings.inventoryRealityCheckOwnedThreshold,
+    inventoryRealityCheckOwnedThreshold: normalizeInventoryRealityThreshold(row.inventoryRealityCheckOwnedThreshold),
     developerModeEnabled: row.developerModeEnabled === 1,
     betaKidLimitBannerDismissed: row.betaKidLimitBannerDismissed === 1,
   };
@@ -779,7 +780,13 @@ export const repository = {
 
   async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
     const current = await repository.getSettings();
-    const next: AppSettings = { ...current, ...patch };
+    const next: AppSettings = {
+      ...current,
+      ...patch,
+      inventoryRealityCheckOwnedThreshold: normalizeInventoryRealityThreshold(
+        patch.inventoryRealityCheckOwnedThreshold ?? current.inventoryRealityCheckOwnedThreshold,
+      ),
+    };
 
     await initDatabase();
     const db = await getDb();

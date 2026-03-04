@@ -22,6 +22,7 @@ import { fetchLinkMetadata } from '@/utils/unfurlUrl';
 import { pickPhotoFromLibrary, takePhotoWithCamera } from '@/utils/photoPicker';
 import { validateNewItemInput } from '@/utils/itemValidation';
 import { cacheRemoteImage } from '@/utils/imageCache';
+import { normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
 import { APPAREL_AGE_SIZES, APPAREL_ALPHA_SIZES, US_SHOE_SIZES, computeDefaultFitBin, getSizeUIModel, inferSizeScheme, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
 
 const statusOptions: ItemStatus[] = ['wishlist', 'owned', 'for-sale', 'sold'];
@@ -838,7 +839,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
     if (status === 'wishlist' && size.trim()) {
       const awareness = getWishlistAwareness(items, { childId, clothingType: closetCategoryToClothingType(category), size });
-      const inventoryRealityThreshold = Math.max(1, settings.inventoryRealityCheckOwnedThreshold ?? 4);
+      const inventoryRealityThreshold = normalizeInventoryRealityThreshold(settings.inventoryRealityCheckOwnedThreshold);
       if (awareness.ownedCount >= inventoryRealityThreshold) {
         Alert.alert('Inventory Reality Check', `You already own ${awareness.ownedCount} ${category ? closetLabel[category] : clothingType} items in size ${size}.`);
       }
@@ -1092,7 +1093,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         {(!existing || !quickMode) ? (
           <>
           <FormInput
-            label="URL"
+            label="Paste a product and we'll fill in the details"
             value={url}
             onChangeText={(value) => {
               const sanitized = sanitizeUrlInput(value);
@@ -1104,6 +1105,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             autoCapitalize="none"
             placeholder="https://..."
           />
+          <Text style={styles.urlTip}>Tip: You can also add items directly from your browser using the Share button.</Text>
           {(previewCard.status === 'loading' || previewCard.status === 'success' || previewCard.status === 'error') ? (
             <Card>
               {previewCard.status === 'loading' ? (
@@ -1656,5 +1658,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#1d4ed8',
     fontWeight: '700',
+  },
+  urlTip: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: -6,
+    marginBottom: 6,
   },
 });

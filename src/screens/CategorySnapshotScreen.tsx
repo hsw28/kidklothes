@@ -1,8 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ActionSheetIOS, ActivityIndicator, Clipboard, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as Sharing from 'expo-sharing';
+import ViewShot from 'react-native-view-shot';
 import { Card } from '@/components/Card';
 import { ChipSelector } from '@/components/ChipSelector';
+import { FormInput } from '@/components/FormInput';
 import { RemoteImage } from '@/components/RemoteImage';
 import { EmptyState } from '@/components/EmptyState';
 import { Screen } from '@/components/Screen';
@@ -20,6 +23,7 @@ import { useAppTheme } from '@/theme';
 import { cacheRemoteImage } from '@/utils/imageCache';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
 import { getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
+import { buildBstPostCaption } from '@/utils/bstPost';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'CategorySnapshot'>;
 
@@ -55,6 +59,8 @@ const CategoryGridCardComponent: React.FC<CategoryGridCardProps> = ({ itemId, ti
 };
 
 const CategoryGridCard = React.memo(CategoryGridCardComponent);
+const SHARE_GRID_LIMIT = 24;
+const SHARE_CAPTURE_WIDTH = 1080;
 
 export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) => {
   const theme = useAppTheme();
@@ -65,6 +71,8 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
   const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>(route.params.brandIds?.length ? route.params.brandIds : route.params.brandId ? [route.params.brandId] : []);
   const [styleFilter, setStyleFilter] = useState<string>('All');
+  const [styleExpanded, setStyleExpanded] = useState(false);
+  const [styleSearch, setStyleSearch] = useState('');
   const [warmedImageUris, setWarmedImageUris] = useState<Record<string, { source: string; cached: string }>>({});
   const season = route.params.season;
   const [binType, setBinType] = useState<ClothingType>('bottom');
@@ -74,6 +82,12 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const [showSizeUps, setShowSizeUps] = useState(false);
   const [locationFilter, setLocationFilter] = useState<string>('All');
   const [compactGrid, setCompactGrid] = useState(false);
+  const [preparingSnapshot, setPreparingSnapshot] = useState(false);
+  const [copiedPostToastVisible, setCopiedPostToastVisible] = useState(false);
+  const [showSnapshotRenderer, setShowSnapshotRenderer] = useState(false);
+  const [snapshotImageLoadedMap, setSnapshotImageLoadedMap] = useState<Record<string, boolean>>({});
+  const snapshotViewRef = useRef<ViewShot | null>(null);
+  const snapshotImageLoadedMapRef = useRef<Record<string, boolean>>({});
   const sizeCheckTypeOptions: Array<{ label: string; value: ClothingType }> = [
     { label: 'Pants', value: 'bottom' },
     { label: 'Tops', value: 'top' },
@@ -276,6 +290,20 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       setStyleFilter('All');
     }
   }, [availableStyleOptions, styleFilter]);
+  useEffect(() => {
+    if (!styleExpanded && styleSearch) setStyleSearch('');
+  }, [styleExpanded, styleSearch]);
+  const styleOptionsSorted = useMemo(
+    () => availableStyleOptions.filter((option) => option !== 'All').slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+    [availableStyleOptions],
+  );
+  const styleHiddenCount = Math.max(0, styleOptionsSorted.length - 5);
+  const visibleStyleOptions = useMemo(() => {
+    if (!styleExpanded) return styleOptionsSorted.slice(0, 5);
+    const query = styleSearch.trim().toLowerCase();
+    if (!query) return styleOptionsSorted;
+    return styleOptionsSorted.filter((option) => option.toLowerCase().includes(query));
+  }, [styleExpanded, styleOptionsSorted, styleSearch]);
 
   const summary = useMemo(() => {
     if (!child || !categoryBaseItems) return undefined;
@@ -397,6 +425,145 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const openItemDetail = useCallback((itemId: string) => {
     navigation.navigate('ItemDetail', { itemId });
   }, [navigation]);
+  const sizeExportLabel = useMemo(() => {
+    if (selectedSizeChip) {
+      return visibleExactSizeEntries.find((entry) => entry.normalized === selectedSizeChip)?.label
+        ?? selectedSizeChip;
+    }
+    if (sizeModeFilter === 'now') return 'Now';
+    if (sizeModeFilter === 'next') return 'Next';
+    return 'All sizes';
+  }, [selectedSizeChip, visibleExactSizeEntries, sizeModeFilter]);
+  const shareHeaderLine1 = useMemo(
+    () => `${child?.name ? `${child.name} – ` : ''}${sizeExportLabel} Closet`,
+    [child?.name, sizeExportLabel],
+  );
+  const shareHeaderLine2 = useMemo(() => {
+    const categoryLabel = closetLabel[category] || 'Closet';
+    if (selectedBrandIds.length === 1) return `${selectedBrandIds[0]} ${categoryLabel}`;
+    if (selectedBrandIds.length > 1) return `${selectedBrandIds.length} brands ${categoryLabel}`;
+    return `All brands ${categoryLabel}`;
+  }, [selectedBrandIds, category]);
+  const shareFilterLine = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedBrandIds.length === 1) parts.push(`Brand=${selectedBrandIds[0]}`);
+    else if (selectedBrandIds.length > 1) parts.push(`Brand=${selectedBrandIds.length} brands`);
+    if (styleFilter !== 'All') parts.push(`Style=${styleFilter}`);
+    if (locationFilter !== 'All') parts.push(`Location=${locationFilter}`);
+    if (season) parts.push(`Season=${season}`);
+    return parts.length ? `Filters: ${parts.join(' • ')}` : '';
+  }, [selectedBrandIds, styleFilter, locationFilter, season]);
+  const snapshotItems = useMemo(() => {
+    return gridItems.slice(0, SHARE_GRID_LIMIT).map((item) => {
+      const sourceUri = getItemDisplayImageUri(item) ?? '';
+      const warmed = warmedImageUris[item.id];
+      const uri = warmed && warmed.source === sourceUri ? warmed.cached : sourceUri || undefined;
+      return {
+        id: item.id,
+        title: item.title,
+        styleName: item.styleName?.trim() || '',
+        subtitle: (item.printName?.trim() || item.title || '').trim(),
+        uri,
+      };
+    });
+  }, [gridItems, warmedImageUris]);
+  const hiddenSnapshotCount = Math.max(0, gridItems.length - snapshotItems.length);
+  const snapshotImageLoadKeys = useMemo(
+    () => snapshotItems.filter((item) => item.uri).map((item) => item.id),
+    [snapshotItems],
+  );
+  const onSnapshotImageReady = useCallback((id: string) => {
+    setSnapshotImageLoadedMap((current) => {
+      if (current[id]) return current;
+      return { ...current, [id]: true };
+    });
+  }, []);
+  useEffect(() => {
+    snapshotImageLoadedMapRef.current = snapshotImageLoadedMap;
+  }, [snapshotImageLoadedMap]);
+  useEffect(() => {
+    if (!showSnapshotRenderer) return;
+    setSnapshotImageLoadedMap({});
+  }, [showSnapshotRenderer]);
+  const shareSnapshot = useCallback(async () => {
+    if (preparingSnapshot) return;
+    const canShare = await Sharing.isAvailableAsync();
+    if (!canShare) return;
+
+    setPreparingSnapshot(true);
+    setShowSnapshotRenderer(true);
+    setSnapshotImageLoadedMap({});
+
+    try {
+      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 2200) {
+        const readyCount = Object.keys(snapshotImageLoadedMapRef.current).length;
+        if (readyCount >= snapshotImageLoadKeys.length) break;
+        await wait(120);
+      }
+      await wait(120);
+
+      const snapshotNode = snapshotViewRef.current;
+      if (!snapshotNode) throw new Error('capture-view-missing');
+      if (typeof snapshotNode.capture !== 'function') throw new Error('capture-unavailable');
+      const uri = await snapshotNode.capture();
+      if (!uri) throw new Error('capture-failed');
+      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share Closet Snapshot' });
+    } catch {
+      // no-op; keep the main flow resilient if sharing is canceled or capture fails.
+    } finally {
+      setPreparingSnapshot(false);
+      setShowSnapshotRenderer(false);
+    }
+  }, [preparingSnapshot, snapshotImageLoadKeys.length]);
+  const copyPostToClipboard = useCallback((includeAppCredit: boolean) => {
+    const brandToken = selectedBrandIds.length === 1 ? selectedBrandIds[0] : selectedBrandIds.length > 1 ? `${selectedBrandIds.length} brands` : '';
+    const categoryToken = closetLabel[category] || 'Closet';
+    const titleLine = `${child?.name ? `${child.name} – ` : ''}${sizeExportLabel} ${[brandToken, categoryToken].filter(Boolean).join(' ')} (${gridItems.length} items)`.replace(/\s+/g, ' ').trim();
+    const filters: Array<{ key: string; value: string }> = [];
+    if (styleFilter !== 'All') filters.push({ key: 'Style', value: styleFilter });
+    if (locationFilter !== 'All') filters.push({ key: 'Location', value: locationFilter });
+    if (season) filters.push({ key: 'Season', value: season });
+    const text = buildBstPostCaption({
+      titleLine,
+      filters,
+      items: gridItems.map((item) => ({ styleName: item.styleName, printName: item.printName, title: item.title })),
+      includeAppCredit,
+    });
+    Clipboard.setString(text);
+    setCopiedPostToastVisible(true);
+    setTimeout(() => setCopiedPostToastVisible(false), 1400);
+  }, [selectedBrandIds, category, child?.name, sizeExportLabel, gridItems, styleFilter, locationFilter, season]);
+  const onPressCopyPost = useCallback(() => {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: 'Copy Post',
+        options: ['Copy Post', 'Copy Post + App Credit', 'Cancel'],
+        cancelButtonIndex: 2,
+      },
+      (index) => {
+        if (index === 0) copyPostToClipboard(false);
+        if (index === 1) copyPostToClipboard(true);
+      },
+    );
+  }, [copyPostToClipboard]);
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        Platform.OS === 'ios' ? (
+          <View style={styles.headerActionsWrap}>
+            <Pressable onPress={() => void shareSnapshot()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share category snapshot">
+              <Text style={styles.shareHeaderAction}>{preparingSnapshot ? 'Preparing...' : 'Share'}</Text>
+            </Pressable>
+            <Pressable onPress={onPressCopyPost} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy post">
+              <Text style={styles.shareHeaderAction}>Copy Post</Text>
+            </Pressable>
+          </View>
+        ) : null
+      ),
+    });
+  }, [navigation, shareSnapshot, preparingSnapshot, onPressCopyPost]);
   const sizeModeLabel = sizeModeOptions.find((option) => option.value === sizeModeFilter)?.label ?? 'All';
   const addCategoryFromSnapshot = useCallback(() => {
     navigation.navigate('AddItem', {
@@ -410,6 +577,17 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   return (
     <Screen>
       <Card>
+        {copiedPostToastVisible ? (
+          <View style={styles.snapshotPreparingRow}>
+            <Text style={styles.meta}>Copied!</Text>
+          </View>
+        ) : null}
+        {preparingSnapshot ? (
+          <View style={styles.snapshotPreparingRow}>
+            <ActivityIndicator size="small" color="#4B5563" />
+            <Text style={styles.meta}>Preparing snapshot...</Text>
+          </View>
+        ) : null}
         <Text style={[styles.title, { fontFamily: theme.fonts.serif }]}>{child.name} {closetLabel[category]}</Text>
         <View style={styles.filtersBlock}>
           <View style={styles.sizeToggleWrap}>
@@ -448,12 +626,45 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
             selectedValues={selectedBrandIds}
             onChange={toggleBrandSelection}
           />
-          <ChipSelector
-            label="Style"
-            options={availableStyleOptions}
-            value={styleFilter}
-            onChange={setStyleFilter}
-          />
+          <View style={styles.sizeToggleWrap}>
+            <Text style={styles.metaLabel}>Style</Text>
+            {styleExpanded && styleOptionsSorted.length > 5 ? (
+              <FormInput
+                label="Search styles"
+                value={styleSearch}
+                onChangeText={setStyleSearch}
+                placeholder="Search styles..."
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            ) : null}
+            <View style={styles.sizeToggleRow}>
+              <Pressable style={[styles.sizeChip, styleFilter === 'All' ? styles.sizeChipActive : null]} onPress={() => setStyleFilter('All')}>
+                <Text style={[styles.sizeChipText, styleFilter === 'All' ? styles.sizeChipTextActive : null]}>All</Text>
+              </Pressable>
+              {visibleStyleOptions.map((option) => {
+                const active = styleFilter === option;
+                return (
+                  <Pressable key={`style-option-${option}`} style={[styles.sizeChip, active ? styles.sizeChipActive : null]} onPress={() => setStyleFilter(option)}>
+                    <Text style={[styles.sizeChipText, active ? styles.sizeChipTextActive : null]}>{option}</Text>
+                  </Pressable>
+                );
+              })}
+              {!styleExpanded && styleHiddenCount > 0 ? (
+                <Pressable style={styles.sizeChip} onPress={() => setStyleExpanded(true)}>
+                  <Text style={styles.sizeChipText}>+{styleHiddenCount} more</Text>
+                </Pressable>
+              ) : null}
+              {styleExpanded && styleOptionsSorted.length > 5 ? (
+                <Pressable style={styles.sizeChip} onPress={() => setStyleExpanded(false)}>
+                  <Text style={styles.sizeChipText}>Show less</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {styleExpanded && styleSearch.trim() && visibleStyleOptions.length === 0 ? (
+              <Text style={styles.meta}>No styles match "{styleSearch.trim()}".</Text>
+            ) : null}
+          </View>
           {showLocationUi ? <ChipSelector label="Location" options={locationOptions} value={locationFilter} onChange={setLocationFilter} /> : null}
         </View>
         {gridItems.length === 0 ? (
@@ -543,6 +754,50 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
           </View>
         ) : null}
       </Card>
+      {showSnapshotRenderer ? (
+        <View pointerEvents="none" style={styles.snapshotHiddenMount}>
+          <ViewShot ref={snapshotViewRef} options={{ format: 'png', quality: 1, result: 'tmpfile' }}>
+            <View style={[styles.snapshotCanvas, { width: SHARE_CAPTURE_WIDTH }]}>
+              <Text numberOfLines={1} style={styles.snapshotHeaderPrimary}>{shareHeaderLine1}</Text>
+              <Text numberOfLines={1} style={styles.snapshotHeaderSecondary}>{shareHeaderLine2}</Text>
+              {shareFilterLine ? <Text numberOfLines={2} style={styles.snapshotFilters}>{shareFilterLine}</Text> : null}
+
+              {snapshotItems.length === 0 ? (
+                <View style={styles.snapshotEmptyCard}>
+                  <Text style={styles.snapshotEmptyText}>No items match these filters</Text>
+                </View>
+              ) : (
+                <View style={styles.snapshotGrid}>
+                  {snapshotItems.map((item) => (
+                    <View key={`share-item-${item.id}`} style={styles.snapshotTile}>
+                      {item.uri ? (
+                        <Image
+                          source={{ uri: item.uri }}
+                          style={styles.snapshotTileImage}
+                          resizeMode="cover"
+                          onLoad={() => onSnapshotImageReady(item.id)}
+                          onError={() => onSnapshotImageReady(item.id)}
+                        />
+                      ) : (
+                        <View style={[styles.snapshotTileImage, styles.snapshotTilePlaceholder]}>
+                          <Text numberOfLines={2} style={styles.snapshotPlaceholderText}>{item.title}</Text>
+                        </View>
+                      )}
+                      <Text numberOfLines={1} style={styles.snapshotTileTitle}>{item.subtitle || item.title}</Text>
+                      {item.styleName ? <Text numberOfLines={1} style={styles.snapshotTileMeta}>{item.styleName}</Text> : null}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.snapshotFooter}>
+                <Text style={styles.snapshotCount}>{gridItems.length} items{hiddenSnapshotCount > 0 ? ` • +${hiddenSnapshotCount} more` : ''}</Text>
+                <Text style={styles.snapshotWatermark}>Tracked with Layette Out</Text>
+              </View>
+            </View>
+          </ViewShot>
+        </View>
+      ) : null}
     </Screen>
   );
 };
@@ -668,5 +923,117 @@ const styles = StyleSheet.create({
   sectionContent: {
     gap: 6,
     marginTop: 6,
+  },
+  shareHeaderAction: {
+    color: '#1d4ed8',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  headerActionsWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  snapshotPreparingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  snapshotHiddenMount: {
+    position: 'absolute',
+    left: -9999,
+    top: -9999,
+    opacity: 0,
+  },
+  snapshotCanvas: {
+    paddingHorizontal: 28,
+    paddingVertical: 30,
+    backgroundColor: '#F8F4EF',
+    gap: 8,
+  },
+  snapshotHeaderPrimary: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#1F1A17',
+  },
+  snapshotHeaderSecondary: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#3E342E',
+  },
+  snapshotFilters: {
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  snapshotGrid: {
+    marginTop: 4,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  snapshotTile: {
+    width: '48.8%',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5DED4',
+    backgroundColor: '#FFFFFF',
+    padding: 8,
+    gap: 3,
+  },
+  snapshotTileImage: {
+    width: '100%',
+    height: 180,
+    borderRadius: 10,
+    backgroundColor: '#F1E8DE',
+  },
+  snapshotTilePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  snapshotPlaceholderText: {
+    fontSize: 15,
+    color: '#6B7280',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  snapshotTileTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1F1A17',
+  },
+  snapshotTileMeta: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  snapshotEmptyCard: {
+    marginTop: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5DED4',
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+  },
+  snapshotEmptyText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#5B534D',
+  },
+  snapshotFooter: {
+    marginTop: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  snapshotCount: {
+    fontSize: 16,
+    color: '#4B5563',
+    fontWeight: '600',
+  },
+  snapshotWatermark: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    fontWeight: '500',
   },
 });

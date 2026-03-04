@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, FlatList, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Animated, Clipboard, FlatList, Image, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as Sharing from 'expo-sharing';
+import ViewShot from 'react-native-view-shot';
 import { Card } from '@/components/Card';
 import { BetaKidLimitModal } from '@/components/BetaKidLimitModal';
 import { ChipSelector } from '@/components/ChipSelector';
 import { DraggableCategoryPrefsEditor } from '@/components/DraggableCategoryPrefsEditor';
 import { EmptyState } from '@/components/EmptyState';
+import { FirstRunOnboardingModal } from '@/components/FirstRunOnboardingModal';
 import { FloatingActionButton } from '@/components/FloatingActionButton';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { FormInput } from '@/components/FormInput';
@@ -39,6 +42,7 @@ import { compareSizeLabels, getSizeChipTransitionOnTap, normalizeSizeLabel, uniq
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 import { getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
 import { buildEmptyCategoryLabel } from '@/utils/closetEmptyLabel';
+import { buildBstPostCaption } from '@/utils/bstPost';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'ClosetHome'>;
 
@@ -61,6 +65,8 @@ const selectionToSizeMode = (selection: { now: boolean; next: boolean }, fallbac
 };
 const FEATURE_SINGLE_RECENT = false;
 const CLOSET_GRID_COLUMNS = 2;
+const CLOSET_SHARE_CAPTURE_WIDTH = 1080;
+const CLOSET_SHARE_PREVIEW_LIMIT = 12;
 
 type TileProps = {
   category: ClosetCategory;
@@ -721,6 +727,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const [showStyleDupesList, setShowStyleDupesList] = useState(false);
   const [showModesModal, setShowModesModal] = useState(false);
   const [showFirstKidAddedHint, setShowFirstKidAddedHint] = useState(false);
+  const [showFirstRunOnboarding, setShowFirstRunOnboarding] = useState(false);
+  const [preparingClosetSnapshot, setPreparingClosetSnapshot] = useState(false);
+  const [copiedPostToastVisible, setCopiedPostToastVisible] = useState(false);
+  const [showClosetSnapshotRenderer, setShowClosetSnapshotRenderer] = useState(false);
+  const [closetSnapshotImageLoadedMap, setClosetSnapshotImageLoadedMap] = useState<Record<string, boolean>>({});
   const hasAutoPromptedGuidedRef = useRef(false);
   const sizeModeOverridesRef = useRef<Record<string, ClosetSizeMode>>({});
   const lastDefaultedChildRef = useRef<string>('');
@@ -730,6 +741,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const tileLayoutsRef = useRef<Record<string, { x: number; y: number; width: number; height: number }>>({});
   const tileDragStateRef = useRef<{ category: ClosetCategory } | null>(null);
   const tilePanRespondersRef = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+  const closetSnapshotViewRef = useRef<ViewShot | null>(null);
+  const closetSnapshotImageLoadedMapRef = useRef<Record<string, boolean>>({});
   const theme = useAppTheme();
   const renderDebugRef = useRef<{ count: number; windowStart: number }>({ count: 0, windowStart: Date.now() });
   const [showKidLimitModal, setShowKidLimitModal] = useState(false);
@@ -825,6 +838,116 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     meta: {
       fontSize: 13,
       color: theme.colors.textSecondary,
+    },
+    snapshotPreparingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    snapshotHiddenMount: {
+      position: 'absolute',
+      left: -9999,
+      top: -9999,
+      opacity: 0,
+    },
+    snapshotCanvas: {
+      width: CLOSET_SHARE_CAPTURE_WIDTH,
+      paddingHorizontal: 28,
+      paddingVertical: 30,
+      backgroundColor: '#F8F4EF',
+      gap: 8,
+    },
+    snapshotHeaderPrimary: {
+      fontSize: 36,
+      fontWeight: '700',
+      color: '#1F1A17',
+    },
+    snapshotHeaderSecondary: {
+      fontSize: 24,
+      fontWeight: '600',
+      color: '#3E342E',
+    },
+    snapshotFilters: {
+      fontSize: 16,
+      color: '#6B7280',
+    },
+    snapshotCategoryWrap: {
+      marginTop: 4,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    snapshotCategoryPill: {
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      backgroundColor: '#FFFFFF',
+      borderWidth: 1,
+      borderColor: '#E5DED4',
+    },
+    snapshotCategoryPillMuted: {
+      backgroundColor: '#F2ECE6',
+    },
+    snapshotCategoryText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#1F1A17',
+    },
+    snapshotCategoryTextMuted: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#6B7280',
+    },
+    snapshotPreviewGrid: {
+      marginTop: 8,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    snapshotPreviewTile: {
+      width: '31.8%',
+      borderRadius: 10,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: '#E5DED4',
+      backgroundColor: '#FFFFFF',
+    },
+    snapshotPreviewImage: {
+      width: '100%',
+      aspectRatio: 1,
+      backgroundColor: '#EDE4DA',
+    },
+    snapshotPreviewPlaceholder: {
+      backgroundColor: '#F2ECE6',
+    },
+    snapshotEmptyCard: {
+      marginTop: 8,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: '#E5DED4',
+      backgroundColor: '#FFFFFF',
+      padding: 16,
+    },
+    snapshotEmptyText: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: '#5B534D',
+    },
+    snapshotFooter: {
+      marginTop: 8,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    snapshotCount: {
+      fontSize: 16,
+      color: '#4B5563',
+      fontWeight: '600',
+    },
+    snapshotWatermark: {
+      fontSize: 13,
+      color: '#9CA3AF',
+      fontWeight: '500',
     },
     duplicateLinkRow: {
       minHeight: 40,
@@ -1179,25 +1302,17 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     },
   });
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
-          <Pressable onPress={() => selectedChild && navigation.navigate('DropPrep', { childId: selectedChild.id })}>
-            <Text style={styles.headerAction}>Drop Prep</Text>
-          </Pressable>
-          <Pressable onPress={() => setShowModesModal(true)}>
-            <Text style={styles.headerAction}>Today</Text>
-          </Pressable>
-        </View>
-      ),
-    });
-  }, [navigation, styles.headerAction, selectedChild?.id]);
-
   useEffect(() => {
     if (!settings.guidedOnboardingCompleted) return;
     hasAutoPromptedGuidedRef.current = true;
   }, [settings.guidedOnboardingCompleted]);
+  useEffect(() => {
+    if (settings.guidedOnboardingCompleted) return;
+    setShowFirstRunOnboarding(true);
+  }, [settings.guidedOnboardingCompleted]);
+  useEffect(() => {
+    closetSnapshotImageLoadedMapRef.current = closetSnapshotImageLoadedMap;
+  }, [closetSnapshotImageLoadedMap]);
 
   useEffect(() => {
     if (!route.params?.showFirstKidAddedHint) return;
@@ -1592,6 +1707,99 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const showSingleRecent = FEATURE_SINGLE_RECENT && recentlyAdded.length === 1;
   const showRecentStrip = recentlyAdded.length >= 2;
   const renderedCategories = showTileGridReorderMode ? tileGridOrder : visibleCategories;
+  const shareSizeLabel = selectedSizeChipLabel || (sizeMode === 'both' ? 'All sizes' : sizeModeLabels[sizeMode]);
+  const closetShareHeaderLine1 = `${selectedChild?.name ? `${selectedChild.name} – ` : ''}${shareSizeLabel} Closet`;
+  const closetShareHeaderLine2 = activeBrandName ? `${activeBrandName} – All Categories` : 'All Categories';
+  const closetShareFilterLine = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedBrandIds.length > 1) parts.push(`Brands=${selectedBrandIds.length}`);
+    if (seasonFilter !== 'All') parts.push(`Season=${seasonFilter}`);
+    if (closetSearch.trim()) parts.push(`Search=${closetSearch.trim()}`);
+    return parts.length ? `Filters: ${parts.join(' • ')}` : '';
+  }, [selectedBrandIds.length, seasonFilter, closetSearch]);
+  const closetShareCategoryRows = useMemo(
+    () => renderedCategories.map((category) => ({ category, count: counts[category] ?? 0 })),
+    [renderedCategories, counts],
+  );
+  const closetShareVisibleCategories = useMemo(
+    () => closetShareCategoryRows.filter((row) => row.count > 0),
+    [closetShareCategoryRows],
+  );
+  const closetShareHiddenCategoryCount = Math.max(0, closetShareCategoryRows.length - closetShareVisibleCategories.length);
+  const closetSharePreviewItems = useMemo(
+    () => filteredOwnedItems.slice(0, CLOSET_SHARE_PREVIEW_LIMIT).map((item) => ({ id: item.id, uri: getItemDisplayImageUri(item) })),
+    [filteredOwnedItems],
+  );
+  const closetShareImageKeys = useMemo(
+    () => closetSharePreviewItems.filter((item) => item.uri).map((item) => item.id),
+    [closetSharePreviewItems],
+  );
+  const onClosetSnapshotImageReady = useCallback((id: string) => {
+    setClosetSnapshotImageLoadedMap((current) => (current[id] ? current : { ...current, [id]: true }));
+  }, []);
+  const shareClosetSnapshot = useCallback(async () => {
+    if (Platform.OS !== 'ios' || preparingClosetSnapshot) return;
+    const canShare = await Sharing.isAvailableAsync();
+    if (!canShare) return;
+
+    setPreparingClosetSnapshot(true);
+    setShowClosetSnapshotRenderer(true);
+    setClosetSnapshotImageLoadedMap({});
+    closetSnapshotImageLoadedMapRef.current = {};
+
+    try {
+      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 2200) {
+        const loadedCount = Object.keys(closetSnapshotImageLoadedMapRef.current).length;
+        if (loadedCount >= closetShareImageKeys.length) break;
+        await wait(120);
+      }
+      await wait(120);
+
+      const node = closetSnapshotViewRef.current;
+      if (!node || typeof node.capture !== 'function') throw new Error('capture-unavailable');
+      const uri = await node.capture();
+      if (!uri) throw new Error('capture-failed');
+      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share Closet Snapshot' });
+    } catch {
+      // Keep flow resilient if share is cancelled or capture fails.
+    } finally {
+      setPreparingClosetSnapshot(false);
+      setShowClosetSnapshotRenderer(false);
+    }
+  }, [preparingClosetSnapshot, closetShareImageKeys.length]);
+  const copyClosetPostToClipboard = useCallback((includeAppCredit: boolean) => {
+    const brandToken = activeBrandName ?? '';
+    const categoryToken = 'Closet';
+    const titleLine = `${selectedChild?.name ? `${selectedChild.name} – ` : ''}${shareSizeLabel} ${[brandToken, categoryToken].filter(Boolean).join(' ')} (${totalFilteredCount} items)`.replace(/\s+/g, ' ').trim();
+    const filters: Array<{ key: string; value: string }> = [];
+    if (selectedBrandIds.length > 1) filters.push({ key: 'Brands', value: `${selectedBrandIds.length}` });
+    if (seasonFilter !== 'All') filters.push({ key: 'Season', value: seasonFilter });
+    if (closetSearch.trim()) filters.push({ key: 'Search', value: closetSearch.trim() });
+    const text = buildBstPostCaption({
+      titleLine,
+      filters,
+      items: filteredOwnedItems.map((item) => ({ styleName: item.styleName, printName: item.printName, title: item.title })),
+      includeAppCredit,
+    });
+    Clipboard.setString(text);
+    setCopiedPostToastVisible(true);
+    setTimeout(() => setCopiedPostToastVisible(false), 1400);
+  }, [activeBrandName, selectedChild?.name, shareSizeLabel, totalFilteredCount, selectedBrandIds.length, seasonFilter, closetSearch, filteredOwnedItems]);
+  const onPressCopyPost = useCallback(() => {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: 'Copy Post',
+        options: ['Copy Post', 'Copy Post + App Credit', 'Cancel'],
+        cancelButtonIndex: 2,
+      },
+      (index) => {
+        if (index === 0) copyClosetPostToClipboard(false);
+        if (index === 1) copyClosetPostToClipboard(true);
+      },
+    );
+  }, [copyClosetPostToClipboard]);
   const openItemDetail = useCallback((itemId: string) => {
     navigation.navigate('ItemDetail', { itemId });
   }, [navigation]);
@@ -1803,6 +2011,35 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     await handleActionClick('quick_add');
     navigation.navigate('AddItem', { shoppingMode: true });
   }
+  const dismissFirstRunOnboarding = useCallback(async () => {
+    setShowFirstRunOnboarding(false);
+    await updateSettings({ guidedOnboardingCompleted: true });
+  }, [updateSettings]);
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+          {Platform.OS === 'ios' ? (
+            <>
+              <Pressable onPress={() => void shareClosetSnapshot()}>
+                <Text style={styles.headerAction}>{preparingClosetSnapshot ? 'Preparing...' : 'Share'}</Text>
+              </Pressable>
+              <Pressable onPress={onPressCopyPost}>
+                <Text style={styles.headerAction}>Copy Post</Text>
+              </Pressable>
+            </>
+          ) : null}
+          <Pressable onPress={() => selectedChild && navigation.navigate('DropPrep', { childId: selectedChild.id })}>
+            <Text style={styles.headerAction}>Drop Prep</Text>
+          </Pressable>
+          <Pressable onPress={() => setShowModesModal(true)}>
+            <Text style={styles.headerAction}>Today</Text>
+          </Pressable>
+        </View>
+      ),
+    });
+  }, [navigation, selectedChild?.id, shareClosetSnapshot, preparingClosetSnapshot, onPressCopyPost, styles.headerAction]);
+
   const openClosetFabMenu = () => {
     const actions = [
       { label: 'Add Item', onPress: () => void openAddItem() },
@@ -1898,6 +2135,22 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         </>
       )}
     >
+      <FirstRunOnboardingModal visible={showFirstRunOnboarding} onDismiss={() => void dismissFirstRunOnboarding()} />
+      {copiedPostToastVisible ? (
+        <Card>
+          <View style={styles.snapshotPreparingRow}>
+            <Text style={styles.meta}>Copied!</Text>
+          </View>
+        </Card>
+      ) : null}
+      {preparingClosetSnapshot ? (
+        <Card>
+          <View style={styles.snapshotPreparingRow}>
+            <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+            <Text style={styles.meta}>Preparing snapshot...</Text>
+          </View>
+        </Card>
+      ) : null}
       <Card>
         <Text style={styles.headerTitle}>What Fits Now</Text>
         <Text style={styles.headerTagline}>Track current, next, later, and avoid duplicate buys.</Text>
@@ -2446,6 +2699,62 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             ) : null}
           </Card>
         </>
+      ) : null}
+
+      {showClosetSnapshotRenderer ? (
+        <View pointerEvents="none" style={styles.snapshotHiddenMount}>
+          <ViewShot ref={closetSnapshotViewRef} options={{ format: 'png', quality: 1, result: 'tmpfile' }}>
+            <View style={styles.snapshotCanvas}>
+              <Text numberOfLines={1} style={styles.snapshotHeaderPrimary}>{closetShareHeaderLine1}</Text>
+              <Text numberOfLines={1} style={styles.snapshotHeaderSecondary}>{closetShareHeaderLine2}</Text>
+              {closetShareFilterLine ? <Text numberOfLines={2} style={styles.snapshotFilters}>{closetShareFilterLine}</Text> : null}
+
+              {totalFilteredCount === 0 ? (
+                <View style={styles.snapshotEmptyCard}>
+                  <Text style={styles.snapshotEmptyText}>No items in this view yet</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.snapshotCategoryWrap}>
+                    {(closetShareVisibleCategories.length ? closetShareVisibleCategories : closetShareCategoryRows).map((row) => (
+                      <View key={`share-category-${row.category}`} style={styles.snapshotCategoryPill}>
+                        <Text numberOfLines={1} style={styles.snapshotCategoryText}>{closetLabel[row.category]} ({row.count})</Text>
+                      </View>
+                    ))}
+                    {closetShareVisibleCategories.length > 0 && closetShareHiddenCategoryCount > 0 ? (
+                      <View style={[styles.snapshotCategoryPill, styles.snapshotCategoryPillMuted]}>
+                        <Text style={styles.snapshotCategoryTextMuted}>+{closetShareHiddenCategoryCount} more categories</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <View style={styles.snapshotPreviewGrid}>
+                    {closetSharePreviewItems.map((item) => (
+                      <View key={`share-thumb-${item.id}`} style={styles.snapshotPreviewTile}>
+                        {item.uri ? (
+                          <Image
+                            source={{ uri: item.uri }}
+                            style={styles.snapshotPreviewImage}
+                            resizeMode="cover"
+                            onLoad={() => onClosetSnapshotImageReady(item.id)}
+                            onError={() => onClosetSnapshotImageReady(item.id)}
+                          />
+                        ) : (
+                          <View style={[styles.snapshotPreviewImage, styles.snapshotPreviewPlaceholder]} />
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                </>
+              )}
+
+              <View style={styles.snapshotFooter}>
+                <Text style={styles.snapshotCount}>{totalFilteredCount} items</Text>
+                <Text style={styles.snapshotWatermark}>Tracked with Layette Out</Text>
+              </View>
+            </View>
+          </ViewShot>
+        </View>
       ) : null}
 
       <Modal visible={showModesModal} transparent animationType="fade" onRequestClose={() => setShowModesModal(false)}>

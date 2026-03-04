@@ -9,6 +9,8 @@ import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
 import { useUndoToast } from '@/hooks/useUndoToast';
 import { ItemsStackParamList } from '@/navigation/types';
+import { closetCategoryForItem } from '@/utils/closetViewInsights';
+import { closetLabel } from '@/utils/categories';
 import { resolveOutboundLink } from '@/utils/outbound';
 import { formatItemCategoryLabel } from '@/utils/itemLabels';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
@@ -69,6 +71,10 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     monetize: settings.monetizationEnabled,
   });
   const itemImageUri = getItemDisplayImageUri(item);
+  const itemClosetCategory = closetCategoryForItem(item);
+  const categoryLabel = closetLabel[itemClosetCategory];
+  const linkedChildId = itemLinks[0]?.childId || item.childIds[0];
+  const canOpenCategory = Boolean(linkedChildId);
 
   const markPurchasedAndAddToCloset = async () => {
     await updateItem(item.id, { status: 'owned' });
@@ -158,6 +164,29 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             await Linking.openURL(resolvedOutbound.outboundUrl);
           }}
           variant="secondary"
+        />
+      ) : null}
+      <PrimaryButton
+        label="Back to Closet"
+        variant="secondary"
+        onPress={() => {
+          (navigation.getParent() as any)?.navigate('Closet', { screen: 'ClosetHome' });
+        }}
+      />
+      {canOpenCategory ? (
+        <PrimaryButton
+          label={`Back to ${categoryLabel}`}
+          variant="secondary"
+          onPress={() => {
+            (navigation.getParent() as any)?.navigate('Closet', {
+              screen: 'CategorySnapshot',
+              params: {
+                childId: linkedChildId,
+                category: itemClosetCategory,
+                sizeMode: 'both',
+              },
+            });
+          }}
         />
       ) : null}
       {item.status !== 'wishlist' ? (

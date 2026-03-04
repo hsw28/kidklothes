@@ -22,6 +22,7 @@ import {
 } from '@/utils/categories';
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { getChildItems, getCoveredNudges, getDeclutterInsights, getSizeUpCounts, getWearingNowByCategory } from '@/utils/fitInsights';
+import { INVENTORY_REALITY_THRESHOLDS, normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
@@ -376,9 +377,9 @@ export const SettingsScreen: React.FC = () => {
         />
         <ChipSelector
           label="Inventory Reality Check Threshold"
-          options={['4', '6', '8', '12']}
-          value={String(settings.inventoryRealityCheckOwnedThreshold ?? 4)}
-          onChange={(value) => updateSettings({ inventoryRealityCheckOwnedThreshold: Number(value) || 4 })}
+          options={INVENTORY_REALITY_THRESHOLDS.map(String)}
+          value={String(normalizeInventoryRealityThreshold(settings.inventoryRealityCheckOwnedThreshold))}
+          onChange={(value) => updateSettings({ inventoryRealityCheckOwnedThreshold: normalizeInventoryRealityThreshold(Number(value)) })}
         />
       </Card>
 
