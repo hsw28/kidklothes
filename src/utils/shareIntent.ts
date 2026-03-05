@@ -51,6 +51,7 @@ export const toAddItemDeepLink = (
   const destination = options.destination;
   const status = options.status ?? (destination === 'wishlist' ? 'wishlist' : 'owned');
   return ExpoLinking.createURL(buildAddItemPath(destination), {
+    scheme: 'layetteout',
     queryParams: {
       url,
       prefillStatus: status,

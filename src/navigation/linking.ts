@@ -2,7 +2,7 @@ import { LinkingOptions } from '@react-navigation/native';
 import * as ExpoLinking from 'expo-linking';
 
 export const linking: LinkingOptions<any> = {
-  prefixes: [ExpoLinking.createURL('/'), 'layetteout://', 'layetteout://'],
+  prefixes: [ExpoLinking.createURL('/', { scheme: 'layetteout' }), 'layetteout://'],
   config: {
     screens: {
       Closet: {

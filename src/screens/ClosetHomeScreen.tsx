@@ -743,6 +743,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const tileLayoutsRef = useRef<Record<string, { x: number; y: number; width: number; height: number }>>({});
   const tileDragStateRef = useRef<{ category: ClosetCategory } | null>(null);
   const tilePanRespondersRef = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+  const revealLatestAddHandledRef = useRef(false);
   const closetSnapshotViewRef = useRef<ViewShot | null>(null);
   const closetSnapshotImageLoadedMapRef = useRef<Record<string, boolean>>({});
   const theme = useAppTheme();
@@ -1328,12 +1329,17 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => clearTimeout(timer);
   }, [navigation, route.params?.showFirstKidAddedHint]);
   useEffect(() => {
-    if (!route.params?.revealLatestAdd) return;
-    setSizeMode('both');
-    setSelectedSizeChip(null);
-    setSelectedBrandIds([]);
-    setSeasonFilter('All');
-    setClosetSearch('');
+    if (!route.params?.revealLatestAdd) {
+      revealLatestAddHandledRef.current = false;
+      return;
+    }
+    if (revealLatestAddHandledRef.current) return;
+    revealLatestAddHandledRef.current = true;
+    setSizeMode((current) => (current === 'both' ? current : 'both'));
+    setSelectedSizeChip((current) => (current ? null : current));
+    setSelectedBrandIds((current) => (current.length > 0 ? [] : current));
+    setSeasonFilter((current) => (current === 'All' ? current : 'All'));
+    setClosetSearch((current) => (current ? '' : current));
     navigation.setParams({ revealLatestAdd: undefined });
   }, [navigation, route.params?.revealLatestAdd]);
   const visibleCategories = useMemo(() => {
@@ -1527,7 +1533,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [filteredOwnedItems, updateItemCachedImage]);
 
   useEffect(() => {
-    setSelectedBrandIds((current) => current.filter((brand) => brandOptions.includes(brand)));
+    setSelectedBrandIds((current) => {
+      const next = current.filter((brand) => brandOptions.includes(brand));
+      if (next.length === current.length && next.every((brand, index) => brand === current[index])) return current;
+      return next;
+    });
   }, [brandOptions]);
   useEffect(() => {
     if (seasonFilter !== 'All' && !seasonOptions.includes(seasonFilter)) setSeasonFilter('All');

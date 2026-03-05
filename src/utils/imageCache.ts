@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const imageCacheDir = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ''}layetteout-images/`;
 const APP_IMAGE_DIR_MARKER = '/layetteout-images/';

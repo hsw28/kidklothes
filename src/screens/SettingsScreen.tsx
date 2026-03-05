@@ -27,6 +27,7 @@ import { INVENTORY_REALITY_THRESHOLDS, normalizeInventoryRealityThreshold } from
 import { cacheRemoteImage, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
 import { getItemLocalImageUri, getItemRemoteImageUri } from '@/utils/itemMedia';
 import * as FileSystem from 'expo-file-system';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import Constants from 'expo-constants';
@@ -61,6 +62,7 @@ export const SettingsScreen: React.FC = () => {
   } = useData();
   const [versionTapCount, setVersionTapCount] = useState(0);
   const [repairingImages, setRepairingImages] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState({ total: 0, processed: 0, recovered: 0, failed: 0, noSource: 0 });
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
   const showDeveloperTools = __DEV__ && Boolean(settings.developerModeEnabled);
   const appVersionLabel = Constants.expoConfig?.version ?? 'dev';
@@ -136,7 +138,7 @@ export const SettingsScreen: React.FC = () => {
       }
 
       const uri = `${baseDir}layette-out-backup-${Date.now()}.json`;
-      await FileSystem.writeAsStringAsync(uri, JSON.stringify(payload, null, 2));
+      await LegacyFileSystem.writeAsStringAsync(uri, JSON.stringify(payload, null, 2));
 
       const canShare = await Sharing.isAvailableAsync();
       if (!canShare) {
@@ -159,7 +161,7 @@ export const SettingsScreen: React.FC = () => {
       if (picked.canceled) return;
 
       const file = picked.assets[0];
-      const raw = await FileSystem.readAsStringAsync(file.uri);
+      const raw = await LegacyFileSystem.readAsStringAsync(file.uri);
       const parsed = JSON.parse(raw) as BackupPayload;
       await importBackup(parsed);
       Alert.alert('Import complete', 'Backup was imported successfully.');
@@ -316,58 +318,97 @@ export const SettingsScreen: React.FC = () => {
   const repairMissingImages = async () => {
     if (repairingImages) return;
     setRepairingImages(true);
+    setRestoreProgress({ total: items.length, processed: 0, recovered: 0, failed: 0, noSource: 0 });
     try {
-      const candidates = items.filter((item) => {
-        const remote = getItemRemoteImageUri(item);
-        const local = getItemLocalImageUri(item);
-        const cached = (item.cachedImageUri ?? '').trim();
-        const needsRemoteCache = Boolean(remote) && (!cached || /\/caches\//i.test(cached));
-        const needsLocalMigration = Boolean(local) && !isAppOwnedImageUri(cached || local);
-        return needsRemoteCache || needsLocalMigration;
-      });
-
-      if (candidates.length === 0) {
-        Alert.alert('Repair complete', 'No recoverable remote images needed repair.');
-        return;
-      }
-
       let repaired = 0;
       let failed = 0;
-      for (const item of candidates) {
-        const local = getItemLocalImageUri(item);
-        if (local && !isAppOwnedImageUri(local)) {
-          try {
-            const persisted = await persistLocalImage(local);
-            if (persisted && persisted !== local) {
-              await repository.updateItemCachedImage(item.id, persisted);
-              repaired += 1;
-              continue;
+      let scanned = 0;
+      let noSource = 0;
+
+      for (const item of items) {
+        scanned += 1;
+        const cached = (item.cachedImageUri ?? '').trim();
+        const remoteCandidates = Array.from(
+          new Set(
+            [getItemRemoteImageUri(item), ...(item.imageUrls ?? []), item.imageUrl]
+              .map((value) => (value ?? '').trim())
+              .filter((value) => /^https?:\/\//i.test(value)),
+          ),
+        );
+        const localCandidates = Array.from(
+          new Set(
+            [cached, getItemLocalImageUri(item), ...(item.imageUrls ?? []), item.imageUrl]
+              .map((value) => (value ?? '').trim())
+              .filter((value) => /^(file:\/\/|content:\/\/|ph:\/\/|assets-library:\/\/)/i.test(value)),
+          ),
+        );
+        const hasAnySource = localCandidates.length > 0 || remoteCandidates.length > 0;
+        if (!hasAnySource) {
+          noSource += 1;
+          setRestoreProgress({ total: items.length, processed: scanned, recovered: repaired, failed, noSource });
+          continue;
+        }
+
+        let restored = false;
+        if (localCandidates.length > 0) {
+          for (const candidate of localCandidates) {
+            try {
+              const persisted = await persistLocalImage(candidate);
+              if (persisted && isAppOwnedImageUri(persisted)) {
+                if (/^file:\/\//i.test(persisted)) {
+                  try {
+                    const info = await LegacyFileSystem.getInfoAsync(persisted);
+                    if (!info.exists) continue;
+                  } catch {
+                    continue;
+                  }
+                }
+                await repository.updateItemCachedImage(item.id, persisted);
+                repaired += 1;
+                restored = true;
+                break;
+              }
+            } catch {
+              // try next local candidate
             }
-          } catch {
-            // fallback to remote when available
           }
         }
 
-        const remote = getItemRemoteImageUri(item);
-        if (!remote) {
-          failed += 1;
+        if (restored) {
+          setRestoreProgress({ total: items.length, processed: scanned, recovered: repaired, failed, noSource });
           continue;
         }
-        try {
-          const cached = await cacheRemoteImage(item.id, remote);
-          if (!cached) {
-            failed += 1;
-            continue;
+
+        if (remoteCandidates.length === 0) {
+          failed += 1;
+          setRestoreProgress({ total: items.length, processed: scanned, recovered: repaired, failed, noSource });
+          continue;
+        }
+        let restoredFromRemote = false;
+        for (const remote of remoteCandidates) {
+          try {
+            const cached = await cacheRemoteImage(item.id, remote);
+            if (!cached) continue;
+            await repository.updateItemCachedImage(item.id, cached);
+            repaired += 1;
+            restoredFromRemote = true;
+            break;
+          } catch {
+            // try next remote candidate
           }
-          await repository.updateItemCachedImage(item.id, cached);
-          repaired += 1;
-        } catch {
+        }
+        if (!restoredFromRemote) {
           failed += 1;
         }
+        setRestoreProgress({ total: items.length, processed: scanned, recovered: repaired, failed, noSource });
       }
 
       await refresh();
-      Alert.alert('Repair complete', `Recovered: ${repaired}\nFailed: ${failed}`);
+      if (repaired === 0 && failed === 0) {
+        Alert.alert('Restore complete', `Scanned ${scanned} items.\nNo recoverable image sources were found.`);
+        return;
+      }
+      Alert.alert('Restore complete', `Recovered: ${repaired}\nCould not recover: ${failed}\nNo source found: ${noSource}`);
     } finally {
       setRepairingImages(false);
     }
@@ -388,6 +429,25 @@ export const SettingsScreen: React.FC = () => {
           We’re sorry if you lost any photos. This photo storage issue has been fixed for new saves and updates. Use Restore Missing Images to recover older photos when a source still exists (saved local file or live product URL). If the original local file was already removed and no URL is available, that photo cannot be restored.
         </Text>
         <PrimaryButton label={repairingImages ? 'Restoring Images...' : 'Restore Missing Images'} variant="secondary" onPress={repairMissingImages} />
+        {repairingImages ? (
+          <View style={{ marginTop: 8, gap: 6 }}>
+            <Text style={{ color: '#6b7280', fontSize: 12 }}>
+              Restoring {restoreProgress.processed} / {Math.max(restoreProgress.total, 1)} items
+            </Text>
+            <View style={{ height: 8, borderRadius: 999, backgroundColor: '#E5E7EB', overflow: 'hidden' }}>
+              <View
+                style={{
+                  height: '100%',
+                  width: `${Math.max(0, Math.min(100, (restoreProgress.processed / Math.max(restoreProgress.total, 1)) * 100))}%`,
+                  backgroundColor: '#111827',
+                }}
+              />
+            </View>
+            <Text style={{ color: '#6b7280', fontSize: 12 }}>
+              Recovered: {restoreProgress.recovered} • Failed: {restoreProgress.failed} • No source: {restoreProgress.noSource}
+            </Text>
+          </View>
+        ) : null}
       </Card>
 
       <Card>

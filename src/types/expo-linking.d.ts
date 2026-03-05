@@ -2,6 +2,7 @@ declare module 'expo-linking' {
   export function createURL(
     path?: string,
     options?: {
+      scheme?: string;
       queryParams?: Record<string, string | number | boolean | undefined>;
     },
   ): string;

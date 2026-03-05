@@ -90,6 +90,8 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const [snapshotImageLoadedMap, setSnapshotImageLoadedMap] = useState<Record<string, boolean>>({});
   const snapshotViewRef = useRef<ViewShot | null>(null);
   const snapshotImageLoadedMapRef = useRef<Record<string, boolean>>({});
+  const shareSnapshotRef = useRef<() => void>(() => undefined);
+  const onPressCopyPostRef = useRef<() => void>(() => undefined);
   const sizeCheckTypeOptions: Array<{ label: string; value: ClothingType }> = [
     { label: 'Pants', value: 'bottom' },
     { label: 'Tops', value: 'top' },
@@ -259,7 +261,11 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   }, [categoryBaseItems, child, childLocations, locationFilter, sizeModeFilter, category, season, matchesSnapshotSizeFilter]);
 
   useEffect(() => {
-    setSelectedBrandIds((current) => current.filter((brand) => availableBrandOptions.includes(brand)));
+    setSelectedBrandIds((current) => {
+      const next = current.filter((brand) => availableBrandOptions.includes(brand));
+      if (next.length === current.length && next.every((brand, index) => brand === current[index])) return current;
+      return next;
+    });
   }, [availableBrandOptions]);
 
   const availableStyleOptions = useMemo(() => {
@@ -538,22 +544,28 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       copyPostToClipboard();
     });
   }, [copyPostToClipboard]);
+  useEffect(() => {
+    shareSnapshotRef.current = () => void shareSnapshot();
+  }, [shareSnapshot]);
+  useEffect(() => {
+    onPressCopyPostRef.current = onPressCopyPost;
+  }, [onPressCopyPost]);
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
         Platform.OS === 'ios' ? (
           <View style={styles.headerActionsWrap}>
-            <Pressable onPress={() => void shareSnapshot()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share category snapshot">
-              <Text style={styles.shareHeaderAction}>{preparingSnapshot ? 'Preparing...' : 'Share'}</Text>
+            <Pressable onPress={() => shareSnapshotRef.current()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share category snapshot">
+              <Text style={styles.shareHeaderAction}>Share</Text>
             </Pressable>
-            <Pressable onPress={onPressCopyPost} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy BST post">
+            <Pressable onPress={() => onPressCopyPostRef.current()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy BST post">
               <Text style={styles.shareHeaderAction}>Copy BST</Text>
             </Pressable>
           </View>
         ) : null
       ),
     });
-  }, [navigation, shareSnapshot, preparingSnapshot, onPressCopyPost]);
+  }, [navigation]);
   const sizeModeLabel = sizeModeOptions.find((option) => option.value === sizeModeFilter)?.label ?? 'All';
   const addCategoryFromSnapshot = useCallback(() => {
     if (!child) return;

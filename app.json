@@ -3,10 +3,7 @@
     "name": "Layette Out",
     "slug": "layetteout",
     "icon": "ios/LayetteOut/Images.xcassets/AppIcon.appiconset/iconrecenter.png",
-    "scheme": [
-      "layetteout",
-      "layetteout"
-    ],
+    "scheme": "layetteout",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
