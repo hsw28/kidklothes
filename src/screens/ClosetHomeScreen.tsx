@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Animated, Clipboard, FlatList, Image, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Sharing from 'expo-sharing';
@@ -43,6 +43,7 @@ import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 import { getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
 import { buildEmptyCategoryLabel } from '@/utils/closetEmptyLabel';
 import { buildBstPostCaption } from '@/utils/bstPost';
+import { copyTextToClipboard, showCopyPostOptions } from '@/utils/copyPostUi';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'ClosetHome'>;
 
@@ -1783,22 +1784,14 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       items: filteredOwnedItems.map((item) => ({ styleName: item.styleName, printName: item.printName, title: item.title })),
       includeAppCredit,
     });
-    Clipboard.setString(text);
+    if (!copyTextToClipboard(text)) return;
     setCopiedPostToastVisible(true);
     setTimeout(() => setCopiedPostToastVisible(false), 1400);
   }, [activeBrandName, selectedChild?.name, shareSizeLabel, totalFilteredCount, selectedBrandIds.length, seasonFilter, closetSearch, filteredOwnedItems]);
   const onPressCopyPost = useCallback(() => {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: 'Copy Post',
-        options: ['Copy Post', 'Copy Post + App Credit', 'Cancel'],
-        cancelButtonIndex: 2,
-      },
-      (index) => {
-        if (index === 0) copyClosetPostToClipboard(false);
-        if (index === 1) copyClosetPostToClipboard(true);
-      },
-    );
+    showCopyPostOptions((includeAppCredit) => {
+      copyClosetPostToClipboard(includeAppCredit);
+    });
   }, [copyClosetPostToClipboard]);
   const openItemDetail = useCallback((itemId: string) => {
     navigation.navigate('ItemDetail', { itemId });
@@ -1938,6 +1931,34 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     [moveCategoryInList, persistVisibleCategoryOrder, showTileGridReorderMode, setShowTileGridReorderMode],
   );
+  const dismissFirstRunOnboarding = useCallback(async () => {
+    setShowFirstRunOnboarding(false);
+    await updateSettings({ guidedOnboardingCompleted: true });
+  }, [updateSettings]);
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+          {Platform.OS === 'ios' ? (
+            <>
+              <Pressable onPress={() => void shareClosetSnapshot()}>
+                <Text style={styles.headerAction}>{preparingClosetSnapshot ? 'Preparing...' : 'Share'}</Text>
+              </Pressable>
+              <Pressable onPress={onPressCopyPost}>
+                <Text style={styles.headerAction}>Copy Post</Text>
+              </Pressable>
+            </>
+          ) : null}
+          <Pressable onPress={() => selectedChild && navigation.navigate('DropPrep', { childId: selectedChild.id })}>
+            <Text style={styles.headerAction}>Drop Prep</Text>
+          </Pressable>
+          <Pressable onPress={() => setShowModesModal(true)}>
+            <Text style={styles.headerAction}>Today</Text>
+          </Pressable>
+        </View>
+      ),
+    });
+  }, [navigation, selectedChild?.id, shareClosetSnapshot, preparingClosetSnapshot, onPressCopyPost, styles.headerAction]);
 
   if (!selectedChild) {
     return (
@@ -2011,34 +2032,6 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     await handleActionClick('quick_add');
     navigation.navigate('AddItem', { shoppingMode: true });
   }
-  const dismissFirstRunOnboarding = useCallback(async () => {
-    setShowFirstRunOnboarding(false);
-    await updateSettings({ guidedOnboardingCompleted: true });
-  }, [updateSettings]);
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
-          {Platform.OS === 'ios' ? (
-            <>
-              <Pressable onPress={() => void shareClosetSnapshot()}>
-                <Text style={styles.headerAction}>{preparingClosetSnapshot ? 'Preparing...' : 'Share'}</Text>
-              </Pressable>
-              <Pressable onPress={onPressCopyPost}>
-                <Text style={styles.headerAction}>Copy Post</Text>
-              </Pressable>
-            </>
-          ) : null}
-          <Pressable onPress={() => selectedChild && navigation.navigate('DropPrep', { childId: selectedChild.id })}>
-            <Text style={styles.headerAction}>Drop Prep</Text>
-          </Pressable>
-          <Pressable onPress={() => setShowModesModal(true)}>
-            <Text style={styles.headerAction}>Today</Text>
-          </Pressable>
-        </View>
-      ),
-    });
-  }, [navigation, selectedChild?.id, shareClosetSnapshot, preparingClosetSnapshot, onPressCopyPost, styles.headerAction]);
 
   const openClosetFabMenu = () => {
     const actions = [

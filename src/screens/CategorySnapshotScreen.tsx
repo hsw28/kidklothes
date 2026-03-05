@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Clipboard, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Sharing from 'expo-sharing';
 import ViewShot from 'react-native-view-shot';
@@ -24,6 +24,7 @@ import { cacheRemoteImage } from '@/utils/imageCache';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
 import { getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 import { buildBstPostCaption } from '@/utils/bstPost';
+import { copyTextToClipboard, showCopyPostOptions } from '@/utils/copyPostUi';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'CategorySnapshot'>;
 
@@ -531,22 +532,14 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       items: gridItems.map((item) => ({ styleName: item.styleName, printName: item.printName, title: item.title })),
       includeAppCredit,
     });
-    Clipboard.setString(text);
+    if (!copyTextToClipboard(text)) return;
     setCopiedPostToastVisible(true);
     setTimeout(() => setCopiedPostToastVisible(false), 1400);
   }, [selectedBrandIds, category, child?.name, sizeExportLabel, gridItems, styleFilter, locationFilter, season]);
   const onPressCopyPost = useCallback(() => {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: 'Copy Post',
-        options: ['Copy Post', 'Copy Post + App Credit', 'Cancel'],
-        cancelButtonIndex: 2,
-      },
-      (index) => {
-        if (index === 0) copyPostToClipboard(false);
-        if (index === 1) copyPostToClipboard(true);
-      },
-    );
+    showCopyPostOptions((includeAppCredit) => {
+      copyPostToClipboard(includeAppCredit);
+    });
   }, [copyPostToClipboard]);
   useLayoutEffect(() => {
     navigation.setOptions({
