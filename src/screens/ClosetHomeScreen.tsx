@@ -35,7 +35,7 @@ import { normalizePrintName } from '@/utils/printName';
 import { normalizeStyleName } from '@/utils/styleName';
 import { formatPieceCount } from '@/utils/formatCounts';
 import { formatItemCategoryLabel, getBrandShortLabel } from '@/utils/itemLabels';
-import { getItemDisplayImageUri } from '@/utils/itemMedia';
+import { getItemDisplayFallbackUri, getItemDisplayImageUri } from '@/utils/itemMedia';
 import { cacheRemoteImage } from '@/utils/imageCache';
 import { showActionMenu } from '@/utils/actionSheets';
 import { compareSizeLabels, getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
@@ -638,10 +638,11 @@ type RecentlyAddedItemCardProps = {
   title: string;
   size: string;
   thumb?: string;
+  thumbFallback?: string;
   onPress: (itemId: string) => void;
 };
 
-const RecentlyAddedItemCardComponent: React.FC<RecentlyAddedItemCardProps> = ({ id, title, size, thumb, onPress }) => {
+const RecentlyAddedItemCardComponent: React.FC<RecentlyAddedItemCardProps> = ({ id, title, size, thumb, thumbFallback, onPress }) => {
   const theme = useAppTheme();
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(6)).current;
@@ -700,7 +701,7 @@ const RecentlyAddedItemCardComponent: React.FC<RecentlyAddedItemCardProps> = ({ 
       accessibilityRole="button"
       accessibilityLabel={`${title}, size ${size || 'unknown'}`}
     >
-      <RemoteImage uri={thumb} style={localStyles.thumb} fallbackLabel={title} />
+      <RemoteImage uri={thumb} fallbackUri={thumbFallback} style={localStyles.thumb} fallbackLabel={title} />
       <Text numberOfLines={1} style={localStyles.title}>{title}</Text>
       <Text numberOfLines={1} style={localStyles.meta}>{size || 'N/A'}</Text>
     </Pressable>
@@ -711,7 +712,7 @@ const RecentlyAddedItemCardComponent: React.FC<RecentlyAddedItemCardProps> = ({ 
 const RecentlyAddedItemCard = React.memo(RecentlyAddedItemCardComponent);
 
 export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { children, items, childItems, storageLocations, settings, logEvent, updateChild, updateSettings, canCreateAnotherKid, updateItemCachedImage } = useData();
+  const { children, items, childItems, storageLocations, settings, loading, logEvent, updateChild, updateSettings, canCreateAnotherKid, updateItemCachedImage } = useData();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [sizeMode, setSizeMode] = useState<ClosetSizeMode>('now');
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
@@ -1308,9 +1309,13 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     hasAutoPromptedGuidedRef.current = true;
   }, [settings.guidedOnboardingCompleted]);
   useEffect(() => {
-    if (settings.guidedOnboardingCompleted) return;
+    if (loading) return;
+    if (settings.guidedOnboardingCompleted) {
+      setShowFirstRunOnboarding(false);
+      return;
+    }
     setShowFirstRunOnboarding(true);
-  }, [settings.guidedOnboardingCompleted]);
+  }, [loading, settings.guidedOnboardingCompleted]);
   useEffect(() => {
     closetSnapshotImageLoadedMapRef.current = closetSnapshotImageLoadedMap;
   }, [closetSnapshotImageLoadedMap]);
@@ -1322,6 +1327,15 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     const timer = setTimeout(() => setShowFirstKidAddedHint(false), 4200);
     return () => clearTimeout(timer);
   }, [navigation, route.params?.showFirstKidAddedHint]);
+  useEffect(() => {
+    if (!route.params?.revealLatestAdd) return;
+    setSizeMode('both');
+    setSelectedSizeChip(null);
+    setSelectedBrandIds([]);
+    setSeasonFilter('All');
+    setClosetSearch('');
+    navigation.setParams({ revealLatestAdd: undefined });
+  }, [navigation, route.params?.revealLatestAdd]);
   const visibleCategories = useMemo(() => {
     const globallyVisible = getConfiguredClosetCategories(settings);
     const childVisible = new Set(getVisibleClosetCategories(selectedChild));
@@ -1770,7 +1784,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       setShowClosetSnapshotRenderer(false);
     }
   }, [preparingClosetSnapshot, closetShareImageKeys.length]);
-  const copyClosetPostToClipboard = useCallback((includeAppCredit: boolean) => {
+  const copyClosetPostToClipboard = useCallback(() => {
     const brandToken = activeBrandName ?? '';
     const categoryToken = 'Closet';
     const titleLine = `${selectedChild?.name ? `${selectedChild.name} – ` : ''}${shareSizeLabel} ${[brandToken, categoryToken].filter(Boolean).join(' ')} (${totalFilteredCount} items)`.replace(/\s+/g, ' ').trim();
@@ -1782,15 +1796,15 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       titleLine,
       filters,
       items: filteredOwnedItems.map((item) => ({ styleName: item.styleName, printName: item.printName, title: item.title })),
-      includeAppCredit,
+      includeAppCredit: true,
     });
     if (!copyTextToClipboard(text)) return;
     setCopiedPostToastVisible(true);
     setTimeout(() => setCopiedPostToastVisible(false), 1400);
   }, [activeBrandName, selectedChild?.name, shareSizeLabel, totalFilteredCount, selectedBrandIds.length, seasonFilter, closetSearch, filteredOwnedItems]);
   const onPressCopyPost = useCallback(() => {
-    showCopyPostOptions((includeAppCredit) => {
-      copyClosetPostToClipboard(includeAppCredit);
+    showCopyPostOptions(() => {
+      copyClosetPostToClipboard();
     });
   }, [copyClosetPostToClipboard]);
   const openItemDetail = useCallback((itemId: string) => {
@@ -1945,7 +1959,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Text style={styles.headerAction}>{preparingClosetSnapshot ? 'Preparing...' : 'Share'}</Text>
               </Pressable>
               <Pressable onPress={onPressCopyPost}>
-                <Text style={styles.headerAction}>Copy Post</Text>
+                <Text style={styles.headerAction}>Copy BST</Text>
               </Pressable>
             </>
           ) : null}
@@ -2030,13 +2044,26 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   };
   async function openAddItem() {
     await handleActionClick('quick_add');
-    navigation.navigate('AddItem', { shoppingMode: true });
+    navigation.navigate('AddItem', {
+      shoppingMode: true,
+      prefillStatus: 'owned',
+      prefillChildId: selectedChild.id,
+    });
   }
 
   const openClosetFabMenu = () => {
     const actions = [
       { label: 'Add Item', onPress: () => void openAddItem() },
-      { label: 'Add From Link', onPress: () => navigation.navigate('AddItem', { quick: false, shoppingMode: true }) },
+      {
+        label: 'Add From Link',
+        onPress: () =>
+          navigation.navigate('AddItem', {
+            quick: false,
+            shoppingMode: true,
+            prefillStatus: 'owned',
+            prefillChildId: selectedChild.id,
+          }),
+      },
       { label: 'Drawer Scan', onPress: () => navigation.navigate('DrawerScan') },
       { label: 'Batch Add', onPress: () => navigation.navigate('BatchAdd') },
     ];
@@ -2120,7 +2147,13 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             </View>
           ) : null}
           <FloatingActionButton
-            onPress={() => navigation.navigate('AddItem', { prefillStatus: 'owned', shoppingMode: true })}
+            onPress={() =>
+              navigation.navigate('AddItem', {
+                prefillStatus: 'owned',
+                prefillChildId: selectedChild.id,
+                shoppingMode: true,
+              })
+            }
             onLongPress={openClosetFabMenu}
             accessibilityLabel="Add item"
             testID="closet-fab-add"
@@ -2387,6 +2420,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                 title={item.title}
                 size={item.size}
                 thumb={getItemDisplayImageUri(item)}
+                thumbFallback={getItemDisplayFallbackUri(item)}
                 onPress={openItemDetail}
               />
             ))}
@@ -2401,6 +2435,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           {(() => {
             const item = recentlyAdded[0];
             const thumb = getItemDisplayImageUri(item);
+            const thumbFallback = getItemDisplayFallbackUri(item);
             return (
               <View style={styles.singleRecentWrap}>
                 <Pressable
@@ -2412,7 +2447,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                   <View style={styles.singleRecentBadge}>
                     <Text style={styles.singleRecentBadgeText}>Just added</Text>
                   </View>
-                  <RemoteImage uri={thumb} style={styles.singleRecentThumb} fallbackLabel={item.title} />
+                  <RemoteImage uri={thumb} fallbackUri={thumbFallback} style={styles.singleRecentThumb} fallbackLabel={item.title} />
                   <Text numberOfLines={1} style={styles.recentStripItemTitle}>{item.title}</Text>
                   <Text numberOfLines={1} style={styles.recentStripItemMeta}>{item.size || 'N/A'}</Text>
                 </Pressable>

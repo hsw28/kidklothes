@@ -13,7 +13,7 @@ import { closetCategoryForItem } from '@/utils/closetViewInsights';
 import { closetLabel } from '@/utils/categories';
 import { resolveOutboundLink } from '@/utils/outbound';
 import { formatItemCategoryLabel } from '@/utils/itemLabels';
-import { getItemDisplayImageUri } from '@/utils/itemMedia';
+import { getItemDisplayFallbackUri, getItemDisplayImageUri } from '@/utils/itemMedia';
 
 type Props = NativeStackScreenProps<ItemsStackParamList, 'ItemDetail'>;
 
@@ -71,6 +71,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     monetize: settings.monetizationEnabled,
   });
   const itemImageUri = getItemDisplayImageUri(item);
+  const itemImageFallbackUri = getItemDisplayFallbackUri(item);
   const itemClosetCategory = closetCategoryForItem(item);
   const categoryLabel = closetLabel[itemClosetCategory];
   const linkedChildId = itemLinks[0]?.childId || item.childIds[0];
@@ -109,7 +110,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <Screen>
       <Card>
-        <RemoteImage uri={itemImageUri} style={styles.heroImage} fallbackLabel={item.title} />
+        <RemoteImage uri={itemImageUri} fallbackUri={itemImageFallbackUri} style={styles.heroImage} fallbackLabel={item.title} />
         <Text style={styles.name}>{item.title}</Text>
         <Text style={styles.label}>Kids: {linkedChildNames.length > 0 ? linkedChildNames.join(', ') : 'Unassigned'}</Text>
         <Text style={styles.label}>Category: {formatItemCategoryLabel(item)}</Text>

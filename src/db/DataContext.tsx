@@ -1,8 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityEvent, AppSettings, BackupPayload, Child, ChildItem, FilterPreset, ID, Item, Outfit, PrintAlias, PurchaseStateSnapshot, StorageLocation } from '@/models';
 import { appConfig } from '@/config';
 import { getEntitlementSnapshot, initPurchases } from '@/services/purchases';
 import { setAppGroupInt } from '@/utils/appGroupStorage';
+import { cacheRemoteImage, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
+import { getItemLocalImageUri, getItemRemoteImageUri } from '@/utils/itemMedia';
 import { BatchAddInput, BulkItemPatchInput, ListRecentItemsInput, NewChildInput, NewItemInput, NewOutfitInput, SaveFilterPresetInput, repository } from './repository';
 
 interface DataContextValue {
@@ -94,6 +96,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [allFilterPresets, setFilterPresets] = useState<FilterPreset[]>([]);
   const [allBrands, setBrands] = useState<string[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const imagePersistInFlightRef = useRef(false);
+  const imagePersistAttemptedRef = useRef<Set<string>>(new Set());
 
   const refreshPurchaseState = useCallback(async (): Promise<PurchaseStateSnapshot | undefined> => {
     if (!appConfig.monetizationEnabled) return undefined;
@@ -152,6 +156,56 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   useEffect(() => {
     void setAppGroupInt('childCount', allChildren.length);
   }, [allChildren.length]);
+  useEffect(() => {
+    if (imagePersistInFlightRef.current) return;
+    const candidates = allItems
+      .filter((item) => {
+        const remote = getItemRemoteImageUri(item);
+        const local = getItemLocalImageUri(item);
+        const cached = (item.cachedImageUri ?? '').trim();
+        const needsRemoteCache = Boolean(remote) && (!cached || /\/caches\//i.test(cached));
+        const needsLocalMigration = Boolean(local) && !isAppOwnedImageUri(cached || local);
+        return needsRemoteCache || needsLocalMigration;
+      })
+      .filter((item) => !imagePersistAttemptedRef.current.has(item.id))
+      .slice(0, 10);
+    if (!candidates.length) return;
+
+    imagePersistInFlightRef.current = true;
+    candidates.forEach((item) => imagePersistAttemptedRef.current.add(item.id));
+    void (async () => {
+      try {
+        for (const item of candidates) {
+          const local = getItemLocalImageUri(item);
+          if (local && !isAppOwnedImageUri(local)) {
+            try {
+              const persistent = await persistLocalImage(local);
+              if (persistent && persistent !== local) {
+                await repository.updateItemCachedImage(item.id, persistent);
+                setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, cachedImageUri: persistent } : entry)));
+                continue;
+              }
+            } catch {
+              // continue to remote fallback
+            }
+          }
+
+          const remote = getItemRemoteImageUri(item);
+          if (!remote) continue;
+          try {
+            const cached = await cacheRemoteImage(item.id, remote);
+            if (!cached) continue;
+            await repository.updateItemCachedImage(item.id, cached);
+            setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, cachedImageUri: cached } : entry)));
+          } catch {
+            // best-effort background persistence of remote images
+          }
+        }
+      } finally {
+        imagePersistInFlightRef.current = false;
+      }
+    })();
+  }, [allItems]);
 
   const runAndRefresh = useCallback(
     async (action: () => Promise<unknown>) => {

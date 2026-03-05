@@ -21,7 +21,7 @@ import { normalizeStyleName } from '@/utils/styleName';
 import { formatSizeDisplay, getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
 import { useAppTheme } from '@/theme';
 import { cacheRemoteImage } from '@/utils/imageCache';
-import { getItemDisplayImageUri } from '@/utils/itemMedia';
+import { getItemDisplayFallbackUri, getItemDisplayImageUri } from '@/utils/itemMedia';
 import { getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 import { buildBstPostCaption } from '@/utils/bstPost';
 import { copyTextToClipboard, showCopyPostOptions } from '@/utils/copyPostUi';
@@ -33,11 +33,12 @@ type CategoryGridCardProps = {
   title: string;
   size: string;
   uri?: string;
+  fallbackUri?: string;
   compact?: boolean;
   onPress: (itemId: string) => void;
 };
 
-const CategoryGridCardComponent: React.FC<CategoryGridCardProps> = ({ itemId, title, size, uri, compact = false, onPress }) => {
+const CategoryGridCardComponent: React.FC<CategoryGridCardProps> = ({ itemId, title, size, uri, fallbackUri, compact = false, onPress }) => {
   const theme = useAppTheme();
   return (
     <Pressable
@@ -50,7 +51,7 @@ const CategoryGridCardComponent: React.FC<CategoryGridCardProps> = ({ itemId, ti
       accessibilityRole="button"
       accessibilityLabel={`${title}, ${size || 'size unknown'}`}
     >
-      <RemoteImage uri={uri} style={[styles.gridImage, compact ? styles.gridImageCompact : null]} fallbackLabel={title} />
+      <RemoteImage uri={uri} fallbackUri={fallbackUri} style={[styles.gridImage, compact ? styles.gridImageCompact : null]} fallbackLabel={title} />
       <View style={styles.gridTextWrap}>
         <Text numberOfLines={compact ? 2 : 1} style={[styles.gridTitle, compact ? styles.gridTitleCompact : null, { fontFamily: theme.fonts.serif }]}>{title}</Text>
         <Text numberOfLines={1} style={[styles.gridMeta, compact ? styles.gridMetaCompact : null]}>{size || 'Size not set'}</Text>
@@ -159,7 +160,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
 
   const seasonScopedOwnedCategoryItems = useMemo(() => (
     season
-      ? locationScopedOwnedCategoryItems.filter((item: (typeof items)[number]) => item.seasonTags.some((tag: string) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
+      ? locationScopedOwnedCategoryItems.filter((item: (typeof items)[number]) => (item.seasonTags ?? []).some((tag: string) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : locationScopedOwnedCategoryItems
   ), [locationScopedOwnedCategoryItems, season]);
 
@@ -208,10 +209,10 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     return Boolean(nextSizeNormalized && itemSize === nextSizeNormalized);
   }, [sizeModeFilter, selectedSizeChip, child?.usesMixedSizes, activeSizeNormalizedSet, currentSizeNormalized, nextSizeNormalized]);
   const normalizeBrandFilterKey = useCallback((value: string) => value.toLowerCase().trim(), []);
-  const matchesSelectedBrands = useCallback((item: { brand?: string | null; brandTags: string[] }, brands: string[]) => {
+  const matchesSelectedBrands = useCallback((item: { brand?: string | null; brandTags?: string[] }, brands: string[]) => {
     if (brands.length === 0) return true;
     const itemBrand = normalizeBrandFilterKey(item.brand ?? '');
-    const itemBrandTags = new Set(item.brandTags.map((tag) => normalizeBrandFilterKey(tag)));
+    const itemBrandTags = new Set((item.brandTags ?? []).map((tag) => normalizeBrandFilterKey(tag)));
     return brands.some((brand) => {
       const key = normalizeBrandFilterKey(brand);
       return itemBrand === key || itemBrandTags.has(key);
@@ -240,7 +241,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     });
     const scopedBySize = scopedByLocation.filter((item) => matchesSnapshotSizeFilter(item));
     const scopedBySeason = season
-      ? scopedBySize.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
+      ? scopedBySize.filter((item) => (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : scopedBySize;
     const names = new Map<string, string>();
     const addName = (raw: string) => {
@@ -252,7 +253,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     };
     scopedBySeason.forEach((item) => {
       addName(item.brand ?? '');
-      item.brandTags.forEach((tag) => addName(tag));
+      (item.brandTags ?? []).forEach((tag) => addName(tag));
     });
     return ['All', ...Array.from(names.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
   }, [categoryBaseItems, child, childLocations, locationFilter, sizeModeFilter, category, season, matchesSnapshotSizeFilter]);
@@ -272,7 +273,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     });
     const scopedBySize = scopedByLocation.filter((item) => matchesSnapshotSizeFilter(item));
     const scopedBySeason = season
-      ? scopedBySize.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
+      ? scopedBySize.filter((item) => (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : scopedBySize;
     const scopedByBrand = scopedBySeason.filter((item) => matchesSelectedBrands(item, selectedBrandIds));
     const names = new Map<string, string>();
@@ -322,7 +323,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const sizeFiltered = owned.filter((item) => matchesSnapshotSizeFilter(item));
     const brandFiltered = sizeFiltered.filter((item) => matchesSelectedBrands(item, selectedBrandIds));
     const seasonFiltered = season
-      ? brandFiltered.filter((item) => item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
+      ? brandFiltered.filter((item) => (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : brandFiltered;
     const styleFiltered = styleFilter !== 'All'
       ? seasonFiltered.filter((item) => normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter))
@@ -331,11 +332,12 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const currentSize = wearingNowAll.get(category);
     const nextSize = anchors.nextByCategory.get(category);
     const currentCount = currentSize ? styleFiltered.filter((item) => item.size === currentSize).length : 0;
-    const sizeUpsCount = nextSize
-      ? styleFiltered.filter((item) => item.size.toLowerCase().trim() === nextSize.toLowerCase().trim()).length
+    const normalizedNextSize = normalizeSizeLabel(nextSize ?? '');
+    const sizeUpsCount = normalizedNextSize
+      ? styleFiltered.filter((item) => normalizeSizeLabel(item.sizeNormalized || item.size || '') === normalizedNextSize).length
       : currentSize
       ? styleFiltered.filter((item) => {
-          const n = sizeToNumber(item.size);
+          const n = sizeToNumber(item.size || '');
           const c = sizeToNumber(currentSize);
           return n !== undefined && c !== undefined && n > c;
         }).length
@@ -353,31 +355,26 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     };
   }, [child, categoryBaseItems, category, locationFilter, childLocations, selectedBrandIds, styleFilter, season, matchesSnapshotSizeFilter, matchesSelectedBrands]);
 
-  if (!child || !summary) {
-    return (
-      <Screen>
-        <EmptyState title="Snapshot unavailable" subtitle="Try again from Closet home." />
-      </Screen>
-    );
-  }
-
-  const childData = getChildItems(child, items, childItems);
-  const sizeUpBinCount = childData.items.filter(
-    (item) => item.status === 'owned' && item.clothingType === binType && item.size.toUpperCase().trim() === binSize.toUpperCase().trim(),
-  ).length;
+  const childData = useMemo(() => (child ? getChildItems(child, items, childItems) : null), [child, items, childItems]);
+  const sizeUpBinCount = (childData?.items ?? []).filter((item) => (
+    item.status === 'owned'
+    && item.clothingType === binType
+    && normalizeSizeLabel(item.sizeNormalized || item.size || '') === normalizeSizeLabel(binSize)
+  )).length;
 
   const printDuplicateGroups = useMemo(() => {
+    if (!childData) return [];
     const groups = new Map<string, { printName: string; sizes: Set<string>; count: number }>();
     childData.items
       .filter((item) => item.status === 'owned' && closetCategoryForItem(item) === category && (item.printNameNorm || item.printName?.trim()))
       .filter((item) => matchesSelectedBrands(item, selectedBrandIds))
       .filter((item) => (styleFilter === 'All' ? true : normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter)))
-      .filter((item) => (season ? item.seasonTags.some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()) : true))
+      .filter((item) => (season ? (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()) : true))
       .forEach((item) => {
         const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
         if (!key) return;
         const prev = groups.get(key) ?? { printName: item.printName?.trim() || key, sizes: new Set<string>(), count: 0 };
-        prev.sizes.add(item.size);
+        prev.sizes.add(item.size || 'Unknown');
         prev.count += 1;
         groups.set(key, prev);
       });
@@ -390,9 +387,9 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
         count: entry.count,
       }))
       .sort((a, b) => b.count - a.count);
-  }, [childData.items, category, selectedBrandIds, styleFilter, season, matchesSelectedBrands]);
+  }, [childData, category, selectedBrandIds, styleFilter, season, matchesSelectedBrands]);
 
-  const gridItems = summary.items;
+  const gridItems = summary?.items ?? [];
   useEffect(() => {
     let cancelled = false;
     const warmVisibleImages = async () => {
@@ -518,7 +515,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       setShowSnapshotRenderer(false);
     }
   }, [preparingSnapshot, snapshotImageLoadKeys.length]);
-  const copyPostToClipboard = useCallback((includeAppCredit: boolean) => {
+  const copyPostToClipboard = useCallback(() => {
     const brandToken = selectedBrandIds.length === 1 ? selectedBrandIds[0] : selectedBrandIds.length > 1 ? `${selectedBrandIds.length} brands` : '';
     const categoryToken = closetLabel[category] || 'Closet';
     const titleLine = `${child?.name ? `${child.name} – ` : ''}${sizeExportLabel} ${[brandToken, categoryToken].filter(Boolean).join(' ')} (${gridItems.length} items)`.replace(/\s+/g, ' ').trim();
@@ -530,15 +527,15 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       titleLine,
       filters,
       items: gridItems.map((item) => ({ styleName: item.styleName, printName: item.printName, title: item.title })),
-      includeAppCredit,
+      includeAppCredit: true,
     });
     if (!copyTextToClipboard(text)) return;
     setCopiedPostToastVisible(true);
     setTimeout(() => setCopiedPostToastVisible(false), 1400);
   }, [selectedBrandIds, category, child?.name, sizeExportLabel, gridItems, styleFilter, locationFilter, season]);
   const onPressCopyPost = useCallback(() => {
-    showCopyPostOptions((includeAppCredit) => {
-      copyPostToClipboard(includeAppCredit);
+    showCopyPostOptions(() => {
+      copyPostToClipboard();
     });
   }, [copyPostToClipboard]);
   useLayoutEffect(() => {
@@ -549,8 +546,8 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
             <Pressable onPress={() => void shareSnapshot()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share category snapshot">
               <Text style={styles.shareHeaderAction}>{preparingSnapshot ? 'Preparing...' : 'Share'}</Text>
             </Pressable>
-            <Pressable onPress={onPressCopyPost} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy post">
-              <Text style={styles.shareHeaderAction}>Copy Post</Text>
+            <Pressable onPress={onPressCopyPost} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy BST post">
+              <Text style={styles.shareHeaderAction}>Copy BST</Text>
             </Pressable>
           </View>
         ) : null
@@ -559,13 +556,22 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   }, [navigation, shareSnapshot, preparingSnapshot, onPressCopyPost]);
   const sizeModeLabel = sizeModeOptions.find((option) => option.value === sizeModeFilter)?.label ?? 'All';
   const addCategoryFromSnapshot = useCallback(() => {
+    if (!child) return;
     navigation.navigate('AddItem', {
       prefillStatus: 'owned',
       prefillChildId: child.id,
       prefillCategory: category,
       prefillType: closetCategoryToClothingType(category),
     });
-  }, [navigation, child?.id, category]);
+  }, [navigation, child, category]);
+
+  if (!child || !summary) {
+    return (
+      <Screen>
+        <EmptyState title="Snapshot unavailable" subtitle="Try again from Closet home." />
+      </Screen>
+    );
+  }
 
   return (
     <Screen>
@@ -675,6 +681,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
               const sourceUri = getItemDisplayImageUri(item) ?? '';
               const warmed = warmedImageUris[item.id];
               const displayUri = warmed && warmed.source === sourceUri ? warmed.cached : sourceUri || undefined;
+              const fallbackUri = getItemDisplayFallbackUri(item);
               return (
                 <CategoryGridCard
                   key={item.id}
@@ -682,6 +689,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
                   title={item.title}
                   size={item.size}
                   uri={displayUri}
+                  fallbackUri={fallbackUri}
                   compact={compactGrid}
                   onPress={openItemDetail}
                 />

@@ -21,7 +21,7 @@ import { ClosetCategory, closetLabel, DEFAULT_WISHLIST_CATEGORY_ORDER, getConfig
 import { formatWishlistShareText } from '@/utils/shareWishlistText';
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { formatItemCategoryLabel } from '@/utils/itemLabels';
-import { getItemDisplayImageUri } from '@/utils/itemMedia';
+import { getItemDisplayFallbackUri, getItemDisplayImageUri } from '@/utils/itemMedia';
 import { validateQuickLinkSaveInput } from '@/utils/itemValidation';
 import { getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
 import { showActionMenu } from '@/utils/actionSheets';
@@ -64,6 +64,7 @@ type ItemListRowProps = {
   isSelected: boolean;
   selectionMode: boolean;
   thumbUri?: string;
+  thumbFallbackUri?: string;
   onPress: (itemId: string) => void;
 };
 
@@ -82,6 +83,7 @@ const ItemListRowComponent: React.FC<ItemListRowProps> = ({
   isSelected,
   selectionMode,
   thumbUri,
+  thumbFallbackUri,
   onPress,
 }) => {
   const theme = useAppTheme();
@@ -114,7 +116,7 @@ const ItemListRowComponent: React.FC<ItemListRowProps> = ({
     >
       <Card>
         <View style={rowStyles.cardRow}>
-          <RemoteImage uri={thumbUri} style={rowStyles.thumbnail} fallbackLabel={title} />
+          <RemoteImage uri={thumbUri} fallbackUri={thumbFallbackUri} style={rowStyles.thumbnail} fallbackLabel={title} />
           <View style={rowStyles.cardBody}>
             <View style={rowStyles.titleRow}>
               <Text style={rowStyles.title}>{title}</Text>
@@ -944,6 +946,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
             const linkForDisplay = childId ? links.find((link) => link.childId === childId) : links[0];
             const child = children.find((entry) => entry.id === linkForDisplay?.childId);
             const thumbUri = getItemDisplayImageUri(item);
+            const thumbFallbackUri = getItemDisplayFallbackUri(item);
             const isSelected = selectedItemIdSet.has(item.id);
 
             return (
@@ -963,6 +966,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
                 isSelected={isSelected}
                 selectionMode={selectionMode}
                 thumbUri={thumbUri}
+                thumbFallbackUri={thumbFallbackUri}
                 onPress={handleListRowPress}
               />
             );

@@ -8,6 +8,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { appConfig } from '@/config';
 import { useData } from '@/db/DataContext';
+import { repository } from '@/db/repository';
 import { AppSettings, BackupPayload, Child } from '@/models';
 import { SettingsStackParamList } from '@/navigation/types';
 import { debugPrintPurchasesDiagnostics } from '@/services/purchases';
@@ -23,6 +24,8 @@ import {
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { getChildItems, getCoveredNudges, getDeclutterInsights, getSizeUpCounts, getWearingNowByCategory } from '@/utils/fitInsights';
 import { INVENTORY_REALITY_THRESHOLDS, normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
+import { cacheRemoteImage, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
+import { getItemLocalImageUri, getItemRemoteImageUri } from '@/utils/itemMedia';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
@@ -57,6 +60,7 @@ export const SettingsScreen: React.FC = () => {
     importBackup,
   } = useData();
   const [versionTapCount, setVersionTapCount] = useState(0);
+  const [repairingImages, setRepairingImages] = useState(false);
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
   const showDeveloperTools = __DEV__ && Boolean(settings.developerModeEnabled);
   const appVersionLabel = Constants.expoConfig?.version ?? 'dev';
@@ -309,6 +313,65 @@ export const SettingsScreen: React.FC = () => {
       ].join('\n'),
     );
   };
+  const repairMissingImages = async () => {
+    if (repairingImages) return;
+    setRepairingImages(true);
+    try {
+      const candidates = items.filter((item) => {
+        const remote = getItemRemoteImageUri(item);
+        const local = getItemLocalImageUri(item);
+        const cached = (item.cachedImageUri ?? '').trim();
+        const needsRemoteCache = Boolean(remote) && (!cached || /\/caches\//i.test(cached));
+        const needsLocalMigration = Boolean(local) && !isAppOwnedImageUri(cached || local);
+        return needsRemoteCache || needsLocalMigration;
+      });
+
+      if (candidates.length === 0) {
+        Alert.alert('Repair complete', 'No recoverable remote images needed repair.');
+        return;
+      }
+
+      let repaired = 0;
+      let failed = 0;
+      for (const item of candidates) {
+        const local = getItemLocalImageUri(item);
+        if (local && !isAppOwnedImageUri(local)) {
+          try {
+            const persisted = await persistLocalImage(local);
+            if (persisted && persisted !== local) {
+              await repository.updateItemCachedImage(item.id, persisted);
+              repaired += 1;
+              continue;
+            }
+          } catch {
+            // fallback to remote when available
+          }
+        }
+
+        const remote = getItemRemoteImageUri(item);
+        if (!remote) {
+          failed += 1;
+          continue;
+        }
+        try {
+          const cached = await cacheRemoteImage(item.id, remote);
+          if (!cached) {
+            failed += 1;
+            continue;
+          }
+          await repository.updateItemCachedImage(item.id, cached);
+          repaired += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      await refresh();
+      Alert.alert('Repair complete', `Recovered: ${repaired}\nFailed: ${failed}`);
+    } finally {
+      setRepairingImages(false);
+    }
+  };
 
   return (
     <Screen>
@@ -317,6 +380,14 @@ export const SettingsScreen: React.FC = () => {
         <Text style={{ color: '#4b5563' }}>
           Data stays local. Configure optional reminder nudges and backup/export.
         </Text>
+      </Card>
+
+      <Card>
+        <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Photos</Text>
+        <Text style={{ color: '#6b7280', fontSize: 12 }}>
+          We’re sorry if you lost any photos. This photo storage issue has been fixed for new saves and updates. Use Restore Missing Images to recover older photos when a source still exists (saved local file or live product URL). If the original local file was already removed and no URL is available, that photo cannot be restored.
+        </Text>
+        <PrimaryButton label={repairingImages ? 'Restoring Images...' : 'Restore Missing Images'} variant="secondary" onPress={repairMissingImages} />
       </Card>
 
       <Card>

@@ -21,7 +21,7 @@ import { getChildCurrentSizeText, getChildNextSizeText, SIZE_OPTIONS } from '@/u
 import { fetchLinkMetadata } from '@/utils/unfurlUrl';
 import { pickPhotoFromLibrary, takePhotoWithCamera } from '@/utils/photoPicker';
 import { validateNewItemInput } from '@/utils/itemValidation';
-import { cacheRemoteImage } from '@/utils/imageCache';
+import { cacheRemoteImage, persistLocalImage } from '@/utils/imageCache';
 import { normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
 import { APPAREL_AGE_SIZES, APPAREL_ALPHA_SIZES, US_SHOE_SIZES, computeDefaultFitBin, getSizeUIModel, inferSizeScheme, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
 
@@ -880,6 +880,15 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         Alert.alert('Saved to Wishlist', 'Saved.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
         return;
       }
+      if (status === 'owned' && created && (shoppingMode || route.params?.prefillStatus === 'owned')) {
+        const parent = navigation.getParent() as { navigate?: (screen: string, params?: Record<string, unknown>) => void } | undefined;
+        if (parent) {
+          parent.navigate?.('ClosetHome', { revealLatestAdd: true });
+        } else {
+          navigation.goBack();
+        }
+        return;
+      }
       navigation.goBack();
       return;
     }
@@ -1024,10 +1033,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             const asset = await pickPhotoFromLibrary();
             if (!asset?.uri) return;
             if (__DEV__) console.log('[ItemForm] picked photo', asset);
+            const persistentUri = await persistLocalImage(asset.uri);
             imageTouchedRef.current = true;
-            imageUrlRef.current = asset.uri;
+            imageUrlRef.current = persistentUri;
             setImageTouched(true);
-            setImageUrl(asset.uri);
+            setImageUrl(persistentUri);
           })();
         },
       },
@@ -1038,10 +1048,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             const asset = await takePhotoWithCamera();
             if (!asset?.uri) return;
             if (__DEV__) console.log('[ItemForm] captured photo', asset);
+            const persistentUri = await persistLocalImage(asset.uri);
             imageTouchedRef.current = true;
-            imageUrlRef.current = asset.uri;
+            imageUrlRef.current = persistentUri;
             setImageTouched(true);
-            setImageUrl(asset.uri);
+            setImageUrl(persistentUri);
           })();
         },
       },
@@ -1103,8 +1114,9 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
               setUrl(sanitized.value !== value ? sanitized.value : value);
             }}
             autoCapitalize="none"
-            placeholder="https://..."
+            placeholder="https://... (optional)"
           />
+          <Text style={styles.urlTip}>URL is optional. You can also enter details manually below.</Text>
           <Text style={styles.urlTip}>Tip: You can also add items directly from your browser using the Share button.</Text>
           {(previewCard.status === 'loading' || previewCard.status === 'success' || previewCard.status === 'error') ? (
             <Card>

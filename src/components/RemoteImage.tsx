@@ -4,6 +4,7 @@ import { useAppTheme } from '@/theme';
 
 type Props = {
   uri?: string | null;
+  fallbackUri?: string | null;
   style: StyleProp<ViewStyle>;
   imageStyle?: StyleProp<ImageStyle>;
   resizeMode?: ImageResizeMode;
@@ -29,6 +30,7 @@ const isRemoteHttpUri = (value?: string | null) => {
 
 const RemoteImageComponent: React.FC<Props> = ({
   uri,
+  fallbackUri,
   style,
   imageStyle,
   resizeMode = 'cover',
@@ -36,46 +38,43 @@ const RemoteImageComponent: React.FC<Props> = ({
   accessibilityLabel,
 }) => {
   const theme = useAppTheme();
-  const [isLoading, setIsLoading] = useState(Boolean(isSupportedImageUri(uri) && isRemoteHttpUri(uri)));
+  const normalizeUri = (value?: string | null) => {
+    if (!value) return '';
+    const trimmed = value.trim();
+    if (trimmed.startsWith('//')) return `https:${trimmed}`;
+    if (trimmed.startsWith('/')) return `file://${trimmed}`;
+    return trimmed;
+  };
+  const primaryUri = useMemo(() => normalizeUri(uri), [uri]);
+  const normalizedFallbackUri = useMemo(() => normalizeUri(fallbackUri), [fallbackUri]);
+  const [activeUri, setActiveUri] = useState(primaryUri);
+  const [isLoading, setIsLoading] = useState(Boolean(isSupportedImageUri(primaryUri) && isRemoteHttpUri(primaryUri)));
   const [failed, setFailed] = useState(false);
   const imageOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     setFailed(false);
-    const supported = Boolean(isSupportedImageUri(uri));
-    const remote = isRemoteHttpUri(uri);
-    const normalized = (() => {
-      if (!uri) return '';
-      const trimmed = uri.trim();
-      if (trimmed.startsWith('//')) return `https:${trimmed}`;
-      if (trimmed.startsWith('/')) return `file://${trimmed}`;
-      return trimmed;
-    })();
-    const alreadyLoaded = remote && normalized ? loadedRemoteImageUris.has(normalized) : false;
+    setActiveUri(primaryUri);
+    const supported = Boolean(isSupportedImageUri(primaryUri));
+    const remote = isRemoteHttpUri(primaryUri);
+    const alreadyLoaded = remote && primaryUri ? loadedRemoteImageUris.has(primaryUri) : false;
     setIsLoading(supported && remote && !alreadyLoaded);
     imageOpacity.setValue(supported ? (remote && !alreadyLoaded ? 0 : 1) : 0);
-  }, [uri, imageOpacity]);
+  }, [primaryUri, imageOpacity]);
 
-  const normalizedUri = useMemo(() => {
-    if (!uri) return '';
-    const trimmed = uri.trim();
-    if (trimmed.startsWith('//')) return `https:${trimmed}`;
-    if (trimmed.startsWith('/')) return `file://${trimmed}`;
-    return trimmed;
-  }, [uri]);
-  const remoteAlreadyLoaded = isRemoteHttpUri(normalizedUri) && loadedRemoteImageUris.has(normalizedUri);
+  const remoteAlreadyLoaded = isRemoteHttpUri(activeUri) && loadedRemoteImageUris.has(activeUri);
 
-  const showImage = isSupportedImageUri(normalizedUri) && !failed;
-  const isRemote = isRemoteHttpUri(normalizedUri);
+  const showImage = isSupportedImageUri(activeUri) && !failed;
+  const isRemote = isRemoteHttpUri(activeUri);
   const showPlaceholder = !showImage || (isLoading && !remoteAlreadyLoaded);
 
   useEffect(() => {
     if (!isRemote) return;
-    if (!normalizedUri) return;
-    if (!loadedRemoteImageUris.has(normalizedUri)) return;
+    if (!activeUri) return;
+    if (!loadedRemoteImageUris.has(activeUri)) return;
     setIsLoading(false);
     imageOpacity.setValue(1);
-  }, [isRemote, normalizedUri, imageOpacity]);
+  }, [isRemote, activeUri, imageOpacity]);
 
   return (
     <View
@@ -93,14 +92,14 @@ const RemoteImageComponent: React.FC<Props> = ({
     >
       {showImage ? (
         <Animated.Image
-          source={{ uri: normalizedUri }}
+          source={{ uri: activeUri }}
           resizeMode={resizeMode}
           style={[StyleSheet.absoluteFillObject, imageStyle, { opacity: imageOpacity }]}
           onLoadStart={() => {
-            if (isRemote && !loadedRemoteImageUris.has(normalizedUri)) setIsLoading(true);
+            if (isRemote && !loadedRemoteImageUris.has(activeUri)) setIsLoading(true);
           }}
           onLoadEnd={() => {
-            if (isRemote && normalizedUri) loadedRemoteImageUris.add(normalizedUri);
+            if (isRemote && activeUri) loadedRemoteImageUris.add(activeUri);
             setIsLoading(false);
             if (!isRemote) {
               imageOpacity.setValue(1);
@@ -113,10 +112,19 @@ const RemoteImageComponent: React.FC<Props> = ({
             }).start();
           }}
           onError={() => {
+            if (normalizedFallbackUri && normalizedFallbackUri !== activeUri) {
+              setFailed(false);
+              setActiveUri(normalizedFallbackUri);
+              const fallbackRemote = isRemoteHttpUri(normalizedFallbackUri);
+              const alreadyLoaded = fallbackRemote ? loadedRemoteImageUris.has(normalizedFallbackUri) : false;
+              setIsLoading(fallbackRemote && !alreadyLoaded);
+              imageOpacity.setValue(fallbackRemote && !alreadyLoaded ? 0 : 1);
+              return;
+            }
             setFailed(true);
             setIsLoading(false);
             imageOpacity.setValue(0);
-            if (__DEV__) console.warn('[RemoteImage] failed to load', normalizedUri);
+            if (__DEV__) console.warn('[RemoteImage] failed to load', activeUri);
           }}
         />
       ) : null}

@@ -40,7 +40,7 @@ export type ClosetStackParamList = {
   GuidedShopping: undefined;
   GuidedOrganizing: undefined;
   GuidedSnapshot: { childId: ID; currentSize: string; clothingType: ClothingType };
-  ClosetHome: { showFirstKidAddedHint?: boolean } | undefined;
+  ClosetHome: { showFirstKidAddedHint?: boolean; revealLatestAdd?: boolean } | undefined;
   BeforeYouBuy: { childId?: ID } | undefined;
   BrandSnapshot: { childId?: ID } | undefined;
   DropPrep: { childId?: ID } | undefined;
