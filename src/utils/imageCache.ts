@@ -56,6 +56,31 @@ export const persistLocalImage = async (uri: string): Promise<string> => {
     await FileSystem.copyAsync({ from: trimmed, to: targetUri });
     return targetUri;
   } catch {
-    return uri;
+    // Fallback for some iOS photo-library URIs (ph:// / assets-library://) where direct copy can fail.
+    try {
+      const response = await fetch(trimmed);
+      if (!response.ok) return uri;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+
+      let base64 = '';
+      try {
+        const BufferCtor = (globalThis as any).Buffer ?? require('buffer').Buffer;
+        base64 = BufferCtor.from(bytes).toString('base64');
+      } catch {
+        const btoaFn = (globalThis as any).btoa;
+        if (!btoaFn) return uri;
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        base64 = btoaFn(binary);
+      }
+
+      await FileSystem.writeAsStringAsync(targetUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      return targetUri;
+    } catch {
+      return uri;
+    }
   }
 };

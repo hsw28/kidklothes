@@ -30,6 +30,7 @@ import * as FileSystem from 'expo-file-system';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import Constants from 'expo-constants';
 import { PRIVACY_POLICY_URL } from '@/constants/legal';
 
@@ -324,6 +325,16 @@ export const SettingsScreen: React.FC = () => {
       let failed = 0;
       let scanned = 0;
       let noSource = 0;
+      let canReadPhotoLibrary = true;
+      try {
+        const currentPerm = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (!currentPerm.granted) {
+          const askedPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          canReadPhotoLibrary = askedPerm.granted;
+        }
+      } catch {
+        // If permission check fails, continue and rely on file operations/fallback remote URLs.
+      }
 
       for (const item of items) {
         scanned += 1;
@@ -352,6 +363,10 @@ export const SettingsScreen: React.FC = () => {
         let restored = false;
         if (localCandidates.length > 0) {
           for (const candidate of localCandidates) {
+            const needsPhotoLibraryAccess = /^(ph:\/\/|assets-library:\/\/)/i.test(candidate);
+            if (needsPhotoLibraryAccess && !canReadPhotoLibrary) {
+              continue;
+            }
             try {
               const persisted = await persistLocalImage(candidate);
               if (persisted && isAppOwnedImageUri(persisted)) {
@@ -429,6 +444,7 @@ export const SettingsScreen: React.FC = () => {
           We’re sorry if you lost any photos. This photo storage issue has been fixed for new saves and updates. Use Restore Missing Images to recover older photos when a source still exists (saved local file or live product URL). If the original local file was already removed and no URL is available, that photo cannot be restored.
         </Text>
         <PrimaryButton label={repairingImages ? 'Restoring Images...' : 'Restore Missing Images'} variant="secondary" onPress={repairMissingImages} />
+        <PrimaryButton label="Review Missing Photos" variant="secondary" onPress={() => navigation.navigate('MissingPhotoRepair')} />
         {repairingImages ? (
           <View style={{ marginTop: 8, gap: 6 }}>
             <Text style={{ color: '#6b7280', fontSize: 12 }}>

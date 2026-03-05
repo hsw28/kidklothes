@@ -23,6 +23,7 @@ import { OutfitBuilderScreen } from '@/screens/OutfitBuilderScreen';
 import { OutfitsListScreen } from '@/screens/OutfitsListScreen';
 import { PrintDupGroupsScreen } from '@/screens/PrintDupGroupsScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
+import { MissingPhotoRepairScreen } from '@/screens/MissingPhotoRepairScreen';
 import { ActivityLogScreen } from '@/screens/ActivityLogScreen';
 import { ActivitySnapshotScreen } from '@/screens/ActivitySnapshotScreen';
 import { PrivacySummaryScreen } from '@/screens/PrivacySummaryScreen';
@@ -136,6 +137,7 @@ const SettingsStackNavigator = () => {
       }}
     >
       <SettingsStack.Screen name="SettingsHome" component={SettingsScreen} options={{ title: 'Settings' }} />
+      <SettingsStack.Screen name="MissingPhotoRepair" component={MissingPhotoRepairScreen} options={{ title: 'Missing Photos' }} />
       <SettingsStack.Screen name="PrivacySummary" component={PrivacySummaryScreen} options={{ title: 'Privacy Summary' }} />
       <SettingsStack.Screen name="TermsSummary" component={TermsSummaryScreen} options={{ title: 'Terms Summary' }} />
       <SettingsStack.Screen name="TermsOfService" component={TermsOfServiceScreen} options={{ title: 'Terms of Service' }} />

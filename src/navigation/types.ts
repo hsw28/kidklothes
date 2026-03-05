@@ -80,6 +80,7 @@ export type KidsStackParamList = {
 
 export type SettingsStackParamList = {
   SettingsHome: undefined;
+  MissingPhotoRepair: undefined;
   PrivacySummary: undefined;
   TermsSummary: undefined;
   TermsOfService: undefined;
