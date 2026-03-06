@@ -1351,9 +1351,13 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     () => sanitizeCategoryOrder(settings.closetCategoryOrder, { includeOther: true, fallback: closetCategories }),
     [settings.closetCategoryOrder],
   );
+  const hiddenClosetCategoriesForChild = useMemo(
+    () => new Set(sanitizeHiddenCategories(selectedChild?.hiddenClosetCategories as string[] | undefined, { includeOther: true })),
+    [selectedChild?.hiddenClosetCategories],
+  );
   const hiddenClosetCategoriesForEdit = useMemo(
-    () => new Set(sanitizeHiddenCategories(settings.hiddenClosetCategoriesGlobal, { includeOther: true })),
-    [settings.hiddenClosetCategoriesGlobal],
+    () => new Set([...sanitizeHiddenCategories(settings.hiddenClosetCategoriesGlobal, { includeOther: true }), ...hiddenClosetCategoriesForChild]),
+    [settings.hiddenClosetCategoriesGlobal, hiddenClosetCategoriesForChild],
   );
   useEffect(() => {
     if (showTileGridReorderMode) return;
@@ -2538,10 +2542,55 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             hidden={hiddenClosetCategoriesForEdit}
             onReorder={async (next) => updateSettings({ closetCategoryOrder: next })}
             onToggleHidden={async (category) => {
-              const current = new Set(sanitizeHiddenCategories(settings.hiddenClosetCategoriesGlobal, { includeOther: true }));
-              if (current.has(category)) current.delete(category);
-              else current.add(category);
-              await updateSettings({ hiddenClosetCategoriesGlobal: Array.from(current) });
+              const globalHidden = new Set(sanitizeHiddenCategories(settings.hiddenClosetCategoriesGlobal, { includeOther: true }));
+              const childHidden = new Set(sanitizeHiddenCategories(selectedChild.hiddenClosetCategories as string[] | undefined, { includeOther: true }));
+              const isHidden = globalHidden.has(category) || childHidden.has(category);
+
+              if (isHidden) {
+                globalHidden.delete(category);
+                childHidden.delete(category);
+                await Promise.all([
+                  updateSettings({ hiddenClosetCategoriesGlobal: Array.from(globalHidden) }),
+                  updateChild(selectedChild.id, { hiddenClosetCategories: Array.from(childHidden) }),
+                ]);
+                return;
+              }
+
+              childHidden.add(category);
+              await updateChild(selectedChild.id, { hiddenClosetCategories: Array.from(childHidden) });
+            }}
+          />
+          <Text style={styles.meta}>
+            Hidden categories can be global or kid-specific. Use the actions below if a category still does not reappear.
+          </Text>
+          <PrimaryButton
+            label={`Unhide All for ${selectedChild.name}`}
+            variant="secondary"
+            onPress={async () => {
+              await updateChild(selectedChild.id, { hiddenClosetCategories: [] });
+            }}
+          />
+          <PrimaryButton
+            label="Unhide All Everywhere"
+            variant="secondary"
+            onPress={async () => {
+              await updateSettings({ hiddenClosetCategoriesGlobal: [] });
+            }}
+          />
+          <PrimaryButton
+            label="Reset Closet Categories (Show All)"
+            variant="secondary"
+            onPress={async () => {
+              await Promise.all([
+                updateSettings({
+                  hiddenClosetCategoriesGlobal: [],
+                  closetCategoryOrder: [...closetCategories],
+                }),
+                ...children.map((child) => updateChild(child.id, { hiddenClosetCategories: [] })),
+              ]);
+              tileOrderRef.current = [...closetCategories];
+              setTileGridOrder([...closetCategories]);
+              setShowTileGridReorderMode(false);
             }}
           />
           <PrimaryButton label="Done" variant="secondary" onPress={() => setShowCategoryLayoutEditor(false)} />

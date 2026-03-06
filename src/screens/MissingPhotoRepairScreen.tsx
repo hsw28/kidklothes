@@ -27,6 +27,7 @@ export const MissingPhotoRepairScreen: React.FC = () => {
         const next: string[] = [];
         for (const item of items) {
           const cached = (item.cachedImageUri ?? '').trim();
+          const display = getItemDisplayImageUri(item);
           const remote = getItemRemoteImageUri(item);
           const local = getItemLocalImageUri(item);
           const localSources = [cached, ...(item.imageUrls ?? []), item.imageUrl ?? ''].map((value) => value.trim()).filter((value) => isLocalLike(value));
@@ -43,9 +44,14 @@ export const MissingPhotoRepairScreen: React.FC = () => {
             }
           }
 
+          const hasAnySource = hasLocalSource || hasRemoteSource;
+          const hasAnyDisplay = Boolean(display);
+
           if (hasValidAppCopy) continue;
-          if (!hasLocalSource && !hasRemoteSource) continue;
-          next.push(item.id);
+          // Include all entries that currently have no usable photo, even if they have no source.
+          if (!hasAnyDisplay || hasAnySource) {
+            next.push(item.id);
+          }
         }
         if (!cancelled) {
           setCandidateIds(next);
@@ -111,8 +117,8 @@ export const MissingPhotoRepairScreen: React.FC = () => {
 
       {!loading && total === 0 ? (
         <Card>
-          <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>No missing-photo items found</Text>
-          <Text style={{ color: '#6b7280', fontSize: 13 }}>If some still look blank, use Restore Missing Images first, then come back here.</Text>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>No items need photo repair</Text>
+          <Text style={{ color: '#6b7280', fontSize: 13 }}>If you still see blanks elsewhere, run Restore Missing Images, then come back here.</Text>
         </Card>
       ) : null}
 
@@ -154,4 +160,3 @@ export const MissingPhotoRepairScreen: React.FC = () => {
     </Screen>
   );
 };
-
