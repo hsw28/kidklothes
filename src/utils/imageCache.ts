@@ -1,10 +1,10 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-const imageCacheDir = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ''}layetteout-images/`;
+const imageCacheDir = `${FileSystem.documentDirectory ?? ''}layetteout-images/`;
 const APP_IMAGE_DIR_MARKER = '/layetteout-images/';
 
 const ensureCacheDir = async () => {
-  if (!FileSystem.documentDirectory && !FileSystem.cacheDirectory) return;
+  if (!FileSystem.documentDirectory) return;
   await FileSystem.makeDirectoryAsync(imageCacheDir, { intermediates: true });
 };
 
@@ -20,7 +20,7 @@ const extensionFromUrl = (url: string) => {
 };
 
 export const cacheRemoteImage = async (itemId: string, url: string): Promise<string | undefined> => {
-  if (!url.trim() || (!FileSystem.documentDirectory && !FileSystem.cacheDirectory)) return undefined;
+  if (!url.trim() || !FileSystem.documentDirectory) return undefined;
   await ensureCacheDir();
   const ext = extensionFromUrl(url);
   const targetUri = `${imageCacheDir}${itemId}.${ext}`;
@@ -43,7 +43,7 @@ const extensionFromLocalUri = (uri: string) => {
 
 export const persistLocalImage = async (uri: string): Promise<string> => {
   const trimmed = uri.trim();
-  if (!trimmed || (!FileSystem.documentDirectory && !FileSystem.cacheDirectory)) return uri;
+  if (!trimmed || !FileSystem.documentDirectory) return uri;
   if (isAppOwnedImageUri(trimmed)) return trimmed;
   if (!/^file:\/\//i.test(trimmed) && !/^content:\/\//i.test(trimmed) && !/^ph:\/\//i.test(trimmed) && !/^assets-library:\/\//i.test(trimmed)) {
     return uri;

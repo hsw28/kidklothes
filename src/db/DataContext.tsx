@@ -97,7 +97,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [allBrands, setBrands] = useState<string[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const imagePersistInFlightRef = useRef(false);
-  const imagePersistAttemptedRef = useRef<Set<string>>(new Set());
+  const startupImageMigrationDoneRef = useRef(false);
 
   const refreshPurchaseState = useCallback(async (): Promise<PurchaseStateSnapshot | undefined> => {
     if (!appConfig.monetizationEnabled) return undefined;
@@ -157,6 +157,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     void setAppGroupInt('childCount', allChildren.length);
   }, [allChildren.length]);
   useEffect(() => {
+    if (loading) return;
+    if (startupImageMigrationDoneRef.current) return;
     if (imagePersistInFlightRef.current) return;
     const candidates = allItems
       .filter((item) => {
@@ -166,13 +168,11 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         const needsRemoteCache = Boolean(remote) && (!cached || /\/caches\//i.test(cached));
         const needsLocalMigration = Boolean(local) && !isAppOwnedImageUri(cached || local);
         return needsRemoteCache || needsLocalMigration;
-      })
-      .filter((item) => !imagePersistAttemptedRef.current.has(item.id))
-      .slice(0, 10);
+      });
+    startupImageMigrationDoneRef.current = true;
     if (!candidates.length) return;
 
     imagePersistInFlightRef.current = true;
-    candidates.forEach((item) => imagePersistAttemptedRef.current.add(item.id));
     void (async () => {
       try {
         for (const item of candidates) {
@@ -205,7 +205,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         imagePersistInFlightRef.current = false;
       }
     })();
-  }, [allItems]);
+  }, [allItems, loading]);
 
   const runAndRefresh = useCallback(
     async (action: () => Promise<unknown>) => {
