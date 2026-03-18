@@ -1,13 +1,15 @@
 import Constants from 'expo-constants';
 import { Linking, Platform } from 'react-native';
+import { BETA_MAX_KIDS } from '@/config/betaLimits';
 
 const FEEDBACK_EMAIL = 'hello@layetteout.com';
 
 export const openKidLimitFeedbackEmail = async (currentCount: number) => {
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
-  const subject = 'Layette Out beta: request for 3+ kids';
+  const nextRequestThreshold = BETA_MAX_KIDS + 1;
+  const subject = `Layette Out beta: request for ${nextRequestThreshold}+ kids`;
   const body = [
-    'Hi! I’m using Layette Out beta and would love support for 3+ kids.',
+    `Hi! I’m using Layette Out beta and would love support for ${nextRequestThreshold}+ kids.`,
     '',
     `Current number of kids in my account: ${currentCount}`,
     `App version: ${appVersion}`,

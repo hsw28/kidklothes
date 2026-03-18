@@ -1,6 +1,7 @@
 import { ID, ItemStatus } from '@/models';
 import { ClothingType } from '@/models';
 import { ClosetSizeMode } from '@/utils/closetViewInsights';
+import { ClosetCategory } from '@/utils/categories';
 
 export type RootTabParamList = {
   Closet: undefined;
@@ -18,6 +19,7 @@ export type ItemsStackParamList = {
         initialSinceHours?: number;
         initialChildId?: ID;
         initialSize?: string;
+        initialCategory?: ClosetCategory;
         initialClothingType?: ClothingType;
         initialBrandId?: string;
         initialSizeBucket?: 'All' | 'now' | 'next';
@@ -26,7 +28,7 @@ export type ItemsStackParamList = {
         initialItemIds?: ID[];
       }
     | undefined;
-  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
+  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; source?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
   ItemDetail: { itemId: ID };
 };
 
@@ -56,6 +58,7 @@ export type ClosetStackParamList = {
         initialSinceHours?: number;
         initialChildId?: ID;
         initialSize?: string;
+        initialCategory?: ClosetCategory;
         initialClothingType?: ClothingType;
         initialBrandId?: string;
         initialSizeBucket?: 'All' | 'now' | 'next';
@@ -65,11 +68,11 @@ export type ClosetStackParamList = {
       }
     | undefined;
   SellBin: undefined;
-  CategorySnapshot: { childId: ID; category: string; sizeMode?: ClosetSizeMode; brandId?: string; brandIds?: string[]; season?: string };
+  CategorySnapshot: { childId: ID; category: string; sizeMode?: ClosetSizeMode; brandId?: string; brandIds?: string[]; season?: string; query?: string; locationFilter?: string };
   OutfitsList: undefined;
   OutfitBuilder: { outfitId?: ID } | undefined;
   ItemDetail: { itemId: ID };
-  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
+  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; source?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
 };
 
 export type KidsStackParamList = {

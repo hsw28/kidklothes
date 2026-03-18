@@ -17,6 +17,7 @@ export interface NewChildInput {
   photoUri?: string;
   notes?: string;
   usesMixedSizes?: boolean;
+  currentSizeCodes?: string[];
   hiddenClosetCategories?: string[];
   currentSizeCode?: Child['currentSize']['code'];
   currentSizeOther?: string;
@@ -31,11 +32,13 @@ export interface NewChildInput {
 
 export interface NewItemInput {
   childId?: ID;
+  childIds?: ID[];
   url?: string;
   sourceDomain?: string;
   canonicalUrl?: string;
   outboundUrl?: string;
   clickCount?: number;
+  quantity?: number;
   brand?: string;
   styleName?: string;
   printName?: string;
@@ -158,6 +161,7 @@ type ChildRow = {
   notes: string | null;
   hiddenClosetCategories: string | null;
   usesMixedSizes: number | null;
+  currentSizeCodes: string | null;
   apparelSizeCurrent: string | null;
   apparelSizeNext: string | null;
   shoeSizeCurrent: string | null;
@@ -174,11 +178,13 @@ type ChildRow = {
 
 type ItemRow = {
   id: string;
+  childId: string | null;
   url: string | null;
   sourceDomain: string | null;
   canonicalUrl: string | null;
   outboundUrl: string | null;
   clickCount: number | null;
+  quantity: number | null;
   brand: string | null;
   styleName: string | null;
   printName: string | null;
@@ -296,6 +302,8 @@ type SettingsRow = {
   inventoryRealityCheckOwnedThreshold: number | null;
   developerModeEnabled: number | null;
   betaKidLimitBannerDismissed: number | null;
+  proTeaserBannerDismissed: number | null;
+  missingPhotoRestoreNudgeShown: number | null;
 };
 
 type EventRow = {
@@ -345,6 +353,8 @@ const defaultSettings: AppSettings = {
   inventoryRealityCheckOwnedThreshold: 5,
   developerModeEnabled: false,
   betaKidLimitBannerDismissed: false,
+  proTeaserBannerDismissed: false,
+  missingPhotoRestoreNudgeShown: true,
 };
 
 const parseStringList = (value: string | null): string[] => {
@@ -363,6 +373,16 @@ const normalizeImageUrls = (imageUrl?: string, imageUrls?: string[]): string[] =
     .filter(Boolean);
   return Array.from(new Set(merged));
 };
+
+const normalizeQuantity = (value?: number | null): number => {
+  const parsed = Number(value ?? 1);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.floor(parsed));
+};
+
+const normalizeChildIds = (childId?: ID, childIds?: ID[]): ID[] => (
+  Array.from(new Set([childId, ...(childIds ?? [])].filter((entry): entry is ID => Boolean(entry))))
+);
 
 const deriveItemSizingFields = (input: {
   clothingType?: string | null;
@@ -400,6 +420,7 @@ const mapChild = (row: ChildRow): Child => ({
   photoUri: row.photoUri ?? undefined,
   notes: row.notes ?? undefined,
   usesMixedSizes: Boolean(row.usesMixedSizes ?? 0),
+  currentSizeCodes: parseStringList(row.currentSizeCodes),
   hiddenClosetCategories: parseStringList(row.hiddenClosetCategories),
   apparelSizeCurrent: row.apparelSizeCurrent ?? undefined,
   apparelSizeNext: row.apparelSizeNext ?? undefined,
@@ -459,6 +480,7 @@ const mapItem = (row: ItemRow, tags: string[], brandTags: string[], childIds: st
   canonicalUrl: row.canonicalUrl ?? undefined,
   outboundUrl: row.outboundUrl ?? undefined,
   clickCount: row.clickCount ?? 0,
+  quantity: normalizeQuantity(row.quantity),
   brand: row.brand ?? undefined,
   styleName: row.styleName ?? undefined,
   printName: row.printName ?? undefined,
@@ -500,7 +522,7 @@ const mapItem = (row: ItemRow, tags: string[], brandTags: string[], childIds: st
   fitBin: (row.fitBin as Item['fitBin']) ?? 'unsure',
   fitBinTouched: row.fitBinTouched === 1,
   tags,
-  childIds,
+  childIds: childIds.length ? childIds : (row.childId ? [row.childId] : []),
 });
 
 const mapOutfit = (row: OutfitRow, tags: string[]): Outfit => ({
@@ -543,6 +565,8 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
     inventoryRealityCheckOwnedThreshold: normalizeInventoryRealityThreshold(row.inventoryRealityCheckOwnedThreshold),
     developerModeEnabled: row.developerModeEnabled === 1,
     betaKidLimitBannerDismissed: row.betaKidLimitBannerDismissed === 1,
+    proTeaserBannerDismissed: row.proTeaserBannerDismissed === 1,
+    missingPhotoRestoreNudgeShown: row.missingPhotoRestoreNudgeShown === 1,
   };
 };
 
@@ -691,6 +715,36 @@ const upsertChildItem = async (input: {
   );
 };
 
+const syncChildItemsForItem = async (input: {
+  itemId: ID;
+  childIds: ID[];
+  sizeAtTime?: string;
+  statusForChild: Item['status'];
+  notesForChild?: string;
+  storageLocationId?: ID;
+}) => {
+  const db = await getDb();
+  const existing = await db.getAllAsync<ChildItemRow>('SELECT * FROM child_items WHERE itemId = ?;', input.itemId);
+  const desired = new Set(input.childIds);
+  const now = Date.now();
+
+  for (const childId of input.childIds) {
+    await upsertChildItem({
+      childId,
+      itemId: input.itemId,
+      storageLocationId: input.storageLocationId,
+      sizeAtTime: input.sizeAtTime,
+      statusForChild: input.statusForChild,
+      notesForChild: input.notesForChild,
+    });
+  }
+
+  for (const link of existing) {
+    if (desired.has(link.childId)) continue;
+    await db.runAsync('UPDATE child_items SET deletedAt = ?, updatedAt = ? WHERE id = ?;', now, now, link.id);
+  }
+};
+
 export const repository = {
   async init() {
     await initDatabase();
@@ -791,7 +845,7 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     await db.runAsync(
-      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, betaKidLimitBannerDismissed = ? WHERE id = ?;`,
+      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ? WHERE id = ?;`,
       'never',
       next.closetAddDefaultView,
       next.notificationsEnabled ? 1 : 0,
@@ -815,6 +869,8 @@ export const repository = {
       next.inventoryRealityCheckOwnedThreshold ?? null,
       next.developerModeEnabled ? 1 : 0,
       next.betaKidLimitBannerDismissed ? 1 : 0,
+      next.proTeaserBannerDismissed ? 1 : 0,
+      next.missingPhotoRestoreNudgeShown ? 1 : 0,
       'app',
     );
 
@@ -893,6 +949,7 @@ export const repository = {
       photoUri: normalizeUrl(input.photoUri) || undefined,
       notes: trimOrNull(input.notes) ?? undefined,
       usesMixedSizes: Boolean(input.usesMixedSizes),
+      currentSizeCodes: normalizeStringArray(input.currentSizeCodes),
       hiddenClosetCategories: normalizeStringArray(input.hiddenClosetCategories),
       apparelSizeCurrent: trimOrNull(input.apparelSizeCurrent) ?? undefined,
       apparelSizeNext: trimOrNull(input.apparelSizeNext) ?? undefined,
@@ -912,13 +969,14 @@ export const repository = {
     };
 
     await db.runAsync(
-      'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, currentSizeCodes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
       child.id,
       child.name,
       child.photoUri ?? null,
       child.notes ?? null,
       JSON.stringify(child.hiddenClosetCategories),
       child.usesMixedSizes ? 1 : 0,
+      JSON.stringify(child.currentSizeCodes ?? []),
       child.apparelSizeCurrent ?? null,
       child.apparelSizeNext ?? null,
       child.shoeSizeCurrent ?? null,
@@ -949,6 +1007,7 @@ export const repository = {
       photoUri: patch.photoUri !== undefined ? normalizeUrl(patch.photoUri) || undefined : row.photoUri ?? undefined,
       notes: patch.notes !== undefined ? trimOrNull(patch.notes) ?? undefined : row.notes ?? undefined,
       usesMixedSizes: patch.usesMixedSizes !== undefined ? Boolean(patch.usesMixedSizes) : Boolean(row.usesMixedSizes ?? 0),
+      currentSizeCodes: patch.currentSizeCodes !== undefined ? normalizeStringArray(patch.currentSizeCodes) : parseStringList(row.currentSizeCodes),
       hiddenClosetCategories:
         patch.hiddenClosetCategories !== undefined
           ? normalizeStringArray(patch.hiddenClosetCategories)
@@ -971,12 +1030,13 @@ export const repository = {
     };
 
     await db.runAsync(
-      'UPDATE children SET name = ?, photoUri = ?, notes = ?, hiddenClosetCategories = ?, usesMixedSizes = ?, apparelSizeCurrent = ?, apparelSizeNext = ?, shoeSizeCurrent = ?, shoeSizeNext = ?, shoeSizeSystem = ?, currentSizeCode = ?, currentSizeOther = ?, nextSizeCode = ?, nextSizeOther = ?, updatedAt = ? WHERE id = ?;',
+      'UPDATE children SET name = ?, photoUri = ?, notes = ?, hiddenClosetCategories = ?, usesMixedSizes = ?, currentSizeCodes = ?, apparelSizeCurrent = ?, apparelSizeNext = ?, shoeSizeCurrent = ?, shoeSizeNext = ?, shoeSizeSystem = ?, currentSizeCode = ?, currentSizeOther = ?, nextSizeCode = ?, nextSizeOther = ?, updatedAt = ? WHERE id = ?;',
       updated.name,
       updated.photoUri ?? null,
       updated.notes ?? null,
       JSON.stringify(updated.hiddenClosetCategories),
       updated.usesMixedSizes ? 1 : 0,
+      JSON.stringify(updated.currentSizeCodes ?? []),
       updated.apparelSizeCurrent ?? null,
       updated.apparelSizeNext ?? null,
       updated.shoeSizeCurrent ?? null,
@@ -1030,6 +1090,7 @@ export const repository = {
         status: input.status,
         category: input.category,
         size: input.size,
+        quantity: input.quantity,
       });
       const aliases = await getActivePrintAliases();
       const normalizedImageUrls = normalizeImageUrls(input.imageUrl, input.imageUrls);
@@ -1037,6 +1098,8 @@ export const repository = {
       const normalizedInputUrl = normalizeUrl(input.url);
       const normalizedCanonicalUrl = normalizeUrl(input.canonicalUrl);
       const sizing = deriveItemSizingFields(input);
+      const childIds = normalizeChildIds(input.childId, input.childIds);
+      const quantity = normalizeQuantity(input.quantity);
       const link = resolveOutboundLink(normalizedInputUrl || '', {
         canonicalUrl: normalizedCanonicalUrl || undefined,
         monetize: false,
@@ -1049,6 +1112,7 @@ export const repository = {
       canonicalUrl: normalizedCanonicalUrl || link.canonicalUrl || undefined,
       outboundUrl: normalizeUrl(input.outboundUrl) || link.outboundUrl || undefined,
       clickCount: input.clickCount ?? 0,
+      quantity,
       brand: trimOrNull(input.brand) ?? undefined,
       styleName: trimOrNull(input.styleName) ?? undefined,
       printName: trimOrNull(input.printName) ?? undefined,
@@ -1089,21 +1153,22 @@ export const repository = {
       fitBin: sizing.fitBin,
       fitBinTouched: sizing.fitBinTouched,
       tags: normalizeStringArray(input.tags),
-      childIds: input.childId ? [input.childId] : [],
+      childIds,
     };
 
     const itemInsertColumns = [
-      'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'styleName', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
+      'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'quantity', 'brand', 'styleName', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
       'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
     ] as const;
     const itemInsertValues: Array<string | number | null> = [
       item.id,
-      input.childId ?? null,
+      childIds[0] ?? null,
       item.url ?? null,
       item.sourceDomain ?? null,
       item.canonicalUrl ?? null,
       item.outboundUrl ?? null,
       item.clickCount,
+      item.quantity,
       item.brand ?? null,
       item.styleName ?? null,
       item.printName ?? null,
@@ -1154,10 +1219,10 @@ export const repository = {
         await replaceItemTags(item.id, item.tags);
         await replaceItemBrands(item.id, item.brandTags);
 
-        if (input.childId) {
-          await upsertChildItem({
-            childId: input.childId,
+        if (childIds.length > 0) {
+          await syncChildItemsForItem({
             itemId: item.id,
+            childIds,
             storageLocationId: input.storageLocationId,
             sizeAtTime: input.sizeAtTime ?? item.size,
             statusForChild: input.statusForChild ?? item.status,
@@ -1171,7 +1236,7 @@ export const repository = {
         if ((firstSaveRow?.count ?? 0) === 0) {
           await repository.logEvent({
             type: 'first_save',
-            payload: { itemId: item.id, childId: input.childId ?? null, quick: false },
+            payload: { itemId: item.id, childId: childIds[0] ?? null, quick: false },
           });
         }
       } catch (eventError) {
@@ -1181,7 +1246,7 @@ export const repository = {
       return item;
     } catch (error) {
       if (__DEV__) console.error('[repository.addItem] failed', {
-        childId: input.childId ?? null,
+        childId: input.childId ?? input.childIds?.[0] ?? null,
         status: input.status,
         clothingType: input.clothingType,
       }, error);
@@ -1199,12 +1264,16 @@ export const repository = {
         status: patch.status ?? existing.status,
         category: patch.category ?? existing.category,
         size: patch.size ?? existing.size,
+        quantity: patch.quantity ?? existing.quantity,
       });
 
       await initDatabase();
       const db = await getDb();
       const now = Date.now();
       const aliases = await getActivePrintAliases();
+      const nextChildIds = patch.childId !== undefined || patch.childIds !== undefined
+        ? normalizeChildIds(patch.childId, patch.childIds ?? existing.childIds)
+        : existing.childIds;
       const nextUrl = patch.url !== undefined ? normalizeUrl(patch.url) : existing.url ?? '';
       const sizing = deriveItemSizingFields({
         clothingType: patch.clothingType ?? existing.clothingType,
@@ -1222,6 +1291,18 @@ export const repository = {
         canonicalUrl: normalizeUrl(patch.canonicalUrl ?? existing.canonicalUrl ?? '') || undefined,
         monetize: false,
       });
+      const touchesImageFields = patch.imageUrl !== undefined || patch.imageUrls !== undefined || patch.cachedImageUri !== undefined;
+      const normalizedPatchImageUrl = patch.imageUrl !== undefined ? normalizeUrl(patch.imageUrl) || undefined : undefined;
+      const normalizedPatchImageUrls = patch.imageUrls !== undefined
+        ? normalizeImageUrls(normalizedPatchImageUrl, patch.imageUrls)
+        : undefined;
+      const normalizedPatchCachedImageUri = patch.cachedImageUri !== undefined ? normalizeUrl(patch.cachedImageUri) || undefined : undefined;
+      const hasIncomingImageReplacement = Boolean(
+        normalizedPatchCachedImageUri || normalizedPatchImageUrl || (normalizedPatchImageUrls?.length ?? 0) > 0,
+      );
+      const shouldClearCachedForReplacement = hasIncomingImageReplacement
+        && !normalizedPatchCachedImageUri
+        && Boolean(normalizedPatchImageUrl || (normalizedPatchImageUrls?.length ?? 0) > 0);
 
     const nextBrand = patch.brand !== undefined ? trimOrNull(patch.brand) ?? undefined : existing.brand;
     const nextBrandTags =
@@ -1236,6 +1317,7 @@ export const repository = {
       canonicalUrl: patch.canonicalUrl !== undefined ? normalizeUrl(patch.canonicalUrl) || undefined : link.canonicalUrl || existing.canonicalUrl,
       outboundUrl: patch.outboundUrl !== undefined ? normalizeUrl(patch.outboundUrl) || undefined : link.outboundUrl || existing.outboundUrl,
       clickCount: patch.clickCount ?? existing.clickCount,
+      quantity: patch.quantity !== undefined ? normalizeQuantity(patch.quantity) : existing.quantity,
       brand: nextBrand,
       styleName: patch.styleName !== undefined ? trimOrNull(patch.styleName) ?? undefined : existing.styleName,
       printName: patch.printName !== undefined ? trimOrNull(patch.printName) ?? undefined : existing.printName,
@@ -1248,16 +1330,23 @@ export const repository = {
       brandTags: nextBrandTags,
       title: patch.title !== undefined ? normalizeWhitespace(patch.title) : existing.title,
       imageUrl:
-        patch.imageUrl !== undefined
-          ? normalizeUrl(patch.imageUrl) || undefined
-          : patch.imageUrls !== undefined
-            ? normalizeImageUrls(undefined, patch.imageUrls)[0]
-            : existing.imageUrl,
+        touchesImageFields
+          ? hasIncomingImageReplacement
+            ? normalizedPatchImageUrl ?? normalizedPatchImageUrls?.[0] ?? existing.imageUrl
+            : existing.imageUrl
+          : existing.imageUrl,
       imageUrls:
-        patch.imageUrls !== undefined || patch.imageUrl !== undefined
-          ? normalizeImageUrls(patch.imageUrl ?? existing.imageUrl, patch.imageUrls ?? existing.imageUrls)
+        touchesImageFields
+          ? hasIncomingImageReplacement
+            ? normalizeImageUrls(normalizedPatchImageUrl ?? existing.imageUrl, normalizedPatchImageUrls ?? existing.imageUrls)
+            : existing.imageUrls
           : existing.imageUrls,
-      cachedImageUri: patch.cachedImageUri !== undefined ? normalizeUrl(patch.cachedImageUri) || undefined : existing.cachedImageUri,
+      cachedImageUri:
+        touchesImageFields
+          ? hasIncomingImageReplacement
+            ? normalizedPatchCachedImageUri ?? (shouldClearCachedForReplacement ? undefined : existing.cachedImageUri)
+            : existing.cachedImageUri
+          : existing.cachedImageUri,
       clothingType: patch.clothingType ?? existing.clothingType,
       size: sizing.legacySize || existing.size,
       status: (patch.status && (['wishlist', 'owned', 'for-sale', 'sold'] as const).includes(patch.status as any) ? patch.status : undefined) ?? existing.status,
@@ -1288,11 +1377,11 @@ export const repository = {
       fitBin: sizing.fitBin,
       fitBinTouched: sizing.fitBinTouched,
       tags: patch.tags !== undefined ? normalizeStringArray(patch.tags) : existing.tags,
-      childIds: patch.childId ? Array.from(new Set([...existing.childIds, patch.childId])) : existing.childIds,
+      childIds: nextChildIds,
     };
 
       await runInTransaction(db, async () => {
-        await db.runAsync(
+      await db.runAsync(
           `UPDATE items SET
         childId = ?,
         url = ?,
@@ -1300,6 +1389,7 @@ export const repository = {
         canonicalUrl = ?,
         outboundUrl = ?,
         clickCount = ?,
+        quantity = ?,
         brand = ?,
         styleName = ?,
         printName = ?,
@@ -1339,12 +1429,13 @@ export const repository = {
         fitBin = ?,
         fitBinTouched = ?
       WHERE id = ?;`,
-      patch.childId ?? existing.childIds[0] ?? null,
+      updated.childIds[0] ?? null,
       updated.url ?? null,
       updated.sourceDomain ?? null,
       updated.canonicalUrl ?? null,
       updated.outboundUrl ?? null,
       updated.clickCount,
+      updated.quantity,
       updated.brand ?? null,
       updated.styleName ?? null,
       updated.printName ?? null,
@@ -1389,16 +1480,14 @@ export const repository = {
         await replaceItemTags(id, updated.tags);
         await replaceItemBrands(id, updated.brandTags);
 
-        if (patch.childId) {
-          await upsertChildItem({
-            childId: patch.childId,
-            itemId: id,
-            storageLocationId: patch.storageLocationId,
-            sizeAtTime: patch.sizeAtTime ?? updated.size,
-            statusForChild: patch.statusForChild ?? updated.status,
-            notesForChild: patch.notesForChild,
-          });
-        }
+        await syncChildItemsForItem({
+          itemId: id,
+          childIds: updated.childIds,
+          storageLocationId: patch.storageLocationId,
+          sizeAtTime: patch.sizeAtTime ?? updated.size,
+          statusForChild: patch.statusForChild ?? updated.status,
+          notesForChild: patch.notesForChild,
+        });
       });
 
       return updated;
@@ -1409,13 +1498,11 @@ export const repository = {
   },
 
   async addItemsBatch(input: BatchAddInput): Promise<Item[]> {
-    const quantity = Math.max(1, Math.min(30, Math.floor(input.quantity || 1)));
-    const created: Item[] = [];
-    for (let idx = 0; idx < quantity; idx += 1) {
-      const item = await repository.addItem(input);
-      created.push(item);
-    }
-    return created;
+    const item = await repository.addItem({
+      ...input,
+      quantity: normalizeQuantity(input.quantity),
+    });
+    return [item];
   },
 
   async markItemsWorn(itemIds: ID[], timestamp = Date.now()): Promise<void> {
@@ -1475,16 +1562,21 @@ export const repository = {
 
   async bulkAssignChild(itemIds: ID[], childId: ID): Promise<void> {
     if (itemIds.length === 0) return;
+    await initDatabase();
+    const db = await getDb();
+    const now = Date.now();
 
     for (const itemId of itemIds) {
       const item = await repository.getItemById(itemId);
       if (!item) continue;
-      await upsertChildItem({
-        childId,
+      const nextChildIds = Array.from(new Set([...item.childIds, childId]));
+      await syncChildItemsForItem({
         itemId,
+        childIds: nextChildIds,
         sizeAtTime: item.size,
         statusForChild: item.status,
       });
+      await db.runAsync('UPDATE items SET childId = ?, updatedAt = ? WHERE id = ?;', nextChildIds[0] ?? null, now, itemId);
     }
   },
 
@@ -1763,13 +1855,14 @@ export const repository = {
 
     for (const child of payload.children) {
       await db.runAsync(
-        'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, currentSizeCodes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
         child.id,
         child.name,
         child.photoUri ?? null,
         child.notes ?? null,
         JSON.stringify(child.hiddenClosetCategories ?? []),
         child.usesMixedSizes ? 1 : 0,
+        JSON.stringify(child.currentSizeCodes ?? []),
         child.apparelSizeCurrent ?? null,
         child.apparelSizeNext ?? null,
         child.shoeSizeCurrent ?? null,
@@ -1799,7 +1892,7 @@ export const repository = {
         fitBinTouched: item.fitBinTouched,
       });
       const importItemColumns = [
-        'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'brand', 'styleName', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
+        'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'quantity', 'brand', 'styleName', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
         'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
       ] as const;
       const importItemValues: Array<string | number | null> = [
@@ -1810,6 +1903,7 @@ export const repository = {
         item.canonicalUrl ?? null,
         item.outboundUrl ?? null,
         item.clickCount ?? 0,
+        normalizeQuantity(item.quantity),
         item.brand ?? null,
         item.styleName ?? null,
         item.printName ?? null,

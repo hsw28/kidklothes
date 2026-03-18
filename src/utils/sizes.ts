@@ -76,8 +76,18 @@ export const sizeCodeToStoredText = (code?: SizeCode | null, otherText?: string 
   return code;
 };
 
+export const getChildCurrentSizeTexts = (child?: Child): string[] => {
+  if (!child) return [];
+  const fromArray = (child.currentSizeCodes ?? [])
+    .map((value) => (value || '').trim())
+    .filter(Boolean);
+  if (fromArray.length > 0) return Array.from(new Set(fromArray));
+  const fallback = sizeCodeToStoredText(child.currentSize?.code ?? null, child.currentSize?.otherText ?? null);
+  return fallback ? [fallback] : [];
+};
+
 export const getChildCurrentSizeText = (child?: Child): string | undefined =>
-  sizeCodeToStoredText(child?.currentSize?.code ?? null, child?.currentSize?.otherText ?? null);
+  getChildCurrentSizeTexts(child)[0];
 
 export const getChildNextSizeText = (child?: Child): string | undefined => {
   if (!child) return undefined;

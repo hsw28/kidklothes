@@ -85,6 +85,7 @@ export interface Child {
   photoUri?: string;
   notes?: string;
   usesMixedSizes: boolean;
+  currentSizeCodes?: string[];
   hiddenClosetCategories: string[];
   apparelSizeCurrent?: string;
   apparelSizeNext?: string;
@@ -100,6 +101,7 @@ export interface Child {
 
 export interface Item extends BaseItem {
   clickCount: number;
+  quantity: number;
   styleName?: string;
   printName?: string;
   printNameNorm?: string;
@@ -222,6 +224,8 @@ export interface AppSettings {
   inventoryRealityCheckOwnedThreshold?: number;
   developerModeEnabled?: boolean;
   betaKidLimitBannerDismissed?: boolean;
+  proTeaserBannerDismissed?: boolean;
+  missingPhotoRestoreNudgeShown?: boolean;
 }
 
 export interface ActivityEvent {

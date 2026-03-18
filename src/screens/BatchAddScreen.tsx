@@ -86,8 +86,9 @@ export const BatchAddScreen: React.FC<Props> = ({ navigation }) => {
       });
       if (createdItems.length > 0) {
         const createdIds = createdItems.map((item) => item.id);
+        const createdCount = createdItems.reduce((sum, item) => sum + item.quantity, 0);
         showToast({
-          label: `Added ${createdIds.length} Item${createdIds.length === 1 ? '' : 's'} in Batch`,
+          label: `Added ${createdCount} Item${createdCount === 1 ? '' : 's'} in Batch`,
           doUndo: async () => {
             await archiveItems(createdIds);
           },
@@ -126,7 +127,7 @@ export const BatchAddScreen: React.FC<Props> = ({ navigation }) => {
     <Screen>
       <Card>
         <Text style={styles.title}>Batch Add</Text>
-        <Text style={styles.meta}>Create many minimal items in one save.</Text>
+        <Text style={styles.meta}>Record multiple copies of the same item in one save.</Text>
       </Card>
       <Card>
         <ChipSelector

@@ -473,7 +473,7 @@
 				CODE_SIGN_ENTITLEMENTS = LayetteOut/LayetteOut.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 6GQ6TNN7UP;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -517,7 +517,7 @@
 				CODE_SIGN_ENTITLEMENTS = LayetteOut/LayetteOut.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 6GQ6TNN7UP;
 				INFOPLIST_FILE = LayetteOut/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Layette Out";

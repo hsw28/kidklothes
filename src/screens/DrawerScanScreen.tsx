@@ -156,8 +156,9 @@ export const DrawerScanScreen: React.FC<Props> = ({ navigation }) => {
       setCounts({});
       setPhotoByLabel({});
       if (createdIds.length > 0) {
+        const createdCount = summary.reduce((sum, entry) => sum + entry.count, 0);
         showToast({
-          label: `Added ${createdIds.length} Item${createdIds.length === 1 ? '' : 's'} from Drawer Scan`,
+          label: `Added ${createdCount} Item${createdCount === 1 ? '' : 's'} from Drawer Scan`,
           doUndo: async () => {
             await archiveItems(createdIds);
           },

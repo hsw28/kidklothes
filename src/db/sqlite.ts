@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { inferSizeScheme, isShoeCategory, normalizeSize } from '@/lib/sizing';
 
 const DB_NAME = 'layetteout.db';
-const LATEST_DB_VERSION = 29;
+const LATEST_DB_VERSION = 33;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let initPromise: Promise<void> | null = null;
@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS children (
   notes TEXT,
   hiddenClosetCategories TEXT,
   usesMixedSizes INTEGER NOT NULL DEFAULT 0,
+  currentSizeCodes TEXT,
   apparelSizeCurrent TEXT,
   apparelSizeNext TEXT,
   shoeSizeCurrent TEXT,
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS items (
   canonicalUrl TEXT,
   outboundUrl TEXT,
   clickCount INTEGER NOT NULL DEFAULT 0,
+  quantity INTEGER NOT NULL DEFAULT 1,
   brand TEXT,
   styleName TEXT,
   printName TEXT,
@@ -164,7 +166,9 @@ CREATE TABLE IF NOT EXISTS settings (
   kidsPreviewCategories TEXT,
   inventoryRealityCheckOwnedThreshold INTEGER,
   developerModeEnabled INTEGER NOT NULL DEFAULT 0,
-  betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0
+  betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0,
+  proTeaserBannerDismissed INTEGER NOT NULL DEFAULT 0,
+  missingPhotoRestoreNudgeShown INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -240,8 +244,8 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
   if ((row?.count ?? 0) > 0) return;
 
   await db.runAsync(
-    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, betaKidLimitBannerDismissed)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     'app',
     'sometimes',
     'detailed',
@@ -264,6 +268,8 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
     null,
     0,
     0,
+    0,
+    1,
   );
 };
 
@@ -847,6 +853,55 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
     }
     await db.execAsync('PRAGMA user_version = 29;');
     currentVersion = 29;
+  }
+
+  if (currentVersion < 30) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'proTeaserBannerDismissed')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN proTeaserBannerDismissed INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync('PRAGMA user_version = 30;');
+    currentVersion = 30;
+  }
+
+  if (currentVersion < 31) {
+    const childColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('children');`);
+    if (!childColumns.some((column) => column.name === 'currentSizeCodes')) {
+      await db.execAsync('ALTER TABLE children ADD COLUMN currentSizeCodes TEXT;');
+    }
+    const rows = await db.getAllAsync<{ id: string; currentSizeCodes: string | null; currentSizeCode: string | null; currentSizeOther: string | null }>(
+      `SELECT id, currentSizeCodes, currentSizeCode, currentSizeOther FROM children;`,
+    );
+    for (const row of rows) {
+      const existing = (row.currentSizeCodes ?? '').trim();
+      if (existing) continue;
+      const fallback = row.currentSizeCode === 'OTHER'
+        ? (row.currentSizeOther ?? '').trim()
+        : (row.currentSizeCode ?? '').trim();
+      if (!fallback) continue;
+      await db.runAsync('UPDATE children SET currentSizeCodes = ? WHERE id = ?;', JSON.stringify([fallback]), row.id);
+    }
+    await db.execAsync('PRAGMA user_version = 31;');
+    currentVersion = 31;
+  }
+
+  if (currentVersion < 32) {
+    const itemColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('items');`);
+    if (!itemColumns.some((column) => column.name === 'quantity')) {
+      await db.execAsync('ALTER TABLE items ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;');
+    }
+    await db.execAsync('UPDATE items SET quantity = 1 WHERE quantity IS NULL OR quantity < 1;');
+    await db.execAsync('PRAGMA user_version = 32;');
+    currentVersion = 32;
+  }
+
+  if (currentVersion < 33) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'missingPhotoRestoreNudgeShown')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN missingPhotoRestoreNudgeShown INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync('PRAGMA user_version = 33;');
+    currentVersion = 33;
   }
 
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');

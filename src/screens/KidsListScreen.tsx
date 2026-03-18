@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { FloatingActionButton } from '@/components/FloatingActionButton';
 import { Screen } from '@/components/Screen';
+import { BETA_MAX_KIDS } from '@/config/betaLimits';
 import { useData } from '@/db/DataContext';
 import { usePromoteChildSize, canPromoteChildSize } from '@/hooks/usePromoteChildSize';
 import { KidsStackParamList } from '@/navigation/types';
@@ -243,7 +244,7 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
         />
       ) : (
         <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
-          {children.length > 2 && !settings.betaKidLimitBannerDismissed ? (
+          {children.length > BETA_MAX_KIDS && !settings.betaKidLimitBannerDismissed ? (
             <Card>
               <Text style={styles.betaLimitBannerText}>You’re over the beta limit. Creating new children is temporarily disabled.</Text>
               <PrimaryButton label="Got it" variant="secondary" onPress={() => void updateSettings({ betaKidLimitBannerDismissed: true })} />

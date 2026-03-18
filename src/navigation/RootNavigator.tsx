@@ -1,6 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { BrandedHeaderTitle } from '@/components/BrandedHeaderTitle';
 import { BeforeYouBuyScreen } from '@/screens/BeforeYouBuyScreen';
 import { BatchAddScreen } from '@/screens/BatchAddScreen';
 import { BrandSnapshotScreen } from '@/screens/BrandSnapshotScreen';
@@ -47,6 +48,7 @@ const SettingsStack = createNativeStackNavigator<SettingsStackParamList>();
 
 const ClosetStackNavigator = () => {
   const theme = useAppTheme();
+  const brandedTitle = (title: string) => () => <BrandedHeaderTitle title={title} />;
   return (
   <ClosetStack.Navigator
     initialRouteName="ClosetHome"
@@ -62,20 +64,20 @@ const ClosetStackNavigator = () => {
     <ClosetStack.Screen name="GuidedShopping" component={GuidedShoppingScreen} options={{ title: 'Shopping Setup' }} />
     <ClosetStack.Screen name="GuidedOrganizing" component={GuidedOrganizingScreen} options={{ title: 'Organize Setup' }} />
     <ClosetStack.Screen name="GuidedSnapshot" component={GuidedSnapshotScreen} options={{ title: 'Snapshot' }} />
-    <ClosetStack.Screen name="ClosetHome" component={ClosetHomeScreen} options={{ title: 'Closet' }} />
+    <ClosetStack.Screen name="ClosetHome" component={ClosetHomeScreen} options={{ headerTitle: brandedTitle('Closet') }} />
     <ClosetStack.Screen name="BeforeYouBuy" component={BeforeYouBuyScreen} options={{ title: 'Going Shopping' }} />
     <ClosetStack.Screen name="BrandSnapshot" component={BrandSnapshotScreen} options={{ title: 'Brand Snapshot' }} />
-    <ClosetStack.Screen name="DropPrep" component={DropPrepScreen} options={{ title: 'Drop Prep' }} />
+    <ClosetStack.Screen name="DropPrep" component={DropPrepScreen} options={{ headerTitle: brandedTitle('Drop Prep') }} />
     <ClosetStack.Screen name="PrintDupGroups" component={PrintDupGroupsScreen} options={{ title: 'Print Duplicates' }} />
     <ClosetStack.Screen name="DrawerScan" component={DrawerScanScreen} options={{ title: 'Drawer Scan' }} />
     <ClosetStack.Screen name="DrawerScanResults" component={DrawerScanResultsScreen} options={{ title: 'Scan Results' }} />
     <ClosetStack.Screen name="BatchAdd" component={BatchAddScreen} options={{ title: 'Batch Add' }} />
     <ClosetStack.Screen name="ItemsList" component={ItemsListScreen} options={{ title: 'Items' }} />
     <ClosetStack.Screen name="SellBin" component={SellBinScreen} options={{ title: 'Sell Bin' }} />
-    <ClosetStack.Screen name="CategorySnapshot" component={CategorySnapshotScreen} options={{ title: 'Category Snapshot' }} />
+    <ClosetStack.Screen name="CategorySnapshot" component={CategorySnapshotScreen} options={{ headerTitle: brandedTitle('Category Snapshot') }} />
     <ClosetStack.Screen name="OutfitsList" component={OutfitsListScreen} options={{ title: 'Outfits (Optional)' }} />
     <ClosetStack.Screen name="OutfitBuilder" component={OutfitBuilderScreen} options={{ title: 'Outfit Builder (Optional)' }} />
-    <ClosetStack.Screen name="AddItem" component={ItemFormScreen} options={{ title: 'Add / Edit Item' }} />
+    <ClosetStack.Screen name="AddItem" component={ItemFormScreen} options={{ headerTitle: brandedTitle('Add / Edit Item') }} />
     <ClosetStack.Screen name="ItemDetail" component={ItemDetailScreen} options={{ title: 'Item Details' }} />
   </ClosetStack.Navigator>
   );
@@ -83,6 +85,7 @@ const ClosetStackNavigator = () => {
 
 const WishlistStackNavigator = () => {
   const theme = useAppTheme();
+  const brandedTitle = (title: string) => () => <BrandedHeaderTitle title={title} />;
   return (
     <WishlistStack.Navigator
       screenOptions={{
@@ -97,9 +100,9 @@ const WishlistStackNavigator = () => {
         name="ItemsList"
         component={ItemsListScreen}
         initialParams={{ initialStatus: 'wishlist', hideInbox: true }}
-        options={{ title: 'Wishlist' }}
+        options={{ headerTitle: brandedTitle('Wishlist') }}
       />
-      <WishlistStack.Screen name="AddItem" component={ItemFormScreen} options={{ title: 'Add / Edit Item' }} />
+      <WishlistStack.Screen name="AddItem" component={ItemFormScreen} options={{ headerTitle: brandedTitle('Add / Edit Item') }} />
       <WishlistStack.Screen name="ItemDetail" component={ItemDetailScreen} options={{ title: 'Item Details' }} />
     </WishlistStack.Navigator>
   );

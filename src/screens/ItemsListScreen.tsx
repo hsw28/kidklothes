@@ -55,6 +55,8 @@ type ItemListRowProps = {
   brand?: string;
   brandTags: string[];
   childName: string;
+  assignmentLabel?: string;
+  quantity: number;
   sizeLabel: string;
   categoryLabel: string;
   wornCount: number;
@@ -74,6 +76,8 @@ const ItemListRowComponent: React.FC<ItemListRowProps> = ({
   brand,
   brandTags,
   childName,
+  assignmentLabel,
+  quantity,
   sizeLabel,
   categoryLabel,
   wornCount,
@@ -133,6 +137,16 @@ const ItemListRowComponent: React.FC<ItemListRowProps> = ({
               <View style={rowStyles.badge}>
                 <Text style={rowStyles.badgeText}>{statusLabel}</Text>
               </View>
+              {quantity > 1 ? (
+                <View style={rowStyles.badge}>
+                  <Text style={rowStyles.badgeText}>{quantity}x</Text>
+                </View>
+              ) : null}
+              {assignmentLabel ? (
+                <View style={rowStyles.badge}>
+                  <Text style={rowStyles.badgeText}>{assignmentLabel}</Text>
+                </View>
+              ) : null}
               {isUnsorted ? (
                 <View style={rowStyles.badgeUnsorted}>
                   <Text style={rowStyles.badgeText}>unsorted</Text>
@@ -178,7 +192,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
   const [sizeBucketFilter, setSizeBucketFilter] = useState<'All' | 'now' | 'next'>(route.params?.initialSizeBucket ?? 'All');
   const [storageLocationIdFilter, setStorageLocationIdFilter] = useState<string | undefined>(route.params?.initialStorageLocationId);
   const [sizeFilter, setSizeFilter] = useState(route.params?.initialSize ?? '');
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('All');
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(route.params?.initialCategory ?? 'All');
   const [clothingType, setClothingType] = useState<ClothingTypeFilter>(route.params?.initialClothingType ?? 'All');
   const [sortedFilter, setSortedFilter] = useState<SortedFilter>('All');
   const [brandFilter, setBrandFilter] = useState<string>(route.params?.initialBrandId ?? 'All');
@@ -237,6 +251,10 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
     if (route.params?.initialClothingType === undefined) return;
     setClothingType(route.params.initialClothingType);
   }, [route.params?.initialClothingType]);
+  useEffect(() => {
+    if (route.params?.initialCategory === undefined) return;
+    setCategoryFilter(route.params.initialCategory);
+  }, [route.params?.initialCategory]);
 
   useEffect(() => {
     if (route.params?.initialBrandId === undefined) return;
@@ -855,7 +873,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             )}
 
-            <FormInput label="Search" value={query} onChangeText={setQuery} placeholder="Search title, brand, brand tags, or tags" autoCapitalize="none" />
+            <FormInput label="Search" value={query} onChangeText={setQuery} clearable placeholder="Search title, brand, brand tags, or tags" autoCapitalize="none" />
 
             {children.length > 0 ? (
               <ChipSelector label="Filter by kid" options={childOptions} value={activeChild ? activeChild.name : 'All'} onChange={chooseChild} />
@@ -945,6 +963,12 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
             const links = linksByItem.get(item.id) ?? [];
             const linkForDisplay = childId ? links.find((link) => link.childId === childId) : links[0];
             const child = children.find((entry) => entry.id === linkForDisplay?.childId);
+            const assignedChildren = children.filter((entry) => item.childIds.includes(entry.id)).map((entry) => entry.name);
+            const assignmentLabel = item.childIds.length > 1
+              ? assignedChildren.length <= 2
+                ? assignedChildren.join(' + ')
+                : `${assignedChildren.length} kids`
+              : undefined;
             const thumbUri = getItemDisplayImageUri(item);
             const thumbFallbackUri = getItemDisplayFallbackUri(item);
             const isSelected = selectedItemIdSet.has(item.id);
@@ -957,6 +981,8 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
                 brand={item.brand}
                 brandTags={item.brandTags}
                 childName={child?.name ?? 'Unassigned'}
+                assignmentLabel={assignmentLabel}
+                quantity={item.quantity}
                 sizeLabel={linkForDisplay?.sizeAtTime || item.size || 'N/A'}
                 categoryLabel={formatItemCategoryLabel(item)}
                 wornCount={item.wornCount}

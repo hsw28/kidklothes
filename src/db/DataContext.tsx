@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import * as FileSystem from 'expo-file-system/legacy';
 import { ActivityEvent, AppSettings, BackupPayload, Child, ChildItem, FilterPreset, ID, Item, Outfit, PrintAlias, PurchaseStateSnapshot, StorageLocation } from '@/models';
 import { appConfig } from '@/config';
 import { getEntitlementSnapshot, initPurchases } from '@/services/purchases';
 import { setAppGroupInt } from '@/utils/appGroupStorage';
-import { cacheRemoteImage, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
+import { cacheRemoteImage, findPersistedImageByFilename, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
 import { getItemLocalImageUri, getItemRemoteImageUri } from '@/utils/itemMedia';
 import { BatchAddInput, BulkItemPatchInput, ListRecentItemsInput, NewChildInput, NewItemInput, NewOutfitInput, SaveFilterPresetInput, repository } from './repository';
 
@@ -79,6 +80,8 @@ const defaultSettings: AppSettings = {
   kidsPreviewCategories: undefined,
   developerModeEnabled: false,
   betaKidLimitBannerDismissed: false,
+  proTeaserBannerDismissed: false,
+  missingPhotoRestoreNudgeShown: true,
 };
 
 const DataContext = createContext<DataContextValue | undefined>(undefined);
@@ -98,6 +101,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const imagePersistInFlightRef = useRef(false);
   const startupImageMigrationDoneRef = useRef(false);
+  const startupImageIntegrityCheckDoneRef = useRef(false);
+  const imageIntegrityWarnedItemIdsRef = useRef<Set<ID>>(new Set());
 
   const refreshPurchaseState = useCallback(async (): Promise<PurchaseStateSnapshot | undefined> => {
     if (!appConfig.monetizationEnabled) return undefined;
@@ -167,7 +172,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         const cached = (item.cachedImageUri ?? '').trim();
         const needsRemoteCache = Boolean(remote) && (!cached || /\/caches\//i.test(cached));
         const needsLocalMigration = Boolean(local) && !isAppOwnedImageUri(cached || local);
-        return needsRemoteCache || needsLocalMigration;
+        const needsOwnedCacheValidation = Boolean(cached) && isAppOwnedImageUri(cached);
+        return needsRemoteCache || needsLocalMigration || needsOwnedCacheValidation;
       });
     startupImageMigrationDoneRef.current = true;
     if (!candidates.length) return;
@@ -176,19 +182,46 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     void (async () => {
       try {
         for (const item of candidates) {
-          const local = getItemLocalImageUri(item);
-          if (local && !isAppOwnedImageUri(local)) {
+          const cached = (item.cachedImageUri ?? '').trim();
+          if (cached && isAppOwnedImageUri(cached)) {
             try {
-              const persistent = await persistLocalImage(local);
-              if (persistent && persistent !== local) {
-                await repository.updateItemCachedImage(item.id, persistent);
-                setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, cachedImageUri: persistent } : entry)));
+              const info = await FileSystem.getInfoAsync(cached);
+              if (info.exists) continue;
+              const rebound = await findPersistedImageByFilename(cached);
+              if (rebound) {
+                await repository.updateItemCachedImage(item.id, rebound);
+                setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, cachedImageUri: rebound } : entry)));
                 continue;
               }
             } catch {
-              // continue to remote fallback
+              // Treat as missing and continue recovery path.
             }
           }
+
+          const localCandidates = Array.from(
+            new Set(
+              [item.cachedImageUri ?? '', ...(item.imageUrls ?? []), item.imageUrl ?? '']
+                .map((value) => value.trim())
+                .filter((value) => /^(file:\/\/|content:\/\/|ph:\/\/|assets-library:\/\/)/i.test(value)),
+            ),
+          );
+
+          let recovered = false;
+          for (const local of localCandidates) {
+            try {
+              const persistent = await persistLocalImage(local);
+              if (!persistent || !isAppOwnedImageUri(persistent)) continue;
+              const info = await FileSystem.getInfoAsync(persistent);
+              if (!info.exists) continue;
+              await repository.updateItemCachedImage(item.id, persistent);
+              setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, cachedImageUri: persistent } : entry)));
+              recovered = true;
+              break;
+            } catch {
+              // try next local source
+            }
+          }
+          if (recovered) continue;
 
           const remote = getItemRemoteImageUri(item);
           if (!remote) continue;
@@ -223,6 +256,141 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     [refresh],
   );
 
+  const isLocalLikeUri = (value?: string) => /^(file:\/\/|content:\/\/|ph:\/\/|assets-library:\/\/)/i.test((value ?? '').trim());
+  const isRemoteHttpUri = (value?: string) => /^https?:\/\//i.test((value ?? '').trim());
+
+  const prepareInputWithPersistentImage = useCallback(async <T extends Partial<NewItemInput>>(input: T): Promise<T> => {
+    const imageUrl = (input.imageUrl ?? '').trim();
+    const cachedImageUri = (input.cachedImageUri ?? '').trim();
+    const imageUrls = (input.imageUrls ?? []).map((entry) => (entry ?? '').trim()).filter(Boolean);
+    const localCandidates = Array.from(new Set([cachedImageUri, imageUrl, ...imageUrls].filter((value) => isLocalLikeUri(value))));
+    const localCandidate = localCandidates[0];
+    if (!localCandidate) return input;
+
+    const persisted = await persistLocalImage(localCandidate);
+    if (!persisted || !isAppOwnedImageUri(persisted)) return input;
+    const persistedInfo = await FileSystem.getInfoAsync(persisted);
+    if (!persistedInfo.exists) return input;
+
+    const nextImageUrls = Array.from(
+      new Set([persisted, ...localCandidates, ...imageUrls.filter((value) => !isLocalLikeUri(value) || isAppOwnedImageUri(value))]),
+    );
+    return {
+      ...input,
+      imageUrl: persisted,
+      imageUrls: nextImageUrls,
+      cachedImageUri: persisted,
+    };
+  }, []);
+
+  const ensureItemHasPersistentCopy = useCallback(async (itemId: ID, remoteCandidate?: string) => {
+    const item = await repository.getItemById(itemId);
+    if (!item) return;
+    const cached = (item.cachedImageUri ?? '').trim();
+    if (cached && isAppOwnedImageUri(cached)) {
+      try {
+        const info = await FileSystem.getInfoAsync(cached);
+        if (info.exists) return;
+        const rebound = await findPersistedImageByFilename(cached);
+        if (rebound) {
+          await repository.updateItemCachedImage(itemId, rebound);
+          return;
+        }
+      } catch {
+        // continue recovery
+      }
+    }
+
+    const localCandidates = Array.from(
+      new Set(
+        [item.cachedImageUri ?? '', ...(item.imageUrls ?? []), item.imageUrl ?? '']
+          .map((value) => value.trim())
+          .filter((value) => isLocalLikeUri(value)),
+      ),
+    );
+    let recoveredFromLocal = false;
+    for (const localCandidate of localCandidates) {
+      try {
+        const persisted = await persistLocalImage(localCandidate);
+        if (persisted && isAppOwnedImageUri(persisted)) {
+          const info = await FileSystem.getInfoAsync(persisted);
+          if (!info.exists) {
+            const rebound = await findPersistedImageByFilename(persisted);
+            if (!rebound) continue;
+            await repository.updateItemCachedImage(itemId, rebound);
+            recoveredFromLocal = true;
+            break;
+          }
+          await repository.updateItemCachedImage(itemId, persisted);
+          recoveredFromLocal = true;
+          break;
+        }
+      } catch {
+        // continue to next local candidate
+      }
+    }
+    if (recoveredFromLocal) return;
+
+    const remote = (remoteCandidate || getItemRemoteImageUri(item) || '').trim();
+    if (!isRemoteHttpUri(remote)) return;
+    try {
+      const cachedRemote = await cacheRemoteImage(itemId, remote);
+      if (cachedRemote) await repository.updateItemCachedImage(itemId, cachedRemote);
+    } catch {
+      // keep original URLs; startup migration can retry automatically.
+    }
+  }, []);
+
+  const warnIfMissingPersistentImage = useCallback(async (itemId: ID, source: 'add' | 'update' | 'startup') => {
+    if (imageIntegrityWarnedItemIdsRef.current.has(itemId)) return;
+    const item = await repository.getItemById(itemId);
+    if (!item) return;
+
+    const hasAnyImageSource = Boolean(
+      (item.imageUrl ?? '').trim()
+      || (item.cachedImageUri ?? '').trim()
+      || (item.imageUrls ?? []).some((entry) => (entry ?? '').trim().length > 0),
+    );
+    if (!hasAnyImageSource) return;
+
+    const cached = (item.cachedImageUri ?? '').trim();
+    if (cached && isAppOwnedImageUri(cached)) {
+      try {
+        const info = await FileSystem.getInfoAsync(cached);
+        if (info.exists) return;
+      } catch {
+        // fall through to warning
+      }
+    }
+
+    imageIntegrityWarnedItemIdsRef.current.add(itemId);
+    await repository.logEvent({
+      type: 'image_integrity_warning',
+      payload: { itemId, source },
+    });
+    if (__DEV__) {
+      console.warn('[ImageIntegrity] Missing persistent photo for item with image source', { itemId, source });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    if (startupImageIntegrityCheckDoneRef.current) return;
+    startupImageIntegrityCheckDoneRef.current = true;
+
+    const recentWithImages = [...allItems]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .filter((item) => Boolean((item.imageUrl ?? '').trim() || (item.cachedImageUri ?? '').trim() || (item.imageUrls ?? []).length))
+      .slice(0, 100);
+    if (!recentWithImages.length) return;
+
+    void (async () => {
+      for (const item of recentWithImages) {
+        await warnIfMissingPersistentImage(item.id, 'startup');
+      }
+    })();
+  }, [allItems, loading, warnIfMissingPersistentImage]);
+
   const value = useMemo<DataContextValue>(
     () => ({
       loading,
@@ -244,9 +412,33 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       deleteChild: async (id) => runAndRefresh(() => repository.deleteChild(id)),
       getKidCount: async () => repository.getKidCount(),
       canCreateAnotherKid: async () => repository.canCreateAnotherKid(),
-      addItem: async (input) => runAndRefreshWithResult(() => repository.addItem(input)),
-      addItemsBatch: async (input) => runAndRefreshWithResult(() => repository.addItemsBatch(input)),
-      updateItem: async (id, patch) => runAndRefresh(() => repository.updateItem(id, patch)),
+      addItem: async (input) => {
+        const prepared = await prepareInputWithPersistentImage(input);
+        const created = await repository.addItem(prepared);
+        await ensureItemHasPersistentCopy(created.id, prepared.imageUrl);
+        await warnIfMissingPersistentImage(created.id, 'add');
+        await refresh();
+        return created;
+      },
+      addItemsBatch: async (input) => {
+        const prepared = await prepareInputWithPersistentImage(input);
+        const createdItems = await repository.addItemsBatch(prepared as BatchAddInput);
+        for (const item of createdItems) {
+          await ensureItemHasPersistentCopy(item.id, prepared.imageUrl);
+          await warnIfMissingPersistentImage(item.id, 'add');
+        }
+        await refresh();
+        return createdItems;
+      },
+      updateItem: async (id, patch) => {
+        const prepared = await prepareInputWithPersistentImage(patch);
+        await repository.updateItem(id, prepared);
+        if (patch.imageUrl !== undefined || patch.imageUrls !== undefined || patch.cachedImageUri !== undefined) {
+          await ensureItemHasPersistentCopy(id, prepared.imageUrl);
+          await warnIfMissingPersistentImage(id, 'update');
+        }
+        await refresh();
+      },
       createStorageLocation: async (input) => runAndRefreshWithResult(() => repository.createStorageLocation(input)),
       updateStorageLocation: async (id, patch) => runAndRefresh(() => repository.updateStorageLocation(id, patch)),
       deleteStorageLocation: async (id) => runAndRefresh(() => repository.deleteStorageLocation(id)),
@@ -279,7 +471,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       exportBackup: async () => repository.exportBackup(),
       importBackup: async (payload) => runAndRefresh(() => repository.importBackup(payload)),
     }),
-    [allChildren, allItems, allChildItems, allStorageLocations, allPrintAliases, purchaseState, allOutfits, allFilterPresets, allBrands, loading, errorMessage, settings, refresh, runAndRefresh, runAndRefreshWithResult, refreshPurchaseState],
+    [allChildren, allItems, allChildItems, allStorageLocations, allPrintAliases, purchaseState, allOutfits, allFilterPresets, allBrands, loading, errorMessage, settings, refresh, runAndRefresh, runAndRefreshWithResult, refreshPurchaseState, prepareInputWithPersistentImage, ensureItemHasPersistentCopy, warnIfMissingPersistentImage],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

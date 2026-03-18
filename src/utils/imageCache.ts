@@ -34,6 +34,28 @@ export const isAppOwnedImageUri = (uri?: string | null): boolean => {
   return value.includes(APP_IMAGE_DIR_MARKER);
 };
 
+const basenameFromUri = (uri: string): string | undefined => {
+  const trimmed = uri.trim();
+  if (!trimmed) return undefined;
+  const withoutQuery = trimmed.split('?')[0];
+  const parts = withoutQuery.split('/');
+  const last = parts[parts.length - 1]?.trim();
+  return last || undefined;
+};
+
+export const findPersistedImageByFilename = async (uri: string): Promise<string | undefined> => {
+  const fileName = basenameFromUri(uri);
+  if (!fileName || !FileSystem.documentDirectory) return undefined;
+  const candidate = `${imageCacheDir}${fileName}`;
+  try {
+    const info = await FileSystem.getInfoAsync(candidate);
+    if (info.exists) return candidate;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+};
+
 const extensionFromLocalUri = (uri: string) => {
   const cleaned = uri.split('?')[0];
   const ext = cleaned.split('.').pop()?.toLowerCase();

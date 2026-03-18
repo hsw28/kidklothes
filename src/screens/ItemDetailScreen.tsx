@@ -48,9 +48,9 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const item = items.find((entry) => entry.id === route.params.itemId);
   const itemLinks = childItems.filter((entry) => entry.itemId === route.params.itemId);
-  const linkedChildNames = itemLinks
-    .map((entry) => children.find((child) => child.id === entry.childId)?.name)
-    .filter(Boolean) as string[];
+  const linkedChildId = itemLinks[0]?.childId || item?.childIds[0];
+  const linkedChildName = linkedChildId ? children.find((child) => child.id === linkedChildId)?.name : undefined;
+  const linkedChildNames = children.filter((child) => item?.childIds.includes(child.id)).map((child) => child.name);
 
   if (!item) {
     return (
@@ -74,8 +74,17 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const itemImageFallbackUri = getItemDisplayFallbackUri(item);
   const itemClosetCategory = closetCategoryForItem(item);
   const categoryLabel = closetLabel[itemClosetCategory];
-  const linkedChildId = itemLinks[0]?.childId || item.childIds[0];
   const canOpenCategory = Boolean(linkedChildId);
+  const styleName = (item.styleName || '').trim();
+  const printName = (item.printName || '').trim();
+  const fabric = (item.fabric || '').trim();
+  const detailTags = Array.from(
+    new Set(
+      [...(item.tags ?? []), ...(item.seasonTags ?? [])]
+        .map((tag) => (tag || '').trim())
+        .filter(Boolean),
+    ),
+  );
 
   const markPurchasedAndAddToCloset = async () => {
     await updateItem(item.id, { status: 'owned' });
@@ -112,16 +121,19 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       <Card>
         <RemoteImage uri={itemImageUri} fallbackUri={itemImageFallbackUri} style={styles.heroImage} fallbackLabel={item.title} />
         <Text style={styles.name}>{item.title}</Text>
-        <Text style={styles.label}>Kids: {linkedChildNames.length > 0 ? linkedChildNames.join(', ') : 'Unassigned'}</Text>
+        <Text style={styles.label}>Kid: {linkedChildNames.length ? linkedChildNames.join(', ') : (linkedChildName || 'Unassigned')}</Text>
+        {item.quantity > 1 ? <Text style={styles.label}>Quantity: {item.quantity}x</Text> : null}
         <Text style={styles.label}>Category: {formatItemCategoryLabel(item)}</Text>
         <Text style={styles.label}>Size: {item.size || 'N/A'}</Text>
         <Text style={styles.label}>Status: {item.status}</Text>
         {item.brand ? <Text style={styles.label}>Brand: {item.brand}</Text> : null}
+        {styleName ? <Text style={styles.label}>Style: {styleName}</Text> : null}
+        {printName ? <Text style={styles.label}>Print: {printName}</Text> : null}
+        {fabric ? <Text style={styles.label}>Fabric: {fabric}</Text> : null}
         {item.sourceDomain ? <Text style={styles.label}>Source: {item.sourceDomain}</Text> : null}
         {item.clickCount > 0 ? <Text style={styles.label}>Outbound clicks: {item.clickCount}</Text> : null}
         {brandFitLabel(item.brandFit) ? <Text style={styles.label}>Runs: {brandFitLabel(item.brandFit)}</Text> : null}
         {kidFitLabel(item.kidFit) ? <Text style={styles.label}>Fit on Kid: {kidFitLabel(item.kidFit)}</Text> : null}
-        {item.fabric ? <Text style={styles.label}>Fabric: {item.fabric}</Text> : null}
         {item.brandSizeNote ? <Text style={styles.label}>Fit note: {item.brandSizeNote}</Text> : null}
         {item.status !== 'wishlist' ? <Text style={styles.label}>Worn count: {item.wornCount}</Text> : null}
         {item.condition ? <Text style={styles.label}>Condition: {item.condition}</Text> : null}
@@ -153,7 +165,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.label}>Sold date: {item.soldDate ?? 'N/A'}</Text>
           </>
         ) : null}
-        {item.tags.length > 0 ? <Text style={styles.label}>Tags: {item.tags.join(', ')}</Text> : null}
+        {detailTags.length > 0 ? <Text style={styles.label}>Tags: {detailTags.join(', ')}</Text> : null}
         {item.notes ? <Text style={styles.label}>Notes: {item.notes}</Text> : null}
       </Card>
 

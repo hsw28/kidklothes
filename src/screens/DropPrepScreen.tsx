@@ -90,7 +90,6 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
     return Array.from(groups.values())
       .filter((entry) => entry.count > 1)
       .sort((a, b) => b.count - a.count)
-      .slice(0, 12)
       .map((entry) => ({
         printName: entry.printName,
         sizes: Array.from(entry.sizes),
@@ -120,7 +119,6 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
     return Array.from(groups.values())
       .filter((entry) => entry.count > 1)
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
-      .slice(0, 12)
       .map((entry) => ({
         label: entry.label,
         brand: entry.brand,
@@ -411,13 +409,13 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={styles.summaryLabel}>Size-Ups Owned</Text>
           <Text style={styles.summaryValue}>{summary.sizeUpsTotal}</Text>
         </Pressable>
-        <Pressable onPress={() => jumpToDupSection('prints')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`Print Duplicates, ${summary.printDupGroupCount}. Jump to duplicate prints section`}>
+        <Pressable onPress={() => jumpToDupSection('prints')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`Print Duplicates, ${duplicatePrintGroups.length}. Jump to duplicate prints section`}>
           <Text style={styles.summaryLabel}>Print Duplicates</Text>
-          <Text style={styles.summaryValue}>{summary.printDupGroupCount}</Text>
+          <Text style={styles.summaryValue}>{duplicatePrintGroups.length}</Text>
         </Pressable>
-        <Pressable onPress={() => jumpToDupSection('styles')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`Style Duplicates, ${summary.styleDupGroupCount}. Jump to duplicate styles section`}>
+        <Pressable onPress={() => jumpToDupSection('styles')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`Style Duplicates, ${duplicateStyleGroups.length}. Jump to duplicate styles section`}>
           <Text style={styles.summaryLabel}>Style Duplicates</Text>
-          <Text style={styles.summaryValue}>{summary.styleDupGroupCount}</Text>
+          <Text style={styles.summaryValue}>{duplicateStyleGroups.length}</Text>
         </Pressable>
         <Pressable onPress={() => navigation.navigate('SellBin')} style={styles.summaryCard} accessibilityRole="button" accessibilityLabel={`For-Sale Bin, ${summary.forSaleCount}`}>
           <Text style={styles.summaryLabel}>For-Sale Bin</Text>
@@ -439,6 +437,7 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
                     hideInbox: true,
                     initialChildId: selectedChild.id,
                     initialStatus: 'owned',
+                    initialCategory: category,
                     initialClothingType: closetCategoryToClothingType(category) as any,
                     initialBrandId: brandId === 'All' ? undefined : brandId,
                     initialSizeBucket: sizeBucket === 'both' ? 'All' : sizeBucket,

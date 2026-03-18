@@ -184,7 +184,7 @@ export const BrandSnapshotScreen: React.FC<Props> = ({ navigation, route }) => {
         />
         <ChipSelector label="Size range" options={['Now', 'Next', 'Both']} value={sizeMode === 'now' ? 'Now' : sizeMode === 'next' ? 'Next' : 'Both'} onChange={(value) => setSizeMode(value.toLowerCase() as ClosetSizeMode)} accent="coral" />
         {advancedUnlocked ? <ChipSelector label="Top brands" options={topBrandChips} value={brandId} onChange={setBrandId} accent="sage" /> : <ChipSelector label="Brand" options={['All']} value="All" onChange={() => setBrandId('All')} />}
-        {advancedUnlocked ? <FormInput label="Brand search" value={brandSearch} onChangeText={setBrandSearch} placeholder="Search brand..." autoCapitalize="none" /> : null}
+        {advancedUnlocked ? <FormInput label="Brand search" value={brandSearch} onChangeText={setBrandSearch} clearable placeholder="Search brand..." autoCapitalize="none" /> : null}
       </Card>
 
       {advancedUnlocked ? (

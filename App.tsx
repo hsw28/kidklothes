@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { ActionSheetIOS, Alert, AlertButton, Linking, Platform } from 'react-native';
 import * as ExpoLinking from 'expo-linking';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import { UndoToastHost } from './src/components/UndoToastHost';
 import { DataProvider } from './src/db/DataContext';
@@ -10,6 +11,8 @@ import { linking } from './src/navigation/linking';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { useData } from './src/db/DataContext';
 import { clearPendingSharePayload, getPendingSharePayload } from './src/utils/appGroupStorage';
+import { isAppOwnedImageUri } from './src/utils/imageCache';
+import { getItemDisplayImageUri, getItemLocalImageUri, getItemRemoteImageUri } from './src/utils/itemMedia';
 import { extractUrlFromShareIntent, toAddItemDeepLink } from './src/utils/shareIntent';
 
 const ShareToAppBridge = () => {
@@ -174,6 +177,83 @@ const ShareToAppBridge = () => {
   return null;
 };
 
+const isLocalLike = (value: string) => /^(file:\/\/|content:\/\/|ph:\/\/|assets-library:\/\/)/i.test(value);
+
+const MissingPhotoRestoreNudge = () => {
+  const { loading, items, settings, updateSettings } = useData();
+  const hasPromptedRef = useRef(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (hasPromptedRef.current) return;
+    if (settings.missingPhotoRestoreNudgeShown) return;
+    if (items.length === 0) {
+      hasPromptedRef.current = true;
+      void updateSettings({ missingPhotoRestoreNudgeShown: true });
+      return;
+    }
+
+    let cancelled = false;
+    hasPromptedRef.current = true;
+
+    void (async () => {
+      let hasMissingPhoto = false;
+      for (const item of items) {
+        const cached = (item.cachedImageUri ?? '').trim();
+        const display = getItemDisplayImageUri(item);
+        const remote = getItemRemoteImageUri(item);
+        const local = getItemLocalImageUri(item);
+        const localSources = [cached, ...(item.imageUrls ?? []), item.imageUrl ?? '']
+          .map((value) => value.trim())
+          .filter((value) => isLocalLike(value));
+        const hasLocalSource = localSources.length > 0 || Boolean(local);
+        const hasRemoteSource = Boolean(remote);
+
+        let hasValidAppCopy = false;
+        if (cached && isAppOwnedImageUri(cached) && /^file:\/\//i.test(cached)) {
+          try {
+            const info = await LegacyFileSystem.getInfoAsync(cached);
+            hasValidAppCopy = Boolean(info.exists);
+          } catch {
+            hasValidAppCopy = false;
+          }
+        }
+
+        const hasAnySource = hasLocalSource || hasRemoteSource;
+        const hasAnyDisplay = Boolean(display);
+        if (!hasValidAppCopy && (!hasAnyDisplay || hasAnySource)) {
+          hasMissingPhoto = true;
+          break;
+        }
+      }
+
+      if (cancelled) return;
+      await updateSettings({ missingPhotoRestoreNudgeShown: true });
+      if (!hasMissingPhoto) return;
+
+      Alert.alert(
+        'Missing Photos',
+        'If any older item photos look blank, go to Settings and tap Restore Missing Images.',
+        [
+          { text: 'Later', style: 'cancel' },
+          {
+            text: 'Open Settings',
+            onPress: () => {
+              void ExpoLinking.openURL('layetteout://settings');
+            },
+          },
+        ],
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items, loading, settings.missingPhotoRestoreNudgeShown, updateSettings]);
+
+  return null;
+};
+
 export default function App() {
   return (
     <ShareIntentProvider>
@@ -181,6 +261,7 @@ export default function App() {
         <NavigationContainer linking={linking}>
           <StatusBar style="dark" />
           <ShareToAppBridge />
+          <MissingPhotoRestoreNudge />
           <RootNavigator />
           <UndoToastHost />
         </NavigationContainer>

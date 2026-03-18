@@ -8,6 +8,7 @@ type ItemCreateValidationInput = {
   status: Item['status'];
   category?: ItemCategory;
   size?: string;
+  quantity?: number;
 };
 
 const allowedStatuses = new Set<string>(ITEM_STATUSES);
@@ -22,6 +23,9 @@ export const validateNewItemInput = (input: ItemCreateValidationInput): { ok: tr
   if (input.category && !allowedCategories.has(String(input.category))) throw new Error(`Invalid category: ${String(input.category)}`);
   if (input.size !== undefined && trimOrNull(input.size) !== null && normalizeWhitespace(input.size).length > 80) {
     throw new Error('Size is too long.');
+  }
+  if (input.quantity !== undefined && (!Number.isInteger(input.quantity) || input.quantity < 1)) {
+    throw new Error('Quantity must be at least 1.');
   }
   return { ok: true };
 };

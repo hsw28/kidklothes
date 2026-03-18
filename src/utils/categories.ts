@@ -86,7 +86,7 @@ export const getCategoryEmptyMicrocopy = (category: ClosetCategory, count: numbe
   return `Add your first photo`;
 };
 
-export const ADD_ITEM_CATEGORY_OPTIONS: ClosetCategory[] = closetCategories.filter((category) => category !== 'other');
+export const ADD_ITEM_CATEGORY_OPTIONS: ClosetCategory[] = [...closetCategories];
 
 export const KIDS_PREVIEW_CATEGORIES: ClosetCategory[] = [...closetCategories];
 export const DEFAULT_WISHLIST_CATEGORY_ORDER: ClosetCategory[] = closetCategories.filter((category) => category !== 'other');

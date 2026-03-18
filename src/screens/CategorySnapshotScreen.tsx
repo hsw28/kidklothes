@@ -32,13 +32,14 @@ type CategoryGridCardProps = {
   itemId: string;
   title: string;
   size: string;
+  detailLabel?: string;
   uri?: string;
   fallbackUri?: string;
   compact?: boolean;
   onPress: (itemId: string) => void;
 };
 
-const CategoryGridCardComponent: React.FC<CategoryGridCardProps> = ({ itemId, title, size, uri, fallbackUri, compact = false, onPress }) => {
+const CategoryGridCardComponent: React.FC<CategoryGridCardProps> = ({ itemId, title, size, detailLabel, uri, fallbackUri, compact = false, onPress }) => {
   const theme = useAppTheme();
   return (
     <Pressable
@@ -54,7 +55,7 @@ const CategoryGridCardComponent: React.FC<CategoryGridCardProps> = ({ itemId, ti
       <RemoteImage uri={uri} fallbackUri={fallbackUri} style={[styles.gridImage, compact ? styles.gridImageCompact : null]} fallbackLabel={title} />
       <View style={styles.gridTextWrap}>
         <Text numberOfLines={compact ? 2 : 1} style={[styles.gridTitle, compact ? styles.gridTitleCompact : null, { fontFamily: theme.fonts.serif }]}>{title}</Text>
-        <Text numberOfLines={1} style={[styles.gridMeta, compact ? styles.gridMetaCompact : null]}>{size || 'Size not set'}</Text>
+        <Text numberOfLines={1} style={[styles.gridMeta, compact ? styles.gridMetaCompact : null]}>{[size || 'Size not set', detailLabel].filter(Boolean).join(' • ')}</Text>
       </View>
     </Pressable>
   );
@@ -63,6 +64,17 @@ const CategoryGridCardComponent: React.FC<CategoryGridCardProps> = ({ itemId, ti
 const CategoryGridCard = React.memo(CategoryGridCardComponent);
 const SHARE_GRID_LIMIT = 24;
 const SHARE_CAPTURE_WIDTH = 1080;
+const tokenMatch = (value: { title: string; printName?: string | null; brand?: string | null; brandTags?: string[]; tags?: string[] }, query: string) => {
+  const tokens = query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) return true;
+
+  const haystack = [value.title, value.printName ?? '', value.brand ?? '', (value.brandTags ?? []).join(' '), (value.tags ?? []).join(' ')].join(' ').toLowerCase();
+  return tokens.every((token) => haystack.includes(token));
+};
 
 export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) => {
   const theme = useAppTheme();
@@ -82,7 +94,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const [showPrintDuplicates, setShowPrintDuplicates] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
   const [showSizeUps, setShowSizeUps] = useState(false);
-  const [locationFilter, setLocationFilter] = useState<string>('All');
+  const [locationFilter, setLocationFilter] = useState<string>(route.params.locationFilter ?? 'All');
   const [compactGrid, setCompactGrid] = useState(false);
   const [preparingSnapshot, setPreparingSnapshot] = useState(false);
   const [copiedPostToastVisible, setCopiedPostToastVisible] = useState(false);
@@ -92,6 +104,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   const snapshotImageLoadedMapRef = useRef<Record<string, boolean>>({});
   const shareSnapshotRef = useRef<() => void>(() => undefined);
   const onPressCopyPostRef = useRef<() => void>(() => undefined);
+  const query = route.params.query?.trim() ?? '';
   const sizeCheckTypeOptions: Array<{ label: string; value: ClothingType }> = [
     { label: 'Pants', value: 'bottom' },
     { label: 'Tops', value: 'top' },
@@ -245,6 +258,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const scopedBySeason = season
       ? scopedBySize.filter((item) => (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : scopedBySize;
+    const scopedByQuery = scopedBySeason.filter((item) => tokenMatch(item, query));
     const names = new Map<string, string>();
     const addName = (raw: string) => {
       const candidate = raw.trim();
@@ -253,12 +267,12 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       const current = names.get(key);
       if (!current || (current === current.toLowerCase() && candidate !== candidate.toLowerCase())) names.set(key, candidate);
     };
-    scopedBySeason.forEach((item) => {
+    scopedByQuery.forEach((item) => {
       addName(item.brand ?? '');
       (item.brandTags ?? []).forEach((tag) => addName(tag));
     });
     return ['All', ...Array.from(names.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
-  }, [categoryBaseItems, child, childLocations, locationFilter, sizeModeFilter, category, season, matchesSnapshotSizeFilter]);
+  }, [categoryBaseItems, child, childLocations, locationFilter, sizeModeFilter, category, season, matchesSnapshotSizeFilter, query]);
 
   useEffect(() => {
     setSelectedBrandIds((current) => {
@@ -281,7 +295,8 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const scopedBySeason = season
       ? scopedBySize.filter((item) => (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : scopedBySize;
-    const scopedByBrand = scopedBySeason.filter((item) => matchesSelectedBrands(item, selectedBrandIds));
+    const scopedByQuery = scopedBySeason.filter((item) => tokenMatch(item, query));
+    const scopedByBrand = scopedByQuery.filter((item) => matchesSelectedBrands(item, selectedBrandIds));
     const names = new Map<string, string>();
     scopedByBrand.forEach((item) => {
       const candidate = (item.styleName ?? '').trim();
@@ -291,7 +306,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       if (!current || (current === current.toLowerCase() && candidate !== candidate.toLowerCase())) names.set(key, candidate);
     });
     return ['All', ...Array.from(names.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
-  }, [categoryBaseItems, child, childLocations, locationFilter, season, selectedBrandIds, matchesSnapshotSizeFilter, matchesSelectedBrands]);
+  }, [categoryBaseItems, child, childLocations, locationFilter, season, selectedBrandIds, matchesSnapshotSizeFilter, matchesSelectedBrands, query]);
 
   useEffect(() => {
     if (!availableStyleOptions.includes(styleFilter)) {
@@ -331,9 +346,10 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const seasonFiltered = season
       ? brandFiltered.filter((item) => (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()))
       : brandFiltered;
+    const queryFiltered = seasonFiltered.filter((item) => tokenMatch(item, query));
     const styleFiltered = styleFilter !== 'All'
-      ? seasonFiltered.filter((item) => normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter))
-      : seasonFiltered;
+      ? queryFiltered.filter((item) => normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter))
+      : queryFiltered;
     const wearingNowAll = getWearingNowByCategory(childData.items.filter((item) => item.status === 'owned'), child);
     const currentSize = wearingNowAll.get(category);
     const nextSize = anchors.nextByCategory.get(category);
@@ -359,7 +375,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       mostWorn: sortedByWorn[0],
       leastWorn: sortedByWorn.length ? sortedByWorn[sortedByWorn.length - 1] : undefined,
     };
-  }, [child, categoryBaseItems, category, locationFilter, childLocations, selectedBrandIds, styleFilter, season, matchesSnapshotSizeFilter, matchesSelectedBrands]);
+  }, [child, categoryBaseItems, category, locationFilter, childLocations, selectedBrandIds, styleFilter, season, matchesSnapshotSizeFilter, matchesSelectedBrands, query]);
 
   const childData = useMemo(() => (child ? getChildItems(child, items, childItems) : null), [child, items, childItems]);
   const sizeUpBinCount = (childData?.items ?? []).filter((item) => (
@@ -376,6 +392,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       .filter((item) => matchesSelectedBrands(item, selectedBrandIds))
       .filter((item) => (styleFilter === 'All' ? true : normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter)))
       .filter((item) => (season ? (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()) : true))
+      .filter((item) => tokenMatch(item, query))
       .forEach((item) => {
         const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
         if (!key) return;
@@ -393,7 +410,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
         count: entry.count,
       }))
       .sort((a, b) => b.count - a.count);
-  }, [childData, category, selectedBrandIds, styleFilter, season, matchesSelectedBrands]);
+  }, [childData, category, selectedBrandIds, styleFilter, season, matchesSelectedBrands, query]);
 
   const gridItems = summary?.items ?? [];
   useEffect(() => {
@@ -455,8 +472,9 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     if (styleFilter !== 'All') parts.push(`Style=${styleFilter}`);
     if (locationFilter !== 'All') parts.push(`Location=${locationFilter}`);
     if (season) parts.push(`Season=${season}`);
+    if (query) parts.push(`Search=${query}`);
     return parts.length ? `Filters: ${parts.join(' • ')}` : '';
-  }, [selectedBrandIds, styleFilter, locationFilter, season]);
+  }, [selectedBrandIds, styleFilter, locationFilter, season, query]);
   const snapshotItems = useMemo(() => {
     return gridItems.slice(0, SHARE_GRID_LIMIT).map((item) => {
       const sourceUri = getItemDisplayImageUri(item) ?? '';
@@ -600,6 +618,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
           </View>
         ) : null}
         <Text style={[styles.title, { fontFamily: theme.fonts.serif }]}>{child.name} {closetLabel[category]}</Text>
+        {query ? <Text style={styles.searchResultsMeta}>Search results for "{query}"</Text> : null}
         <View style={styles.filtersBlock}>
           <View style={styles.sizeToggleWrap}>
             <Text style={styles.metaLabel}>Size</Text>
@@ -644,6 +663,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
                 label="Search styles"
                 value={styleSearch}
                 onChangeText={setStyleSearch}
+                clearable
                 placeholder="Search styles..."
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -681,8 +701,8 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
         {gridItems.length === 0 ? (
           <View style={{ marginTop: 12 }}>
             <EmptyState
-              title={`No ${closetLabel[category]} in ${sizeModeLabel}`}
-              subtitle="Try another filter or add your first item for this category."
+              title={query ? `No search results in ${closetLabel[category]}` : `No ${closetLabel[category]} in ${sizeModeLabel}`}
+              subtitle={query ? `No ${closetLabel[category].toLowerCase()} match "${query}" with the current filters.` : 'Try another filter or add your first item for this category.'}
               actionLabel={`Add ${closetLabel[category]}`}
               onActionPress={addCategoryFromSnapshot}
             />
@@ -700,6 +720,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
                   itemId={item.id}
                   title={item.title}
                   size={item.size}
+                  detailLabel={[item.quantity > 1 ? `${item.quantity}x` : '', item.childIds.length > 1 ? 'Shared' : ''].filter(Boolean).join(' • ') || undefined}
                   uri={displayUri}
                   fallbackUri={fallbackUri}
                   compact={compactGrid}
@@ -824,6 +845,12 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: 14,
     color: '#716A63',
+  },
+  searchResultsMeta: {
+    fontSize: 13,
+    color: '#716A63',
+    fontWeight: '600',
+    marginTop: 4,
   },
   filtersBlock: {
     gap: 6,

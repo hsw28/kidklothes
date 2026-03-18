@@ -78,6 +78,149 @@ const hostnameFallback = (inputUrl: string) => {
 };
 
 const UNFURL_TIMEOUT_MS = 15000;
+const HTML_FALLBACK_TIMEOUT_MS = 10000;
+
+const withTimeoutSignal = (timeoutMs: number) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { controller, timer };
+};
+
+const isMercariUrl = (urlValue: string) => {
+  try {
+    const host = new URL(urlValue).hostname.toLowerCase();
+    return host.includes('mercari.com');
+  } catch {
+    return false;
+  }
+};
+
+const parseHtmlTagContent = (html: string, regex: RegExp): string => {
+  const match = html.match(regex);
+  return (match?.[1] || '').trim();
+};
+
+const decodeHtmlEntities = (value: string): string =>
+  value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+
+const parseOpenGraphFromHtml = (html: string) => {
+  const ogTitle = decodeHtmlEntities(
+    parseHtmlTagContent(html, /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["'][^>]*>/i)
+      || parseHtmlTagContent(html, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["'][^>]*>/i),
+  );
+  const ogImage = parseHtmlTagContent(html, /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["'][^>]*>/i)
+    || parseHtmlTagContent(html, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["'][^>]*>/i);
+  const ogSite = decodeHtmlEntities(
+    parseHtmlTagContent(html, /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["'][^>]*>/i)
+      || parseHtmlTagContent(html, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:site_name["'][^>]*>/i),
+  );
+  const canonical = parseHtmlTagContent(html, /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["'][^>]*>/i)
+    || parseHtmlTagContent(html, /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["'][^>]*>/i);
+  const htmlTitle = decodeHtmlEntities(parseHtmlTagContent(html, /<title[^>]*>([^<]+)<\/title>/i));
+  return { ogTitle, ogImage, ogSite, canonical, htmlTitle };
+};
+
+const parseProductLdJson = (html: string): { title?: string; image?: string; brand?: string } => {
+  const scripts = Array.from(
+    html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi),
+  );
+  for (const script of scripts) {
+    const raw = (script[1] || '').trim();
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      const nodes = Array.isArray(parsed) ? parsed : parsed['@graph'] ? parsed['@graph'] : [parsed];
+      for (const node of nodes) {
+        if (!node || typeof node !== 'object') continue;
+        const nodeType = String((node as any)['@type'] || '').toLowerCase();
+        if (!nodeType.includes('product')) continue;
+        const title = typeof (node as any).name === 'string' ? String((node as any).name).trim() : '';
+        const imageField = (node as any).image;
+        const image = Array.isArray(imageField)
+          ? String(imageField.find((entry) => typeof entry === 'string') || '').trim()
+          : typeof imageField === 'string'
+            ? imageField.trim()
+            : '';
+        const brandField = (node as any).brand;
+        const brand = typeof brandField === 'string'
+          ? brandField.trim()
+          : brandField && typeof brandField === 'object' && typeof (brandField as any).name === 'string'
+            ? String((brandField as any).name).trim()
+            : '';
+        return { title: decodeHtmlEntities(title), image, brand: decodeHtmlEntities(brand) };
+      }
+    } catch {
+      // keep scanning
+    }
+  }
+  return {};
+};
+
+const fetchMercariHtmlFallback = async (normalizedUrl: string, fallback: ReturnType<typeof hostnameFallback>): Promise<UrlPreview | null> => {
+  const { controller, timer } = withTimeoutSignal(HTML_FALLBACK_TIMEOUT_MS);
+  try {
+    const response = await fetch(normalizedUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const html = await response.text();
+    if (!html) return null;
+    const og = parseOpenGraphFromHtml(html);
+    const ld = parseProductLdJson(html);
+    const titleBase = ld.title || og.ogTitle || og.htmlTitle || deriveTitleFromProductSlug(normalizedUrl) || fallback.title;
+    const title = titleBase.replace(/\s*\|\s*Mercari.*$/i, '').trim() || titleBase;
+    const imageUrl = (ld.image || og.ogImage || '').trim();
+    const canonicalUrl = og.canonical || normalizedUrl;
+    const canonicalBrand = await canonicalizeBrand(ld.brand || og.ogSite || 'Mercari', canonicalUrl, og.ogSite || 'Mercari');
+    return {
+      title,
+      imageUrl,
+      imageUrls: imageUrl ? [imageUrl] : [],
+      brand: canonicalBrand?.brandName || ld.brand || og.ogSite || fallback.brand,
+      siteName: og.ogSite || 'Mercari',
+      canonicalUrl,
+      sourceDomain: fallback.sourceDomain,
+      isFallback: true,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const maybeEnrichMercariPreview = async (
+  preview: UrlPreview,
+  normalizedUrl: string,
+  fallback: ReturnType<typeof hostnameFallback>,
+): Promise<UrlPreview> => {
+  if (!isMercariUrl(normalizedUrl)) return preview;
+  const shouldEnrich = !preview.imageUrl || isWeakTitle(preview.title, preview.siteName, preview.canonicalUrl || normalizedUrl);
+  if (!shouldEnrich) return preview;
+  const mercari = await fetchMercariHtmlFallback(normalizedUrl, fallback);
+  if (!mercari) return preview;
+  return {
+    ...preview,
+    title: mercari.title || preview.title,
+    imageUrl: mercari.imageUrl || preview.imageUrl,
+    imageUrls: (mercari.imageUrls?.length ? mercari.imageUrls : preview.imageUrls) || [],
+    brand: mercari.brand || preview.brand,
+    siteName: mercari.siteName || preview.siteName,
+    canonicalUrl: mercari.canonicalUrl || preview.canonicalUrl,
+    sourceDomain: preview.sourceDomain || mercari.sourceDomain,
+    isFallback: preview.isFallback && mercari.isFallback,
+  };
+};
 
 const callUnfurl = async (baseUrl: string, normalizedUrl: string): Promise<UnfurlServiceResponse> => {
   const base = baseUrl.replace(/\/$/, '');
@@ -154,14 +297,23 @@ export const fetchLinkMetadata = async (inputUrl: string): Promise<UrlPreview> =
 
   try {
     const payload = await callUnfurl(appConfig.unfurlServiceBaseUrl, normalized);
-    return buildPreview(payload, normalized, fallback);
+    const preview = await buildPreview(payload, normalized, fallback);
+    return maybeEnrichMercariPreview(preview, normalized, fallback);
   } catch (error) {
     if (__DEV__) console.warn('[fetchLinkMetadata] primary unfurl failed', normalized, error);
     try {
       const payload = await callUnfurl(appConfig.localUnfurlServiceBaseUrl, normalized);
-      return buildPreview(payload, normalized, fallback);
+      const preview = await buildPreview(payload, normalized, fallback);
+      return maybeEnrichMercariPreview(preview, normalized, fallback);
     } catch (localError) {
       if (__DEV__) console.warn('[fetchLinkMetadata] local unfurl failed', normalized, localError);
+      if (isMercariUrl(normalized)) {
+        const mercari = await fetchMercariHtmlFallback(normalized, fallback);
+        if (mercari) {
+          if (__DEV__) console.warn('[fetchLinkMetadata] using Mercari HTML fallback', normalized);
+          return mercari;
+        }
+      }
       const canonicalBrand = await canonicalizeBrand(fallback.brand, normalized, fallback.brand);
       if (__DEV__) console.warn('[fetchLinkMetadata] using fallback metadata', normalized);
       const slugTitle = deriveTitleFromProductSlug(normalized);

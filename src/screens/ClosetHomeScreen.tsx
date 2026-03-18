@@ -12,6 +12,8 @@ import { EmptyState } from '@/components/EmptyState';
 import { FirstRunOnboardingModal } from '@/components/FirstRunOnboardingModal';
 import { FloatingActionButton } from '@/components/FloatingActionButton';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { ProComingSoonModal } from '@/components/ProComingSoonModal';
+import { ProComingSoonTeaser } from '@/components/ProComingSoonTeaser';
 import { FormInput } from '@/components/FormInput';
 import { RemoteImage } from '@/components/RemoteImage';
 import { Screen } from '@/components/Screen';
@@ -40,7 +42,7 @@ import { cacheRemoteImage } from '@/utils/imageCache';
 import { showActionMenu } from '@/utils/actionSheets';
 import { compareSizeLabels, getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
-import { getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
+import { getChildCurrentSizeText, getChildCurrentSizeTexts, getChildNextSizeText } from '@/utils/sizes';
 import { buildEmptyCategoryLabel } from '@/utils/closetEmptyLabel';
 import { buildBstPostCaption } from '@/utils/bstPost';
 import { copyTextToClipboard, showCopyPostOptions } from '@/utils/copyPostUi';
@@ -718,6 +720,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
   const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>([]);
   const [seasonFilter, setSeasonFilter] = useState<string>('All');
+  const [locationFilter, setLocationFilter] = useState<string>('All');
   const [closetSearch, setClosetSearch] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showCategoryLayoutEditor, setShowCategoryLayoutEditor] = useState(false);
@@ -730,6 +733,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const [showModesModal, setShowModesModal] = useState(false);
   const [showFirstKidAddedHint, setShowFirstKidAddedHint] = useState(false);
   const [showFirstRunOnboarding, setShowFirstRunOnboarding] = useState(false);
+  const [showProModal, setShowProModal] = useState(false);
   const [preparingClosetSnapshot, setPreparingClosetSnapshot] = useState(false);
   const [copiedPostToastVisible, setCopiedPostToastVisible] = useState(false);
   const [showClosetSnapshotRenderer, setShowClosetSnapshotRenderer] = useState(false);
@@ -1377,14 +1381,20 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const sizeAnchors = useMemo(() => getSizeAnchors(ownedItems, selectedChild), [ownedItems, selectedChild]);
 
   const normalize = (value: string) => value.toLowerCase().trim();
+  const currentSizeLabels = getChildCurrentSizeTexts(selectedChild);
   const currentSizeLabel = getChildCurrentSizeText(selectedChild);
   const nextSizeLabel = getChildNextSizeText(selectedChild);
-  const currentSizeNormalized = normalizeSizeLabel(currentSizeLabel || '');
+  const currentSizeNormalizedList = useMemo(
+    () => currentSizeLabels.map((entry) => normalizeSizeLabel(entry)).filter(Boolean),
+    [currentSizeLabels],
+  );
+  const currentSizeNormalized = currentSizeNormalizedList[0] || '';
+  const currentSizesNormalizedSet = useMemo(() => new Set(currentSizeNormalizedList), [currentSizeNormalizedList]);
   const nextSizeNormalized = normalizeSizeLabel(nextSizeLabel || '');
 
   const activeSizeEntries = useMemo(
-    () => uniqueSortedSizeEntries([currentSizeLabel, nextSizeLabel]),
-    [currentSizeLabel, nextSizeLabel],
+    () => uniqueSortedSizeEntries([...currentSizeLabels, nextSizeLabel]),
+    [currentSizeLabels, nextSizeLabel],
   );
 
   const presentSizeEntries = useMemo(
@@ -1412,15 +1422,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
 
     if (sizeMode === 'now') {
       if (item.fitBin) return item.fitBin === 'current';
-      if (selectedChild?.usesMixedSizes && activeSizesNormalizedSet.size > 0) {
-        return activeSizesNormalizedSet.has(itemSize);
+      if (currentSizesNormalizedSet.size > 0) {
+        return currentSizesNormalizedSet.has(itemSize);
       }
+      if (selectedChild?.usesMixedSizes && activeSizesNormalizedSet.size > 0) return activeSizesNormalizedSet.has(itemSize);
       return Boolean(currentSizeNormalized && itemSize === currentSizeNormalized);
     }
 
     if (item.fitBin) return item.fitBin === 'next';
     return Boolean(nextSizeNormalized && itemSize === nextSizeNormalized);
-  }, [itemSizeKey, sizeMode, selectedSizeChip, selectedChild?.usesMixedSizes, activeSizesNormalizedSet, currentSizeNormalized, nextSizeNormalized]);
+  }, [itemSizeKey, sizeMode, selectedSizeChip, selectedChild?.usesMixedSizes, currentSizesNormalizedSet, activeSizesNormalizedSet, currentSizeNormalized, nextSizeNormalized]);
 
   useEffect(() => {
     if (!selectedSizeChip) return;
@@ -1430,15 +1441,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
 
   useEffect(() => {
     if (sizeMode === 'now') {
-      setSelectedSizeChip(currentSizeNormalized || null);
+      setSelectedSizeChip(currentSizeNormalizedList.length === 1 ? currentSizeNormalizedList[0] : null);
       return;
     }
     if (sizeMode === 'next') {
       setSelectedSizeChip(nextSizeNormalized || null);
     }
-  }, [sizeMode, currentSizeNormalized, nextSizeNormalized]);
+  }, [sizeMode, currentSizeNormalizedList, nextSizeNormalized]);
 
   const normalizeBrandFilterKey = (value: string) => value.toLowerCase().trim();
+  const normalizeLocationToken = (value: string) => value.toLowerCase().trim().replace(/[\s-]+/g, '_');
   const matchesBrand = (item: (typeof ownedItems)[number], selectedBrands: string[]) => {
     if (selectedBrands.length === 0) return true;
     const itemBrand = normalizeBrandFilterKey(item.brand ?? '');
@@ -1452,6 +1464,58 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     if (selectedSeason === 'All') return true;
     return item.seasonTags.some((tag) => tag.toLowerCase().trim() === selectedSeason.toLowerCase().trim());
   };
+  const childLinkByItemId = useMemo(
+    () => new Map(childItems.filter((link) => link.childId === selectedChild?.id).map((link) => [link.itemId, link])),
+    [childItems, selectedChild?.id],
+  );
+  const specialLocationIds = useMemo(() => {
+    if (!selectedChild) return { currentClosetLocationId: undefined, sizeUpLocationId: undefined, sellBinLocationId: undefined, outGrewLocationId: undefined };
+    const scoped = storageLocations.filter((location) => !location.childId || location.childId === selectedChild.id);
+    const currentCloset = scoped.find((location) => {
+      const name = location.name.toLowerCase().trim();
+      const type = normalizeLocationToken(location.type ?? '');
+      return name === 'current closet' || type === 'closet';
+    });
+    const sizeUpBin = scoped.find((location) => {
+      const name = location.name.toLowerCase().trim();
+      const type = normalizeLocationToken(location.type ?? '');
+      return name === 'size-up bin' || type === 'size_up';
+    });
+    const sellBin = scoped.find((location) => {
+      const name = location.name.toLowerCase().trim();
+      const type = normalizeLocationToken(location.type ?? '');
+      return name === 'sell bin' || type === 'sell';
+    });
+    const outGrew = scoped.find((location) => {
+      const name = normalizeLocationToken(location.name ?? '');
+      const type = normalizeLocationToken(location.type ?? '');
+      return name === 'out_grew' || name === 'outgrew' || type === 'out_grew';
+    });
+    return {
+      currentClosetLocationId: currentCloset?.id,
+      sizeUpLocationId: sizeUpBin?.id,
+      sellBinLocationId: sellBin?.id,
+      outGrewLocationId: outGrew?.id,
+    };
+  }, [selectedChild, storageLocations]);
+  const locationOptions = useMemo(() => {
+    const options = ['All', 'Unassigned'];
+    if (specialLocationIds.currentClosetLocationId) options.push('Current');
+    if (specialLocationIds.sizeUpLocationId) options.push('Size Up');
+    if (specialLocationIds.sellBinLocationId) options.push('Sell');
+    if (specialLocationIds.outGrewLocationId) options.push('Out Grew');
+    return options;
+  }, [specialLocationIds.currentClosetLocationId, specialLocationIds.sizeUpLocationId, specialLocationIds.sellBinLocationId, specialLocationIds.outGrewLocationId]);
+  const matchesLocation = useCallback((item: (typeof ownedItems)[number], selectedLocation: string) => {
+    if (selectedLocation === 'All') return true;
+    const locationId = childLinkByItemId.get(item.id)?.storageLocationId ?? '';
+    if (selectedLocation === 'Unassigned') return !locationId;
+    if (selectedLocation === 'Current') return Boolean(specialLocationIds.currentClosetLocationId && locationId === specialLocationIds.currentClosetLocationId);
+    if (selectedLocation === 'Size Up') return Boolean(specialLocationIds.sizeUpLocationId && locationId === specialLocationIds.sizeUpLocationId);
+    if (selectedLocation === 'Sell') return Boolean(specialLocationIds.sellBinLocationId && locationId === specialLocationIds.sellBinLocationId);
+    if (selectedLocation === 'Out Grew') return Boolean(specialLocationIds.outGrewLocationId && locationId === specialLocationIds.outGrewLocationId);
+    return true;
+  }, [childLinkByItemId, specialLocationIds.currentClosetLocationId, specialLocationIds.sizeUpLocationId, specialLocationIds.sellBinLocationId, specialLocationIds.outGrewLocationId]);
 
   const matchesClosetSearch = useCallback((item: (typeof ownedItems)[number], rawQuery: string) => {
     const q = rawQuery.trim().toLowerCase();
@@ -1507,8 +1571,12 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [sizeScopedItems, seasonFilter]);
 
   const filteredOwnedItems = useMemo(
-    () => sizeScopedItems.filter((item) => matchesBrand(item, selectedBrandIds)).filter((item) => matchesSeason(item, seasonFilter)).filter((item) => matchesClosetSearch(item, closetSearch)),
-    [sizeScopedItems, selectedBrandIds, seasonFilter, matchesClosetSearch, closetSearch],
+    () => sizeScopedItems
+      .filter((item) => matchesBrand(item, selectedBrandIds))
+      .filter((item) => matchesSeason(item, seasonFilter))
+      .filter((item) => matchesLocation(item, locationFilter))
+      .filter((item) => matchesClosetSearch(item, closetSearch)),
+    [sizeScopedItems, selectedBrandIds, seasonFilter, locationFilter, matchesLocation, matchesClosetSearch, closetSearch],
   );
   useEffect(() => {
     let cancelled = false;
@@ -1546,6 +1614,9 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   useEffect(() => {
     if (seasonFilter !== 'All' && !seasonOptions.includes(seasonFilter)) setSeasonFilter('All');
   }, [seasonFilter, seasonOptions]);
+  useEffect(() => {
+    if (locationFilter !== 'All' && !locationOptions.includes(locationFilter)) setLocationFilter('All');
+  }, [locationFilter, locationOptions]);
 
   useEffect(() => {
     if (!loggedBrandChangeRef.current) {
@@ -1698,7 +1769,6 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     return Array.from(groups.values())
       .filter((entry) => entry.count > 1)
       .sort((a, b) => b.count - a.count)
-      .slice(0, 8)
       .map((entry) => ({ printName: entry.printName, sizes: Array.from(entry.sizes), count: entry.count, sizeCounts: entry.sizeCounts }));
   }, [filteredOwnedItems]);
   const duplicateStyles = useMemo(() => {
@@ -1720,7 +1790,6 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     return Array.from(groups.values())
       .filter((entry) => entry.count > 1)
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
-      .slice(0, 8)
       .map((entry) => ({
         label: entry.label,
         brand: entry.brand,
@@ -1840,11 +1909,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     const nextSelection = { ...current, [key]: !current[key] };
     const nextMode = selectionToSizeMode(nextSelection, 'both');
     setSizeMode(nextMode);
-    if (nextMode === 'now') setSelectedSizeChip(currentSizeNormalized || null);
+    if (nextMode === 'now') setSelectedSizeChip(currentSizeNormalizedList.length === 1 ? currentSizeNormalizedList[0] : null);
     else if (nextMode === 'next') setSelectedSizeChip(nextSizeNormalized || null);
     else setSelectedSizeChip(null);
     if (selectedChild?.id) sizeModeOverridesRef.current[selectedChild.id] = nextMode;
-  }, [sizeMode, selectedChild?.id, currentSizeNormalized, nextSizeNormalized]);
+  }, [sizeMode, selectedChild?.id, currentSizeNormalizedList, nextSizeNormalized]);
 
   const selectAllClosetSizes = useCallback(() => {
     setSelectedSizeChip(null);
@@ -1963,6 +2032,10 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     setShowFirstRunOnboarding(false);
     await updateSettings({ guidedOnboardingCompleted: true });
   }, [updateSettings]);
+  const dismissProTeaserBanner = useCallback(async () => {
+    if (settings.proTeaserBannerDismissed) return;
+    await updateSettings({ proTeaserBannerDismissed: true });
+  }, [settings.proTeaserBannerDismissed, updateSettings]);
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
@@ -2191,6 +2264,13 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         </Card>
       ) : null}
+      {!settings.proTeaserBannerDismissed ? (
+        <ProComingSoonTeaser
+          variant="banner"
+          onPress={() => setShowProModal(true)}
+          onDismiss={() => { void dismissProTeaserBanner(); }}
+        />
+      ) : null}
       <Card>
         <Text style={styles.headerTitle}>What Fits Now</Text>
         <Text style={styles.headerTagline}>Track current, next, later, and avoid duplicate buys.</Text>
@@ -2209,7 +2289,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.topBrandLabel}>Size</Text>
           {(() => {
             const selection = sizeModeToSelection(sizeMode);
-            const nowActive = selectedSizeChip ? Boolean(currentSizeNormalized && selectedSizeChip === currentSizeNormalized) : selection.now;
+            const nowActive = selectedSizeChip ? currentSizesNormalizedSet.has(selectedSizeChip) : selection.now;
             const nextActive = selectedSizeChip ? Boolean(nextSizeNormalized && selectedSizeChip === nextSizeNormalized) : selection.next;
             const allActive = sizeMode === 'both' && !selectedSizeChip;
             return (
@@ -2256,6 +2336,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           label="Search Closet"
           value={closetSearch}
           onChangeText={setClosetSearch}
+          clearable
           placeholder="Search title, print, brand, tags (e.g. daisy)"
           autoCapitalize="none"
           autoCorrect={false}
@@ -2263,6 +2344,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         {closetSearch.trim() ? (
           <PrimaryButton label="See Matches" variant="secondary" onPress={openClosetSearchResults} />
         ) : null}
+        <ChipSelector label="Location" options={locationOptions} value={locationFilter} onChange={setLocationFilter} accent="sage" />
         {advancedUnlocked ? (
           <View style={styles.topBrandRowWrap}>
             <View style={styles.topBrandHeader}>
@@ -2400,6 +2482,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                   brandId: primaryBrandId,
                   brandIds: selectedBrandIds.length ? selectedBrandIds : undefined,
                   season: seasonFilter === 'All' ? undefined : seasonFilter,
+                  query: closetSearch.trim() || undefined,
+                  locationFilter: locationFilter === 'All' ? undefined : locationFilter,
                 });
               }}
             />
@@ -2859,6 +2943,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         visible={showKidLimitModal}
         onClose={() => setShowKidLimitModal(false)}
         onSendFeedback={() => { void openKidLimitFeedbackEmail(kidLimitCurrentCount); }}
+      />
+      <ProComingSoonModal
+        visible={showProModal}
+        onClose={() => setShowProModal(false)}
+        onFeedback={() => { void openKidLimitFeedbackEmail(children.length); }}
       />
     </Screen>
   );

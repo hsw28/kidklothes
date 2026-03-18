@@ -11,8 +11,7 @@ import { useData } from '@/db/DataContext';
 import { BrandFit, ClothingType, Condition, FitBin, Item, ItemSizeScheme, ItemSizeSystem, ItemSizeType, ItemStatus, KidFit } from '@/models';
 import { ItemsStackParamList } from '@/navigation/types';
 import { ADD_ITEM_CATEGORY_OPTIONS, ClosetCategory, closetCategoryToClothingType, closetLabel, normalizeItemCategoryToClosetCategory } from '@/utils/categories';
-import { isAdvancedUnlocked } from '@/utils/featureUnlock';
-import { getWishlistAwareness, sizeToNumber } from '@/utils/fitInsights';
+import { getWishlistAwareness } from '@/utils/fitInsights';
 import { canonicalizeBrand, prettyBrandFallback } from '@/utils/brandNormalize';
 import { formatItemCategoryLabel } from '@/utils/itemLabels';
 import { normalizeItemPayload } from '@/utils/itemPayload';
@@ -25,9 +24,11 @@ import { cacheRemoteImage, persistLocalImage } from '@/utils/imageCache';
 import { normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
 import { APPAREL_AGE_SIZES, APPAREL_ALPHA_SIZES, US_SHOE_SIZES, computeDefaultFitBin, getSizeUIModel, inferSizeScheme, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
 
-const statusOptions: ItemStatus[] = ['wishlist', 'owned', 'for-sale', 'sold'];
+const statusOptions: ItemStatus[] = ['wishlist', 'owned', 'sold'];
 const conditionOptions: Condition[] = ['new-with-tags', 'like-new', 'good', 'play', 'donate'];
 const categoryOptions: ClosetCategory[] = ADD_ITEM_CATEGORY_OPTIONS;
+const storagePresetOptions = ['None', 'Sell', 'Size Up', 'Current', 'Out Grew'] as const;
+type StoragePresetOption = (typeof storagePresetOptions)[number];
 const brandFitOptions: Array<{ value: BrandFit; label: string }> = [
   { value: 'tts', label: 'True to size' },
   { value: 'small', label: 'Runs small' },
@@ -50,29 +51,6 @@ const fitBinLabels: Record<FitBin, string> = {
   unsure: 'Unsure',
 };
 
-function useCategoryDefault(clothingType?: ClothingType): ClosetCategory | undefined {
-  switch (clothingType) {
-    case 'bottom':
-      return 'pants';
-    case 'top':
-      return 'tops';
-    case 'sleeper':
-      return 'pjs';
-    case 'romper':
-      return 'one-pieces';
-    case 'dress':
-      return 'dresses-skirts';
-    case 'shoes':
-      return 'shoes';
-    case 'outerwear':
-      return 'outerwear';
-    case 'accessory':
-      return 'accessories';
-    default:
-      return undefined;
-  }
-}
-
 type Props = NativeStackScreenProps<ItemsStackParamList, 'AddItem'>;
 
 type SimilarCandidate = {
@@ -91,6 +69,48 @@ const normalizeText = (value: string) => value.toLowerCase().trim().replace(/\s+
 const debugPollutionMarkers = ['[TextInputUI]', 'PrimaryButton onPress failed', 'ERR_INTERNAL_SQLITE_ERROR', '[React]'];
 
 const isProbablyHttpUrl = (value: string) => /^https?:\/\/\S+$/i.test(value.trim());
+const MARKETPLACE_BRAND_TOKENS = new Set([
+  'ebay',
+  'mercari',
+  'poshmark',
+  'depop',
+  'vinted',
+  'kidizen',
+  'thredup',
+  'offerup',
+  'facebookmarketplace',
+  'marketplace',
+  'whatnot',
+]);
+
+const normalizeMarketplaceToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const isMarketplaceSource = (urlValue?: string, sourceDomain?: string, siteName?: string) => {
+  const candidates: string[] = [];
+  const trimmedUrl = (urlValue || '').trim();
+  if (trimmedUrl) {
+    try {
+      candidates.push(new URL(trimmedUrl).hostname.replace(/^www\./i, ''));
+    } catch {
+      // ignore malformed URL
+    }
+  }
+  if (sourceDomain?.trim()) candidates.push(sourceDomain.trim());
+  if (siteName?.trim()) candidates.push(siteName.trim());
+  return candidates.some((value) => {
+    const normalized = normalizeMarketplaceToken(value);
+    return Array.from(MARKETPLACE_BRAND_TOKENS).some((token) => normalized.includes(token));
+  });
+};
+
+const sanitizeAutofillBrand = (candidate: string, options: { isMarketplace: boolean }) => {
+  const trimmed = candidate.trim();
+  if (!trimmed) return '';
+  if (!options.isMarketplace) return trimmed;
+  const token = normalizeMarketplaceToken(trimmed);
+  if (!token || MARKETPLACE_BRAND_TOKENS.has(token)) return '';
+  return trimmed;
+};
 
 const extractHttpUrl = (value: string): string | undefined => {
   const match = value.match(/https?:\/\/[^\s'"`<>]+/i);
@@ -153,22 +173,6 @@ const getDomainLabel = (value: string) => {
   } catch {
     return '';
   }
-};
-
-const tokenize = (value: string) =>
-  normalizeText(value)
-    .split(/\s+/)
-    .filter((token) => token.length > 2);
-
-const tokenOverlap = (a: string, b: string): number => {
-  const aTokens = new Set(tokenize(a));
-  const bTokens = new Set(tokenize(b));
-  if (aTokens.size === 0 || bTokens.size === 0) return 0;
-  let shared = 0;
-  aTokens.forEach((token) => {
-    if (bTokens.has(token)) shared += 1;
-  });
-  return shared / Math.max(aTokens.size, bTokens.size);
 };
 
 const printStopwords = new Set([
@@ -236,35 +240,30 @@ const suggestPrintName = (titleValue: string, brandValue: string, brandTagsValue
   return candidates[0];
 };
 
-const scoreSimilarity = (candidate: Item, input: { title: string; brand: string; clothingType: ClothingType; size: string }) => {
-  if (candidate.clothingType !== input.clothingType) return { score: 0, reasons: [] as string[] };
+const normalizeStorageToken = (value: string) => value.toLowerCase().trim().replace(/[\s-]+/g, '_');
 
-  const reasons: string[] = ['Same clothing type'];
-  let score = 0.3;
+const getStoragePresetForLocation = (location?: { name?: string; type?: string }): StoragePresetOption | undefined => {
+  if (!location) return undefined;
+  const name = normalizeStorageToken(location.name ?? '');
+  const type = normalizeStorageToken(location.type ?? '');
+  if (name === 'sell_bin' || type === 'sell') return 'Sell';
+  if (name === 'size_up_bin' || type === 'size_up') return 'Size Up';
+  if (name === 'current_closet' || type === 'closet') return 'Current';
+  if (name === 'out_grew' || name === 'outgrew' || type === 'out_grew') return 'Out Grew';
+  return undefined;
+};
 
-  const n1 = sizeToNumber(candidate.size);
-  const n2 = sizeToNumber(input.size);
-  if (n1 !== undefined && n2 !== undefined && Math.abs(n1 - n2) <= 8) {
-    score += 0.25;
-    reasons.push('Nearby size');
-  }
+const getFormStatus = (value?: ItemStatus): ItemStatus => (value === 'for-sale' ? 'owned' : (value ?? 'wishlist'));
 
-  if (input.brand && candidate.brand && normalizeText(input.brand) === normalizeText(candidate.brand)) {
-    score += 0.3;
-    reasons.push('Same brand');
-  }
-
-  const overlap = tokenOverlap(candidate.title, input.title);
-  if (overlap >= 0.5) {
-    score += 0.25;
-    reasons.push('Title overlap');
-  }
-
-  return { score: Math.min(score, 1), reasons };
+const getStorageConfigForPreset = (preset: Exclude<StoragePresetOption, 'None'>) => {
+  if (preset === 'Sell') return { name: 'Sell Bin', type: 'sell' };
+  if (preset === 'Size Up') return { name: 'Size-Up Bin', type: 'size_up' };
+  if (preset === 'Current') return { name: 'Current Closet', type: 'closet' };
+  return { name: 'Out Grew', type: 'out_grew' };
 };
 
 export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { children, items, childItems, storageLocations, printAliases, settings, logEvent, addItem, updateItem, updateItemCachedImage, updateSettings } = useData();
+  const { children, items, childItems, storageLocations, printAliases, settings, logEvent, addItem, updateItem, updateItemCachedImage, updateSettings, createStorageLocation } = useData();
   const editing = route.params?.itemId;
   const duplicateFromItemId = route.params?.duplicateFromItemId;
   const shoppingMode = route.params?.shoppingMode === true;
@@ -306,15 +305,29 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [notes, setNotes] = useState(sourceItem?.notes ?? '');
   const [tags, setTags] = useState(sourceItem?.tags.join(', ') ?? '');
   const [seasonTags, setSeasonTags] = useState(sourceItem?.seasonTags.join(', ') ?? '');
-  const [childId, setChildId] = useState(sourceChildLink?.childId ?? route.params?.prefillChildId ?? settings.lastShoppingChildId ?? children[0]?.id ?? '');
+  const [selectedChildIds, setSelectedChildIds] = useState<string[]>(
+    sourceItem?.childIds.length
+      ? sourceItem.childIds
+      : route.params?.prefillChildId
+        ? [route.params.prefillChildId]
+        : settings.lastShoppingChildId
+          ? [settings.lastShoppingChildId]
+          : children[0]?.id
+            ? [children[0].id]
+            : [],
+  );
   const [clothingType, setClothingType] = useState<ClothingType>(initialType);
-  const [status, setStatus] = useState<ItemStatus>(sourceItem?.status ?? route.params?.prefillStatus ?? 'wishlist');
-  const [storageLocationId, setStorageLocationId] = useState(sourceChildLink?.storageLocationId ?? '');
+  const [status, setStatus] = useState<ItemStatus>(getFormStatus(sourceItem?.status ?? route.params?.prefillStatus));
+  const [storagePreset, setStoragePreset] = useState<StoragePresetOption>(() => {
+    const matchedLocation = storageLocations.find((location) => location.id === sourceChildLink?.storageLocationId);
+    return getStoragePresetForLocation(matchedLocation) ?? (sourceItem?.status === 'for-sale' ? 'Sell' : 'None');
+  });
+  const [storagePresetTouched, setStoragePresetTouched] = useState(false);
+  const [quantity, setQuantity] = useState(Math.max(1, sourceItem?.quantity ?? 1));
   const [condition, setCondition] = useState<Condition | undefined>(sourceItem?.condition);
   const [category, setCategory] = useState<ClosetCategory | undefined>(
     normalizeItemCategoryToClosetCategory(sourceItem?.category)
-    ?? normalizeItemCategoryToClosetCategory(route.params?.prefillCategory)
-    ?? useCategoryDefault(sourceItem?.clothingType),
+    ?? normalizeItemCategoryToClosetCategory(route.params?.prefillCategory),
   );
   const [isFetchingPreview, setIsFetchingPreview] = useState(false);
   const [previewCard, setPreviewCard] = useState<PreviewCardState>(() => (route.params?.url ? { status: 'loading', domain: getDomainLabel(route.params.url) } : { status: 'idle' }));
@@ -339,6 +352,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [sizePickerSection, setSizePickerSection] = useState<'AGE' | 'ALPHA' | 'CUSTOM' | 'SHOE'>(
     (sourceItem?.sizeScheme === 'ALPHA' ? 'ALPHA' : sourceItem?.sizeScheme === 'SHOE' ? 'SHOE' : sourceItem?.sizeScheme === 'CUSTOM' ? 'CUSTOM' : 'AGE'),
   );
+  const isWebImportFlow = Boolean(route.params?.url?.trim()) || route.params?.source === 'shareext';
+  const primaryChildId = selectedChildIds[0] ?? '';
   const deepLinkUrlRef = useRef(route.params?.url?.trim() || '');
   const imageTouchedRef = useRef(Boolean(sourceItem?.imageUrl || sourceItem?.cachedImageUri));
   const imageUrlRef = useRef(existingPrimaryImage);
@@ -347,13 +362,10 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const latestAutoRequestUrlRef = useRef('');
   const lastAutoSuccessUrlRef = useRef('');
   const autofillMetaRef = useRef<{ titleAutoValue?: string; brandAutoValue?: string; imageAutoValue?: string }>({});
-  const showLocationFeatures = isAdvancedUnlocked(settings, children, childItems, items) || storageLocations.length > 0;
-  const locationOptions = useMemo(
-    () =>
-      storageLocations
-        .filter((location) => !location.childId || location.childId === childId)
-        .map((location) => ({ id: location.id, label: location.name })),
-    [storageLocations, childId],
+  const showLocationFeatures = children.length > 0;
+  const scopedStorageLocations = useMemo(
+    () => storageLocations.filter((location) => !location.childId || location.childId === primaryChildId),
+    [storageLocations, primaryChildId],
   );
   useEffect(() => {
     imageTouchedRef.current = imageTouched;
@@ -363,9 +375,9 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [imageUrl]);
 
   const defaultWearingSize = useMemo(() => {
-    if (!quickMode || !childId) return '';
+    if (!quickMode || !primaryChildId) return '';
     const linked = childItems
-      .filter((link) => link.childId === childId)
+      .filter((link) => link.childId === primaryChildId)
       .map((link) => items.find((item) => item.id === link.itemId))
       .filter(Boolean)
       .map((item) => item as Item)
@@ -375,8 +387,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     const freq = new Map<string, number>();
     linked.forEach((item) => freq.set(item.size, (freq.get(item.size) ?? 0) + 1));
     return Array.from(freq.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
-  }, [quickMode, childId, childItems, items, clothingType]);
-  const selectedChild = useMemo(() => children.find((entry) => entry.id === childId), [children, childId]);
+  }, [quickMode, primaryChildId, childItems, items, clothingType]);
+  const selectedChild = useMemo(() => children.find((entry) => entry.id === primaryChildId), [children, primaryChildId]);
   const sizeUiModel = useMemo(
     () => getSizeUIModel({ categoryIdOrName: category || clothingType, shoeSystem: selectedChild?.shoeSizeSystem ?? 'US_SHOE' }),
     [category, clothingType, selectedChild?.shoeSizeSystem],
@@ -392,11 +404,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       .map((value) => (value || '').trim())
       .filter(Boolean);
     const recent = items
-      .filter((item) => item.childIds.includes(childId))
+      .filter((item) => item.childIds.includes(primaryChildId))
       .map((item) => item.size.trim())
       .filter(Boolean);
     return Array.from(new Set([...pinned, ...recent, ...commonSizeLabels])).slice(0, 24);
-  }, [childCurrentSizeText, childNextSizeText, items, childId]);
+  }, [childCurrentSizeText, childNextSizeText, items, primaryChildId]);
 
   useEffect(() => {
     const sharedUrl = route.params?.url?.trim();
@@ -443,10 +455,6 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   );
 
   useEffect(() => {
-    if (!category) setCategory(useCategoryDefault(clothingType));
-  }, [category, clothingType]);
-
-  useEffect(() => {
     if (!category) return;
     const derived = closetCategoryToClothingType(category);
     if (derived !== clothingType) setClothingType(derived);
@@ -461,18 +469,41 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     }
     if (prevCategoryRef.current === categoryKey) return;
     prevCategoryRef.current = categoryKey;
-    setSize('');
-    setSizeRaw('');
-    setSizeNormalized('');
-    setSizeType(sizeUiModel.sizeType);
-    setSizeSystem((sizeUiModel.sizeSystem === 'US_SHOE' ? 'US_SHOE' : 'APPAREL') as ItemSizeSystem);
-    setSizeScheme(undefined);
+    const nextType: ItemSizeType = sizeUiModel.sizeType;
+    const nextSystem: ItemSizeSystem = (sizeUiModel.sizeSystem === 'US_SHOE' ? 'US_SHOE' : 'APPAREL') as ItemSizeSystem;
+    const preservedRaw = (sizeRaw || size || '').trim();
+    const preservedNormalized = normalizeStructuredSize(preservedRaw);
+    const hasPreservedSize = Boolean(preservedRaw);
+
+    setSizeType(nextType);
+    setSizeSystem(nextSystem);
+    if (hasPreservedSize) {
+      setSize(preservedRaw);
+      setSizeRaw(preservedRaw);
+      setSizeNormalized(preservedNormalized);
+      if (!sizeScheme) {
+        setSizeScheme(inferSizeScheme(preservedRaw) as ItemSizeScheme);
+      }
+    } else {
+      setSize('');
+      setSizeRaw('');
+      setSizeNormalized('');
+      setSizeScheme(undefined);
+    }
     if (!fitBinTouched) {
-      setFitBin('unsure');
+      setFitBin(
+        hasPreservedSize
+          ? computeDefaultFitBin({
+              sizeType: nextType,
+              sizeNormalized: preservedNormalized,
+              kid: selectedChild ?? {},
+            })
+          : 'unsure',
+      );
     }
     const defaultSection = sizeUiModel.sizeType === 'shoe' ? 'SHOE' : 'AGE';
     setSizePickerSection(defaultSection);
-  }, [category, clothingType, fitBinTouched, sizeUiModel.sizeSystem, sizeUiModel.sizeType]);
+  }, [category, clothingType, fitBinTouched, selectedChild, size, sizeRaw, sizeScheme, sizeUiModel.sizeSystem, sizeUiModel.sizeType]);
 
   useEffect(() => {
     if (sizeUiModel.sizeType === 'shoe' && !['SHOE', 'CUSTOM'].includes(sizePickerSection)) setSizePickerSection('SHOE');
@@ -486,16 +517,16 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [quickMode, existing, size, defaultWearingSize, applySizeValue]);
 
   useEffect(() => {
-    if (!storageLocationId) return;
-    if (locationOptions.some((option) => option.id === storageLocationId)) return;
-    setStorageLocationId('');
-  }, [storageLocationId, locationOptions]);
+    if (children.length === 1 && selectedChildIds[0] !== children[0]?.id) {
+      setSelectedChildIds(children[0]?.id ? [children[0].id] : []);
+    }
+  }, [children, selectedChildIds]);
 
   useEffect(() => {
     if (shoppingMode && quickMode && !existing) {
-      updateSettings({ lastShoppingType: clothingType, lastShoppingChildId: childId || undefined });
+      updateSettings({ lastShoppingType: clothingType, lastShoppingChildId: primaryChildId || undefined });
     }
-  }, [shoppingMode, quickMode, existing, clothingType, childId]);
+  }, [shoppingMode, quickMode, existing, clothingType, primaryChildId]);
 
   useEffect(() => {
     const sanitized = sanitizeUrlInput(url);
@@ -579,12 +610,18 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       autofillMetaRef.current.titleAutoValue = nextTitle;
     }
 
-    const canonicalBrand = await canonicalizeBrand(preview.brand || null, preview.canonicalUrl || url || null, preview.siteName || null);
-    const nextBrand = (
-      canonicalBrand?.brandName
-      || (preview.brand || preview.siteName || '').trim()
-      || prettyBrandFallback(preview.brand || null, preview.canonicalUrl || url || null, preview.siteName || null)
-    ).trim();
+    const previewSourceUrl = preview.canonicalUrl || url || '';
+    const fromMarketplace = isMarketplaceSource(previewSourceUrl, preview.sourceDomain, preview.siteName);
+    const canonicalBrand = await canonicalizeBrand(preview.brand || null, previewSourceUrl || null, preview.siteName || null);
+    const nextBrand = sanitizeAutofillBrand(
+      (
+        canonicalBrand?.brandName
+        || (preview.brand || '').trim()
+        || (fromMarketplace ? '' : (preview.siteName || '').trim())
+        || (fromMarketplace ? '' : prettyBrandFallback(preview.brand || null, previewSourceUrl || null, preview.siteName || null))
+      ).trim(),
+      { isMarketplace: fromMarketplace },
+    );
     if (nextBrand && (!brandTouched || !brand.trim() || brand.trim() === autofillMetaRef.current.brandAutoValue)) {
       setBrand(nextBrand);
       autofillMetaRef.current.brandAutoValue = nextBrand;
@@ -684,9 +721,9 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     await runPreviewFetch('manual');
   };
 
-  const buildPayload = (overrides?: { brand?: string }) =>
+  const buildPayload = (overrides?: { brand?: string; storageLocationId?: string }) =>
     normalizeItemPayload({
-      childId,
+      childIds: selectedChildIds,
       quickMode,
       title,
       url,
@@ -706,7 +743,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       fitBin,
       fitBinTouched,
       category,
-      storageLocationId,
+      storageLocationId: overrides?.storageLocationId ?? '',
       brandFit,
       kidFit,
       brandSizeNote,
@@ -720,9 +757,27 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       tags,
       seasonTags,
       notes,
+      quantity,
       printAliases,
       brandOverride: overrides?.brand,
     });
+
+  const resolveStorageLocationIdForSave = async (): Promise<string> => {
+    if (storagePreset === 'None') {
+      return storagePresetTouched ? '' : (sourceChildLink?.storageLocationId ?? '');
+    }
+    if (!primaryChildId) return sourceChildLink?.storageLocationId ?? '';
+
+    const config = getStorageConfigForPreset(storagePreset);
+    const existingLocation = scopedStorageLocations.find((location) => {
+      const preset = getStoragePresetForLocation(location);
+      return preset === storagePreset && (!location.childId || location.childId === primaryChildId);
+    });
+    if (existingLocation?.id) return existingLocation.id;
+
+    const created = await createStorageLocation({ childId: primaryChildId, name: config.name, type: config.type });
+    return created?.id ?? '';
+  };
 
   const getDuplicateCandidates = (): SimilarCandidate[] => {
     const draftTitle = normalizeText((quickMode ? (title.trim() || `${size.trim() || 'New'} ${category ? closetLabel[category] : clothingType}`) : title).trim());
@@ -733,61 +788,51 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     return items
       .filter((candidate) => {
         if (editing && candidate.id === editing) return false;
-        return candidate.childIds.includes(childId);
+        if (normalizeText(candidate.size) !== normalizeText(size)) return false;
+        if (candidate.status !== status) return false;
+        if (candidate.clothingType !== clothingType) return false;
+        return true;
       })
       .flatMap((candidate) => {
-        const exactTitle = draftTitle && normalizeText(candidate.title) === draftTitle;
-        if (exactTitle) {
-          return [{ item: candidate, score: 1, reasons: ['Exact same title'] } satisfies SimilarCandidate];
-        }
-
-        if (!normalizedBrand || !normalizedPrint) return [];
-        const candidateBrand = normalizeText(candidate.brand || candidate.brandTags[0] || '');
-        if (!candidateBrand || candidateBrand !== normalizedBrand) return [];
-        const candidatePrint = candidate.printNameNorm || resolvePrintName(candidate.printName ?? '', printAliases);
-        if (!candidatePrint || candidatePrint !== normalizedPrint) return [];
         if (draftCategory) {
           const candidateCategory = normalizeItemCategoryToClosetCategory(candidate.category);
           if (candidateCategory && candidateCategory !== draftCategory) return [];
-        } else if (candidate.clothingType !== clothingType) {
-          return [];
         }
-        return [{ item: candidate, score: 0.96, reasons: ['Same brand', 'Same category', 'Same print'] } satisfies SimilarCandidate];
+        const exactTitle = draftTitle && normalizeText(candidate.title) === draftTitle;
+        const candidateBrand = normalizeText(candidate.brand || candidate.brandTags[0] || '');
+        const sameBrand = !normalizedBrand || (candidateBrand && candidateBrand === normalizedBrand);
+        if (exactTitle) {
+          return [{ item: candidate, score: 1, reasons: sameBrand ? ['Exact same title', 'Same brand', 'Same size'] : ['Exact same title', 'Same size'] } satisfies SimilarCandidate];
+        }
+
+        if (!normalizedBrand || !normalizedPrint) return [];
+        if (!candidateBrand || candidateBrand !== normalizedBrand) return [];
+        const candidatePrint = candidate.printNameNorm || resolvePrintName(candidate.printName ?? '', printAliases);
+        if (!candidatePrint || candidatePrint !== normalizedPrint) return [];
+        return [{ item: candidate, score: 0.96, reasons: ['Same brand', 'Same category', 'Same print', 'Same size'] } satisfies SimilarCandidate];
       })
       .slice(0, 3);
-  };
-
-  const getPrintDuplicateCandidates = (): SimilarCandidate[] => {
-    const normalizedPrint = resolvePrintName(printName, printAliases);
-    if (!normalizedPrint) return [];
-    const targetSize = sizeToNumber(size);
-
-    const matches = items
-      .filter((candidate) => {
-        if (editing && candidate.id === editing) return false;
-        if (!candidate.childIds.includes(childId)) return false;
-        const candidateCanonical = candidate.printNameNorm || resolvePrintName(candidate.printName ?? '', printAliases);
-        if (candidateCanonical !== normalizedPrint) return false;
-        return true;
-      })
-      .map((candidate) => {
-        const reasons = ['Same print name'];
-        if (candidate.clothingType === clothingType) reasons.push('Same category');
-        const candidateSize = sizeToNumber(candidate.size);
-        if (normalizeText(candidate.size) === normalizeText(size)) {
-          reasons.push('Same size');
-        } else if (targetSize !== undefined && candidateSize !== undefined && Math.abs(targetSize - candidateSize) <= 10) {
-          reasons.push('Adjacent size');
-        }
-        return { item: candidate, score: 0.98, reasons };
-      })
-      .filter((entry) => entry.reasons.includes('Same size') || entry.reasons.includes('Adjacent size'))
-      .slice(0, 3);
-
-    return matches;
   };
 
   const completeSave = async (addAnother: boolean) => {
+    const goToWishlistHome = () => {
+      const parentNav = navigation.getParent() as { navigate?: (name: string, params?: Record<string, unknown>) => void } | undefined;
+      if (parentNav?.navigate) {
+        parentNav.navigate('Wishlist', {
+          screen: 'ItemsList',
+          params: { initialStatus: 'wishlist', hideInbox: true },
+        });
+        return;
+      }
+      navigation.replace('ItemsList' as never, { initialStatus: 'wishlist', hideInbox: true } as never);
+    };
+    const closeItemForm = () => {
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+        return;
+      }
+      goToWishlistHome();
+    };
     const maybeCacheSavedImage = async (itemId: string, candidateUrl?: string) => {
       const normalized = (candidateUrl || '').trim();
       if (!/^https?:\/\//i.test(normalized)) return;
@@ -810,7 +855,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     }
 
-    const payload = buildPayload({ brand: effectiveBrand || undefined });
+    const resolvedStorageLocationId = await resolveStorageLocationIdForSave();
+    const payload = buildPayload({ brand: effectiveBrand || undefined, storageLocationId: resolvedStorageLocationId });
     if (brandFit) await logEvent('item_form_field_used_brand_fit', { value: brandFit });
     if (kidFit) await logEvent('item_form_field_used_kid_fit', { value: kidFit });
     if (sizeNormalized.trim() || brandSizeNote.trim() || existing?.fitRating || existing?.fitException) {
@@ -823,10 +869,6 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     }
     if (existing) {
       await updateItem(existing.id, payload);
-      if (payload.imageUrl && !/^https?:\/\//i.test(payload.imageUrl.trim())) {
-        // Local photo/screenshot replacements should supersede any previously cached remote image.
-        await updateItemCachedImage(existing.id, '');
-      }
       await maybeCacheSavedImage(existing.id, payload.imageUrl);
       navigation.replace('ItemDetail', { itemId: existing.id });
       return;
@@ -838,7 +880,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     if (status === 'wishlist' && size.trim()) {
-      const awareness = getWishlistAwareness(items, { childId, clothingType: closetCategoryToClothingType(category), size });
+      const awareness = getWishlistAwareness(items, { childId: primaryChildId, clothingType: closetCategoryToClothingType(category), size });
       const inventoryRealityThreshold = normalizeInventoryRealityThreshold(settings.inventoryRealityCheckOwnedThreshold);
       if (awareness.ownedCount >= inventoryRealityThreshold) {
         Alert.alert('Inventory Reality Check', `You already own ${awareness.ownedCount} ${category ? closetLabel[category] : clothingType} items in size ${size}.`);
@@ -849,7 +891,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     if (quickMode) {
       await logEvent('item_created_via', {
         createdVia: 'quick_add',
-        childId,
+        childId: primaryChildId,
         status,
         itemId: created?.id ?? null,
       });
@@ -857,6 +899,10 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
     if (!addAnother) {
       if (status === 'wishlist' && created) {
+        if (isWebImportFlow) {
+          goToWishlistHome();
+          return;
+        }
         const hasMeaningfulDetails = Boolean(
           printName.trim() ||
             fabric.trim() ||
@@ -871,13 +917,13 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
         if (!hasMeaningfulDetails) {
           Alert.alert('Saved to Wishlist', 'You can add details later.', [
-            { text: 'Close', style: 'cancel', onPress: () => navigation.goBack() },
+            { text: 'Close', style: 'cancel', onPress: closeItemForm },
             { text: 'Add Details', onPress: () => navigation.replace('ItemDetail', { itemId: created.id }) },
           ]);
           return;
         }
 
-        Alert.alert('Saved to Wishlist', 'Saved.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        Alert.alert('Saved to Wishlist', 'Saved.', [{ text: 'OK', onPress: closeItemForm }]);
         return;
       }
       if (status === 'owned' && created && (shoppingMode || route.params?.prefillStatus === 'owned')) {
@@ -928,17 +974,20 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     setNotes('');
     setTags('');
     setSeasonTags('');
+    setQuantity(1);
+    setCategory(undefined);
     setDidAutofillPrint(false);
     setPreviewCard({ status: 'idle' });
     latestAutoRequestUrlRef.current = '';
     lastAutoSuccessUrlRef.current = '';
     autofillMetaRef.current = {};
+    if (children.length === 1 && children[0]?.id) setSelectedChildIds([children[0].id]);
   };
 
   const attemptSave = async (addAnother: boolean) => {
     try {
-      if (!childId) {
-        Alert.alert('Missing Fields', 'Please choose a kid.');
+      if (selectedChildIds.length === 0) {
+        Alert.alert('Missing Fields', 'Please choose at least one kid.');
         return;
       }
 
@@ -947,7 +996,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (!clothingType) {
+      if (!category) {
         Alert.alert('Missing Fields', 'Please choose a category.');
         return;
       }
@@ -968,54 +1017,36 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         status,
         category,
         size,
+        quantity,
       });
 
       if (!existing) {
-        const highConfidence = getDuplicateCandidates();
-        const normalizedPrint = resolvePrintName(printName, printAliases);
-        const printMatches = getPrintDuplicateCandidates();
-        if (printMatches.length > 0) {
-          const sizeList = Array.from(new Set(printMatches.map((entry) => entry.item.size)))
-            .sort((a, b) => (sizeToNumber(a) ?? 0) - (sizeToNumber(b) ?? 0))
-            .slice(0, 3);
-          const phrase = sizeList.join(' and ');
-          setDuplicateCandidates(printMatches);
-          setDuplicateModalMessage(`You already own this print in ${phrase}.`);
-          setPendingAddAnother(addAnother);
-          setShowDuplicateModal(true);
-          await logEvent('duplicate_warn_shown', {
-            childId,
-            clothingType,
-            size,
-            printName: normalizedPrint,
-            candidateIds: printMatches.map((entry) => entry.item.id),
-          });
-          return;
-        }
-
-        if (highConfidence.length > 0) {
-          setDuplicateCandidates(highConfidence);
-          setDuplicateModalMessage('These look close to what you are adding.');
-          setPendingAddAnother(addAnother);
-          setShowDuplicateModal(true);
-          await logEvent('duplicate_warn_shown', {
-            childId,
-            clothingType,
-            size,
-            candidateIds: highConfidence.map((entry) => entry.item.id),
-          });
-          return;
+        if (quantity === 1) {
+          const highConfidence = getDuplicateCandidates();
+          if (highConfidence.length > 0) {
+            setDuplicateCandidates(highConfidence);
+            setDuplicateModalMessage('These look close to what you are adding.');
+            setPendingAddAnother(addAnother);
+            setShowDuplicateModal(true);
+            await logEvent('duplicate_warn_shown', {
+              childId: primaryChildId,
+              clothingType,
+              size,
+              candidateIds: highConfidence.map((entry) => entry.item.id),
+            });
+            return;
+          }
         }
       }
 
       await completeSave(addAnother);
     } catch (error) {
-      if (__DEV__) console.error('[ItemForm] save failed', { editing, quickMode, addAnother, childId, clothingType, status }, error);
+      if (__DEV__) console.error('[ItemForm] save failed', { editing, quickMode, addAnother, childId: primaryChildId, clothingType, status }, error);
       void logEvent('item_save_failed', {
         editing: Boolean(editing),
         quickMode,
         addAnother,
-        childId: childId || null,
+        childId: primaryChildId || null,
         status,
         message: error instanceof Error ? error.message : 'unknown',
       }).catch(() => undefined);
@@ -1067,7 +1098,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
     const candidatePool = items
       .filter((item) => item.id !== editing)
-      .filter((item) => item.childIds.includes(childId))
+      .filter((item) => item.childIds.includes(primaryChildId))
       .filter((item) =>
         brand.trim()
           ? item.brandTags.includes(brand.trim()) || (item.brand ?? '').toLowerCase().trim() === brand.toLowerCase().trim()
@@ -1089,7 +1120,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);
-  }, [quickMode, showPrintSuggestions, debouncedPrintQuery, items, editing, childId, brand, printAliases]);
+  }, [quickMode, showPrintSuggestions, debouncedPrintQuery, items, editing, primaryChildId, brand, printAliases]);
   const topPrintSuggestion = printSuggestions[0];
 
   return (
@@ -1262,25 +1293,55 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         </Card>
       ) : null}
 
-      <ChipSelector
-        label="Child"
-        options={children.map((entry) => entry.name)}
-        value={children.find((entry) => entry.id === childId)?.name}
-        onChange={(name) => setChildId(children.find((entry) => entry.name === name)?.id ?? '')}
-      />
+      {children.length === 1 ? (
+        <Text style={styles.assignmentMeta}>Assigned to {children[0]?.name}</Text>
+      ) : (
+        <ChipSelector
+          label="Kids"
+          options={children.map((entry) => entry.name)}
+          selectedValues={children.filter((entry) => selectedChildIds.includes(entry.id)).map((entry) => entry.name)}
+          onChange={(name) => {
+            const nextId = children.find((entry) => entry.name === name)?.id;
+            if (!nextId) return;
+            setSelectedChildIds((current) => (
+              current.includes(nextId)
+                ? current.filter((entry) => entry !== nextId)
+                : [...current, nextId]
+            ));
+          }}
+        />
+      )}
+      <View style={styles.quantityRow}>
+        <Text style={styles.quantityLabel}>Quantity</Text>
+        <View style={styles.quantityControls}>
+          <Pressable style={styles.quantityButton} onPress={() => setQuantity((current) => Math.max(1, current - 1))}>
+            <Text style={styles.quantityButtonText}>-</Text>
+          </Pressable>
+          <Text style={styles.quantityValue}>{quantity}</Text>
+          <Pressable style={styles.quantityButton} onPress={() => setQuantity((current) => Math.min(30, current + 1))}>
+            <Text style={styles.quantityButtonText}>+</Text>
+          </Pressable>
+        </View>
+      </View>
+      {selectedChildIds.length > 1 && quantity < selectedChildIds.length ? (
+        <Text style={styles.assignmentWarning}>Quantity is lower than the number of assigned children.</Text>
+      ) : null}
       <ChipSelector
         label="Category"
         options={categoryOptions.map((entry) => closetLabel[entry])}
         value={category ? closetLabel[category] : undefined}
         onChange={(label) => setCategory(categoryOptions.find((entry) => closetLabel[entry] === label))}
       />
-      <ChipSelector label="Status" options={statusOptions} value={status} onChange={setStatus} />
+        <ChipSelector label="Status" options={statusOptions} value={status} onChange={setStatus} />
       {showLocationFeatures ? (
         <ChipSelector
           label="Storage Location (optional)"
-          options={['None', ...locationOptions.map((entry) => entry.label)]}
-          value={locationOptions.find((entry) => entry.id === storageLocationId)?.label ?? 'None'}
-          onChange={(label) => setStorageLocationId(label === 'None' ? '' : locationOptions.find((entry) => entry.label === label)?.id ?? '')}
+          options={[...storagePresetOptions]}
+          value={storagePreset}
+          onChange={(label) => {
+            setStoragePresetTouched(true);
+            setStoragePreset(label);
+          }}
         />
       ) : null}
 
@@ -1379,7 +1440,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                 onChange={(label) => setBrandFit(brandFitOptions.find((option) => option.label === label)?.value)}
               />
               <ChipSelector
-                label={childId ? `Fit on ${children.find((entry) => entry.id === childId)?.name ?? 'Kid'}` : 'Fit on kid'}
+                label={primaryChildId ? `Fit on ${children.find((entry) => entry.id === primaryChildId)?.name ?? 'Kid'}` : 'Fit on kid'}
                 options={kidFitLabels}
                 value={kidFitOptions.find((option) => option.value === kidFit)?.label}
                 onChange={(label) => setKidFit(kidFitOptions.find((option) => option.label === label)?.value)}
@@ -1391,7 +1452,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
           {status !== 'wishlist' ? (
             <FormInput label="Purchase Price (optional)" value={purchasePrice} onChangeText={setPurchasePrice} placeholder="e.g. 24.99" keyboardType="decimal-pad" />
           ) : null}
-          {(status === 'for-sale' || status === 'sold') ? (
+          {(storagePreset === 'Sell' || status === 'sold') ? (
             <>
               <FormInput
                 label="Target Resale Price"
@@ -1530,6 +1591,54 @@ const styles = StyleSheet.create({
   message: {
     fontSize: 16,
     color: '#374151',
+  },
+  assignmentMeta: {
+    fontSize: 13,
+    color: '#4b5563',
+    fontWeight: '600',
+  },
+  assignmentWarning: {
+    fontSize: 12,
+    color: '#92400e',
+    fontWeight: '600',
+  },
+  quantityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  quantityLabel: {
+    fontSize: 13,
+    color: '#4b5563',
+    fontWeight: '600',
+  },
+  quantityControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  quantityButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  quantityButtonText: {
+    fontSize: 18,
+    color: '#111827',
+    fontWeight: '700',
+  },
+  quantityValue: {
+    minWidth: 28,
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#111827',
+    fontWeight: '700',
   },
   modalBackdrop: {
     flex: 1,

@@ -5,7 +5,7 @@ import { resolveOutboundLink } from '@/utils/outbound';
 import { resolvePrintName } from '@/utils/printName';
 
 type ItemPayloadFormInput = {
-  childId?: string;
+  childIds?: string[];
   quickMode: boolean;
   title: string;
   url: string;
@@ -39,12 +39,13 @@ type ItemPayloadFormInput = {
   tags: string;
   seasonTags: string;
   notes: string;
+  quantity: number;
   printAliases: PrintAlias[];
   brandOverride?: string;
 };
 
 export type NormalizedItemPayload = {
-  childId?: string;
+  childIds?: string[];
   title: string;
   url?: string;
   brand?: string;
@@ -80,6 +81,7 @@ export type NormalizedItemPayload = {
   tags: string[];
   seasonTags: string[];
   notes?: string;
+  quantity: number;
   sourceDomain?: string;
   canonicalUrl?: string;
   outboundUrl?: string;
@@ -104,7 +106,7 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
     : input.title;
 
   const payload = {
-    childId: input.childId || undefined,
+    childIds: input.childIds?.filter(Boolean) ?? [],
     title: baseTitle,
     url: input.url || undefined,
     brand: (input.brandOverride ?? input.brand) || undefined,
@@ -149,6 +151,7 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
       .map((tag) => tag.trim())
       .filter(Boolean),
     notes: input.notes || undefined,
+    quantity: Math.max(1, Math.floor(input.quantity || 1)),
   };
 
   const resolved = resolveOutboundLink(payload.url || '', {

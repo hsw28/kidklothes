@@ -13,12 +13,12 @@ import { KidsStackParamList } from '@/navigation/types';
 import { useAppTheme } from '@/theme';
 import { pickPhotoFromLibrary, takePhotoWithCamera } from '@/utils/photoPicker';
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
-import { SIZE_OPTIONS, formatSizeDisplay, inferNextSize } from '@/utils/sizes';
+import { SIZE_OPTIONS, formatSizeDisplay, inferNextSize, sizeCodeToStoredText } from '@/utils/sizes';
 import { APPAREL_AGE_SIZES, APPAREL_ALPHA_SIZES, US_SHOE_SIZES } from '@/lib/sizing';
 
 type Props = NativeStackScreenProps<KidsStackParamList, 'KidForm'>;
 
-type SizeFieldKey = 'current' | 'next';
+type SizeFieldKey = 'next';
 
 const isKidLimitReachedError = (error: unknown) => {
   const code = (error as { code?: string })?.code;
@@ -27,11 +27,11 @@ const isKidLimitReachedError = (error: unknown) => {
 };
 
 const pickerLabels = {
-  current: 'Wearing Now (Size)',
   next: 'Next Size',
 } as const;
 const APPAREL_SIZE_OPTIONS = [...APPAREL_AGE_SIZES, ...APPAREL_ALPHA_SIZES, 'Other…'];
 const SHOE_SIZE_OPTIONS = [...US_SHOE_SIZES, 'Other…'];
+const CURRENT_SIZE_MULTI_OPTIONS = SIZE_OPTIONS.filter((entry) => entry.code !== 'OTHER').map((entry) => entry.code);
 
 export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const { children, storageLocations, addChild, updateChild, deleteChild, createStorageLocation, listStorageLocations, canCreateAnotherKid } = useData();
@@ -44,8 +44,13 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [photoUri, setPhotoUri] = useState(existing?.photoUri ?? '');
   const [notes, setNotes] = useState(existing?.notes ?? '');
   const [usesMixedSizes, setUsesMixedSizes] = useState(existing?.usesMixedSizes ?? false);
-  const [currentSizeCode, setCurrentSizeCode] = useState<SizeCode | null>(existing?.currentSize.code ?? null);
-  const [currentSizeOther, setCurrentSizeOther] = useState(existing?.currentSize.otherText ?? '');
+  const [currentSizeCodes, setCurrentSizeCodes] = useState<string[]>(
+    existing?.currentSizeCodes?.length
+      ? existing.currentSizeCodes
+      : (sizeCodeToStoredText(existing?.currentSize.code ?? null, existing?.currentSize.otherText ?? null)
+          ? [sizeCodeToStoredText(existing?.currentSize.code ?? null, existing?.currentSize.otherText ?? null) as string]
+          : []),
+  );
   const [nextSizeCode, setNextSizeCode] = useState<SizeCode | null>(existing?.nextSize.code ?? null);
   const [nextSizeOther, setNextSizeOther] = useState(existing?.nextSize.otherText ?? '');
   const [showSizePicker, setShowSizePicker] = useState<SizeFieldKey | null>(null);
@@ -138,6 +143,11 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
     rowGap: {
       gap: 12,
     },
+    multiSizeGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
     photoRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -197,14 +207,7 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
   };
 
   const selectSizeCode = (field: SizeFieldKey, code: SizeCode | null) => {
-    if (field === 'current') {
-      setCurrentSizeCode(code);
-      if (code !== 'OTHER') setCurrentSizeOther('');
-      if (!nextSizeCode) {
-        const inferred = code ? inferNextSize(code) : null;
-        if (inferred) setNextSizeCode(inferred);
-      }
-    } else {
+    if (field === 'next') {
       setNextSizeCode(code);
       if (code !== 'OTHER') setNextSizeOther('');
     }
@@ -217,28 +220,40 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
         Alert.alert('Name Required', 'Please enter a name.');
         return;
       }
-      if (currentSizeCode === 'OTHER' && !currentSizeOther.trim()) {
-        Alert.alert('Size Required', 'Enter the current size text.');
-        return;
-      }
       if (nextSizeCode === 'OTHER' && !nextSizeOther.trim()) {
         Alert.alert('Next Size Required', 'Enter the next size text.');
         return;
       }
+
+      const fallbackCurrentSize = sizeCodeToStoredText(existing?.currentSize.code ?? null, existing?.currentSize.otherText ?? null);
+      const mergedCurrentSizes = Array.from(
+        new Set(
+          [...currentSizeCodes, ...(fallbackCurrentSize ? [fallbackCurrentSize] : [])]
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      );
+      const primaryCurrent = mergedCurrentSizes[0] || '';
+      const primaryCurrentIsCode = CURRENT_SIZE_MULTI_OPTIONS.includes(primaryCurrent as SizeCode);
+      const derivedCurrentCode = primaryCurrentIsCode ? (primaryCurrent as SizeCode) : (existing?.currentSize.code ?? null);
+      const derivedCurrentOther = primaryCurrentIsCode ? '' : (primaryCurrent || existing?.currentSize.otherText || '');
+
+      const autoNextFromCurrent = !nextSizeCode && derivedCurrentCode ? inferNextSize(derivedCurrentCode) : null;
 
       const payload = {
         name: name.trim(),
         photoUri: photoUri.trim() || undefined,
         notes: notes || undefined,
         usesMixedSizes,
+        currentSizeCodes: mergedCurrentSizes,
         apparelSizeCurrent: apparelSizeCurrent.trim() || undefined,
         apparelSizeNext: apparelSizeNext.trim() || undefined,
         shoeSizeSystem: shoeSizeSystem as any,
         shoeSizeCurrent: shoeSizeCurrent.trim() || undefined,
         shoeSizeNext: shoeSizeNext.trim() || undefined,
-        currentSizeCode: currentSizeCode ?? undefined,
-        currentSizeOther: currentSizeCode === 'OTHER' ? currentSizeOther.trim() : '',
-        nextSizeCode: nextSizeCode ?? undefined,
+        currentSizeCode: derivedCurrentCode ?? undefined,
+        currentSizeOther: derivedCurrentCode === 'OTHER' ? derivedCurrentOther.trim() : '',
+        nextSizeCode: (nextSizeCode ?? autoNextFromCurrent) ?? undefined,
         nextSizeOther: nextSizeCode === 'OTHER' ? nextSizeOther.trim() : '',
       };
 
@@ -262,6 +277,7 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
             { name: 'Current Closet', type: 'closet' },
             { name: 'Size-Up Bin', type: 'size_up' },
             { name: 'Sell Bin', type: 'sell' },
+            { name: 'Out Grew', type: 'out_grew' },
           ] as const;
           for (const entry of defaults) {
             if (names.has(entry.name.toLowerCase())) continue;
@@ -315,11 +331,30 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
         </View>
       </Card>
       <FormInput label="Name" value={name} onChangeText={setName} placeholder="Ava" />
-      <Pressable style={styles.pickerField} onPress={() => setShowSizePicker('current')}>
-        <Text style={styles.pickerLabel}>Wearing Now (Size)</Text>
-        <Text style={styles.pickerValue}>{currentSizeCode ? formatSizeDisplay(currentSizeCode, currentSizeOther) : 'Select a size'}</Text>
-      </Pressable>
-      {currentSizeCode === 'OTHER' ? <FormInput label="Enter size" value={currentSizeOther} onChangeText={setCurrentSizeOther} placeholder="e.g. 24M/2T" /> : null}
+      <Card>
+        <Text style={styles.sectionTitle}>Current sizes in rotation</Text>
+        <Text style={styles.helperText}>Select all sizes they currently wear.</Text>
+        <View style={styles.multiSizeGrid}>
+          {CURRENT_SIZE_MULTI_OPTIONS.map((sizeCode) => {
+            const active = currentSizeCodes.includes(sizeCode);
+            return (
+              <Pressable
+                key={`current-size-multi-${sizeCode}`}
+                style={[styles.optionButton, active ? styles.optionButtonActive : null]}
+                onPress={() => {
+                  setCurrentSizeCodes((prev) =>
+                    prev.includes(sizeCode)
+                      ? prev.filter((entry) => entry !== sizeCode)
+                      : [...prev, sizeCode],
+                  );
+                }}
+              >
+                <Text style={[styles.optionText, active ? styles.optionTextActive : null]}>{sizeCode}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Card>
 
       <Pressable style={styles.pickerField} onPress={() => setShowSizePicker('next')}>
         <Text style={styles.pickerLabel}>Next Size (optional)</Text>
@@ -418,7 +453,7 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
       {!existing ? (
         <Card>
           <Text style={styles.sectionTitle}>Create Starter Cubbies?</Text>
-          <Text style={styles.helperText}>Current Closet, Size-Up Bin, and Sell Bin for this child.</Text>
+          <Text style={styles.helperText}>Current Closet, Size-Up Bin, Sell Bin, and Out Grew for this child.</Text>
           <ChipSelector label="Starter Cubbies" options={['On', 'Off']} value={createStarterCubbies ? 'On' : 'Off'} onChange={(value) => setCreateStarterCubbies(value === 'On')} />
         </Card>
       ) : null}
@@ -463,18 +498,16 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.rowGap}>
                 {SIZE_OPTIONS.map((option) => {
-                  const active = showSizePicker === 'current' ? currentSizeCode === option.code : nextSizeCode === option.code;
+                  const active = nextSizeCode === option.code;
                   return (
-                    <Pressable key={option.code} style={[styles.optionButton, active ? styles.optionButtonActive : null]} onPress={() => selectSizeCode(showSizePicker ?? 'current', option.code)}>
+                    <Pressable key={option.code} style={[styles.optionButton, active ? styles.optionButtonActive : null]} onPress={() => selectSizeCode(showSizePicker ?? 'next', option.code)}>
                       <Text style={[styles.optionText, active ? styles.optionTextActive : null]}>{option.label}</Text>
                     </Pressable>
                   );
                 })}
-                {showSizePicker === 'next' ? (
-                  <Pressable style={[styles.optionButton, !nextSizeCode ? styles.optionButtonActive : null]} onPress={() => selectSizeCode('next', null)}>
-                    <Text style={[styles.optionText, !nextSizeCode ? styles.optionTextActive : null]}>None (optional)</Text>
-                  </Pressable>
-                ) : null}
+                <Pressable style={[styles.optionButton, !nextSizeCode ? styles.optionButtonActive : null]} onPress={() => selectSizeCode('next', null)}>
+                  <Text style={[styles.optionText, !nextSizeCode ? styles.optionTextActive : null]}>None (optional)</Text>
+                </Pressable>
               </View>
             </ScrollView>
             <PrimaryButton label="Cancel" variant="secondary" onPress={() => setShowSizePicker(null)} />

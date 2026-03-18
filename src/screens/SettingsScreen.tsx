@@ -5,6 +5,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
 import { ChipSelector } from '@/components/ChipSelector';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { ProComingSoonModal } from '@/components/ProComingSoonModal';
+import { ProComingSoonTeaser } from '@/components/ProComingSoonTeaser';
 import { Screen } from '@/components/Screen';
 import { appConfig } from '@/config';
 import { useData } from '@/db/DataContext';
@@ -24,8 +26,9 @@ import {
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { getChildItems, getCoveredNudges, getDeclutterInsights, getSizeUpCounts, getWearingNowByCategory } from '@/utils/fitInsights';
 import { INVENTORY_REALITY_THRESHOLDS, normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
-import { cacheRemoteImage, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
+import { cacheRemoteImage, findPersistedImageByFilename, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
 import { getItemLocalImageUri, getItemRemoteImageUri } from '@/utils/itemMedia';
+import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 import * as FileSystem from 'expo-file-system';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -40,6 +43,18 @@ const closetAddViewLabels: Record<AppSettings['closetAddDefaultView'], string> =
   detailed: 'Detailed',
   simple: 'Simple',
 };
+const SOCIAL_LINKS = [
+  {
+    label: 'Instagram',
+    url: 'https://www.instagram.com/layetteout',
+    icon: 'IG',
+  },
+  {
+    label: 'TikTok',
+    url: 'https://www.tiktok.com/@layette.out',
+    icon: '♪',
+  },
+];
 
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<SettingsStackParamList>>();
@@ -64,6 +79,7 @@ export const SettingsScreen: React.FC = () => {
   const [versionTapCount, setVersionTapCount] = useState(0);
   const [repairingImages, setRepairingImages] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState({ total: 0, processed: 0, recovered: 0, failed: 0, noSource: 0 });
+  const [showProModal, setShowProModal] = useState(false);
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
   const showDeveloperTools = __DEV__ && Boolean(settings.developerModeEnabled);
   const appVersionLabel = Constants.expoConfig?.version ?? 'dev';
@@ -215,10 +231,12 @@ export const SettingsScreen: React.FC = () => {
     let currentCloset = childLocations.find((location) => location.name === 'Current Closet');
     let sizeUpBin = childLocations.find((location) => location.name === 'Size-Up Bin');
     let sellBin = childLocations.find((location) => location.name === 'Sell Bin');
+    let outGrew = childLocations.find((location) => location.name === 'Out Grew');
 
     if (!currentCloset) currentCloset = await createStorageLocation({ childId: child.id, name: 'Current Closet', type: 'closet', notes: DEV_SAMPLE_MARKER });
     if (!sizeUpBin) sizeUpBin = await createStorageLocation({ childId: child.id, name: 'Size-Up Bin', type: 'size_up', notes: DEV_SAMPLE_MARKER });
     if (!sellBin) sellBin = await createStorageLocation({ childId: child.id, name: 'Sell Bin', type: 'sell', notes: DEV_SAMPLE_MARKER });
+    if (!outGrew) outGrew = await createStorageLocation({ childId: child.id, name: 'Out Grew', type: 'out_grew', notes: DEV_SAMPLE_MARKER });
 
     const templates = [
       { title: 'Blueberries PJs', clothingType: 'sleeper', size: '2T', brand: brands[0], printName: 'Blueberries', status: 'owned' as const },
@@ -239,7 +257,7 @@ export const SettingsScreen: React.FC = () => {
     for (let i = 0; i < 25; i += 1) {
       const tpl = templates[i % templates.length];
       const status = i < 3 ? 'for-sale' : tpl.status;
-      const locationId = i < 4 ? sizeUpBin?.id : i < 7 && status === 'for-sale' ? sellBin?.id : currentCloset?.id;
+      const locationId = i < 2 ? sizeUpBin?.id : i < 4 ? outGrew?.id : i < 7 && status === 'for-sale' ? sellBin?.id : currentCloset?.id;
       const created = await addItem({
         childId: child.id,
         title: tpl.title,
@@ -339,6 +357,22 @@ export const SettingsScreen: React.FC = () => {
       for (const item of items) {
         scanned += 1;
         const cached = (item.cachedImageUri ?? '').trim();
+        if (cached && isAppOwnedImageUri(cached)) {
+          try {
+            const cachedInfo = await LegacyFileSystem.getInfoAsync(cached);
+            if (!cachedInfo.exists) {
+              const rebound = await findPersistedImageByFilename(cached);
+              if (rebound) {
+                await repository.updateItemCachedImage(item.id, rebound);
+                repaired += 1;
+                setRestoreProgress({ total: items.length, processed: scanned, recovered: repaired, failed, noSource });
+                continue;
+              }
+            }
+          } catch {
+            // continue with normal recovery paths
+          }
+        }
         const remoteCandidates = Array.from(
           new Set(
             [getItemRemoteImageUri(item), ...(item.imageUrls ?? []), item.imageUrl]
@@ -373,7 +407,14 @@ export const SettingsScreen: React.FC = () => {
                 if (/^file:\/\//i.test(persisted)) {
                   try {
                     const info = await LegacyFileSystem.getInfoAsync(persisted);
-                    if (!info.exists) continue;
+                    if (!info.exists) {
+                      const rebound = await findPersistedImageByFilename(persisted);
+                      if (!rebound) continue;
+                      await repository.updateItemCachedImage(item.id, rebound);
+                      repaired += 1;
+                      restored = true;
+                      break;
+                    }
                   } catch {
                     continue;
                   }
@@ -436,6 +477,59 @@ export const SettingsScreen: React.FC = () => {
         <Text style={{ color: '#4b5563' }}>
           Data stays local. Configure optional reminder nudges and backup/export.
         </Text>
+      </Card>
+      <ProComingSoonTeaser variant="card" onPress={() => setShowProModal(true)} />
+      <Card>
+        <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Follow for Updates</Text>
+        <Text style={{ color: '#6b7280' }}>
+          Follow Layette Out on Instagram or TikTok for feature updates, then send feedback if there is something you want prioritized.
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+          {SOCIAL_LINKS.map((link) => (
+            <Pressable
+              key={link.label}
+              onPress={() => void openExternalLink(link.url, link.label)}
+              accessibilityRole="button"
+              accessibilityLabel={link.label}
+              style={{
+                flex: 1,
+                minHeight: 52,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+                backgroundColor: '#FFFFFF',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                paddingHorizontal: 14,
+              }}
+            >
+              <View
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 999,
+                  backgroundColor: '#F3F4F6',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ color: '#111827', fontSize: 11, fontWeight: '800' }}>{link.icon}</Text>
+              </View>
+              <Text style={{ color: '#111827', fontWeight: '700' }}>{link.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={{ marginTop: 12 }}>
+          <PrimaryButton
+            label="Send Feedback"
+            variant="secondary"
+            onPress={() => {
+              void openKidLimitFeedbackEmail(children.length);
+            }}
+          />
+        </View>
       </Card>
 
       <Card>
@@ -649,6 +743,11 @@ export const SettingsScreen: React.FC = () => {
           Version {appVersionLabel}{__DEV__ && settings.developerModeEnabled ? ' • Developer Mode' : ''}
         </Text>
       </Pressable>
+      <ProComingSoonModal
+        visible={showProModal}
+        onClose={() => setShowProModal(false)}
+        onFeedback={() => { void openKidLimitFeedbackEmail(children.length); }}
+      />
     </Screen>
   );
 };
