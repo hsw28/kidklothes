@@ -33,7 +33,7 @@ import {
   topBrands,
 } from '@/utils/closetViewInsights';
 import { ClosetCategory, categoryGlyph, closetCategories, closetCategoryToClothingType, closetLabel, getCategoryEmptyMicrocopy, getConfiguredClosetCategories, sanitizeCategoryOrder, sanitizeHiddenCategories } from '@/utils/categories';
-import { normalizePrintName } from '@/utils/printName';
+import { extractPrintWords, normalizePrintName } from '@/utils/printName';
 import { normalizeStyleName } from '@/utils/styleName';
 import { formatPieceCount } from '@/utils/formatCounts';
 import { formatItemCategoryLabel, getBrandShortLabel } from '@/utils/itemLabels';
@@ -70,6 +70,212 @@ const FEATURE_SINGLE_RECENT = false;
 const CLOSET_GRID_COLUMNS = 2;
 const CLOSET_SHARE_CAPTURE_WIDTH = 1080;
 const CLOSET_SHARE_PREVIEW_LIMIT = 12;
+
+type PrintWordCloudEntry = {
+  word: string;
+  count: number;
+  itemIds: string[];
+  fontSize: number;
+  colorIndex: number;
+};
+
+type PrintWordCloudMeasurement = {
+  width: number;
+  height: number;
+};
+
+type PlacedPrintWordCloudEntry = PrintWordCloudEntry & {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+const getPrintWordCloudMeasurementKey = (entry: PrintWordCloudEntry) => `${entry.word}:${entry.fontSize}`;
+
+const rectanglesOverlap = (
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+  gap: number,
+) => !(
+  a.x + a.width + gap < b.x
+  || b.x + b.width + gap < a.x
+  || a.y + a.height + gap < b.y
+  || b.y + b.height + gap < a.y
+);
+
+const buildPrintWordCloudLayout = (
+  entries: PrintWordCloudEntry[],
+  width: number,
+  measurements: Record<string, PrintWordCloudMeasurement>,
+) => {
+  if (!entries.length || width <= 0) return { items: [] as PlacedPrintWordCloudEntry[], height: 128 };
+
+  const measurableEntries = entries.filter((entry) => measurements[getPrintWordCloudMeasurementKey(entry)]);
+  if (!measurableEntries.length) return { items: [] as PlacedPrintWordCloudEntry[], height: 145 };
+
+  const maxWordWidth = measurableEntries.reduce(
+    (max, entry) => Math.max(max, measurements[getPrintWordCloudMeasurementKey(entry)]?.width ?? 0),
+    0,
+  );
+  const cloudWidth = Math.min(width, Math.max(maxWordWidth + 36, width * 0.8));
+  const padding = 2;
+  const collisionGap = 3;
+  const centerX = cloudWidth / 2;
+  const placed: PlacedPrintWordCloudEntry[] = [];
+  let maxBottom = 0;
+
+  measurableEntries.forEach((entry, index) => {
+    const measured = measurements[getPrintWordCloudMeasurementKey(entry)];
+    const wordWidth = Math.min(cloudWidth - padding * 2, measured.width + 4);
+    const wordHeight = measured.height + 2;
+    let candidate: PlacedPrintWordCloudEntry | null = null;
+
+    for (let attempt = 0; attempt < 1400; attempt += 1) {
+      const angle = index * 2.3999632297 + attempt * 0.31;
+      const radius = attempt === 0 ? 0 : Math.sqrt(attempt) * 8.5;
+      const x = Math.max(
+        padding,
+        Math.min(cloudWidth - wordWidth - padding, centerX + Math.cos(angle) * radius * 1.28 - wordWidth / 2),
+      );
+      const y = Math.max(
+        padding,
+        24 + Math.sin(angle) * radius * 0.68 - wordHeight / 2,
+      );
+      const nextRect = { x, y, width: wordWidth, height: wordHeight };
+      if (placed.some((item) => rectanglesOverlap(nextRect, item, collisionGap))) continue;
+      candidate = {
+        ...entry,
+        ...nextRect,
+      };
+      break;
+    }
+
+    if (!candidate) {
+      candidate = {
+        ...entry,
+        x: padding + ((index % 3) * 8),
+        y: maxBottom + 2,
+        width: wordWidth,
+        height: wordHeight,
+      };
+    }
+
+    placed.push(candidate);
+    maxBottom = Math.max(maxBottom, candidate.y + candidate.height);
+  });
+
+  const minX = Math.min(...placed.map((item) => item.x));
+  const maxX = Math.max(...placed.map((item) => item.x + item.width));
+  const recenterOffset = (width - (maxX - minX)) / 2 - minX;
+  const centered = placed.map((item) => ({ ...item, x: item.x + recenterOffset }));
+
+  return { items: centered, height: Math.max(128, maxBottom + 4) };
+};
+
+type PrintWordCloudProps = {
+  entries: PrintWordCloudEntry[];
+  colors: string[];
+  onPressWord: (entry: PrintWordCloudEntry) => void;
+  styles: ReturnType<typeof StyleSheet.create>;
+};
+
+const PrintWordCloud: React.FC<PrintWordCloudProps> = ({ entries, colors, onPressWord, styles }) => {
+  const [width, setWidth] = useState(0);
+  const [measurements, setMeasurements] = useState<Record<string, PrintWordCloudMeasurement>>({});
+
+  useEffect(() => {
+    setMeasurements((current) =>
+      Object.fromEntries(
+        entries.flatMap((entry) => {
+          const key = getPrintWordCloudMeasurementKey(entry);
+          return current[key] ? [[key, current[key]]] : [];
+        }),
+      ),
+    );
+  }, [entries]);
+
+  const layout = useMemo(() => buildPrintWordCloudLayout(entries, width, measurements), [entries, width, measurements]);
+  const allMeasured = entries.every((entry) => Boolean(measurements[getPrintWordCloudMeasurementKey(entry)]));
+
+  return (
+    <View
+      style={[styles.wordCloudWrap, { height: layout.height }]}
+      onLayout={(event) => {
+        const nextWidth = Math.round(event.nativeEvent.layout.width);
+        if (nextWidth > 0 && nextWidth !== width) setWidth(nextWidth);
+      }}
+    >
+      {!allMeasured ? (
+        <View pointerEvents="none" style={styles.wordCloudMeasureLayer}>
+          {entries.map((entry) => {
+            const key = getPrintWordCloudMeasurementKey(entry);
+            return (
+              <View
+                key={`measure-${key}`}
+                style={styles.wordCloudMeasureItem}
+                onLayout={(event) => {
+                  const next = {
+                    width: Math.ceil(event.nativeEvent.layout.width),
+                    height: Math.ceil(event.nativeEvent.layout.height),
+                  };
+                  setMeasurements((current) => {
+                    const prev = current[key];
+                    if (prev && prev.width === next.width && prev.height === next.height) return current;
+                    return { ...current, [key]: next };
+                  });
+                }}
+              >
+                <Text
+                  style={[
+                    styles.wordCloudText,
+                    {
+                      fontSize: entry.fontSize,
+                      lineHeight: entry.fontSize + 2,
+                      color: colors[entry.colorIndex],
+                    },
+                  ]}
+                >
+                  {entry.word}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {layout.items.map((entry) => (
+        <Pressable
+          key={entry.word}
+          onPress={() => onPressWord(entry)}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${entry.word} print items`}
+          style={({ pressed }) => [
+            styles.wordCloudItem,
+            {
+              left: entry.x,
+              top: entry.y,
+            },
+            pressed ? styles.wordCloudItemActive : null,
+          ]}
+        >
+          <Text
+            style={[
+              styles.wordCloudText,
+              {
+                fontSize: entry.fontSize,
+                lineHeight: entry.fontSize + 2,
+                color: colors[entry.colorIndex],
+              },
+            ]}
+          >
+            {entry.word}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+};
 
 type TileProps = {
   category: ClosetCategory;
@@ -980,6 +1186,33 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       color: theme.colors.accentPeriwinkle,
       fontWeight: '700',
     },
+    wordCloudWrap: {
+      marginTop: 18,
+      position: 'relative',
+      width: '100%',
+      minHeight: 170,
+    },
+    wordCloudMeasureLayer: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      opacity: 0,
+      zIndex: -1,
+    },
+    wordCloudMeasureItem: {
+      alignSelf: 'flex-start',
+    },
+    wordCloudItem: {
+      position: 'absolute',
+    },
+    wordCloudItemActive: {
+      opacity: 0.72,
+    },
+    wordCloudText: {
+      color: theme.colors.textPrimary,
+      fontWeight: '800',
+      letterSpacing: 0,
+    },
     headerAction: {
       color: theme.colors.accentPeriwinkle,
       fontSize: 14,
@@ -1797,6 +2030,37 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         count: entry.count,
         sizeCounts: entry.sizeCounts,
       }));
+  }, [filteredOwnedItems]);
+  const printWordCloud = useMemo(() => {
+    const words = new Map<string, { word: string; count: number; itemIds: Set<string> }>();
+    filteredOwnedItems.forEach((item) => {
+      const printLabel = item.printNameNorm || item.printName?.trim();
+      if (!printLabel) return;
+      const uniqueWords = new Set(extractPrintWords(printLabel));
+      uniqueWords.forEach((word) => {
+        const prev = words.get(word) ?? { word, count: 0, itemIds: new Set<string>() };
+        prev.count += 1;
+        prev.itemIds.add(item.id);
+        words.set(word, prev);
+      });
+    });
+    const ranked = Array.from(words.values())
+      .filter((entry) => entry.count > 1)
+      .sort((a, b) => b.count - a.count || a.word.localeCompare(b.word))
+      .slice(0, 18);
+    const maxCount = ranked[0]?.count ?? 0;
+    const minCount = ranked[ranked.length - 1]?.count ?? 0;
+    const span = Math.max(1, maxCount - minCount);
+    return ranked.map((entry, index) => {
+      const normalizedWeight = (entry.count - minCount) / span;
+      return {
+        word: entry.word,
+        count: entry.count,
+        itemIds: Array.from(entry.itemIds),
+        fontSize: Math.round(20 + normalizedWeight * 24),
+        colorIndex: index % 4,
+      };
+    });
   }, [filteredOwnedItems]);
   const recentlyAdded = useMemo(
     () => filteredOwnedItems.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 8),
@@ -2775,102 +3039,130 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               )
             ) : null}
           </Card>
-
-          <Card>
-            <Pressable onPress={() => setShowDupes((prev) => !prev)}>
-              <Text style={styles.sectionToggle}>Duplicate prints across sizes {showDupes ? '▾' : '▸'}</Text>
-            </Pressable>
-            <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
-            {showDupes ? (
-              duplicatePrints.length ? (
-                duplicatePrints.map((group) => (
-                  <Pressable
-                    key={`${group.printName}-${group.sizes.join('|')}`}
-                    onPress={() => {
-                      const groupKey = normalizePrintName(group.printName ?? '');
-                      const itemIds = filteredOwnedItems
-                        .filter((item) => {
-                          const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
-                          if (!key || key !== groupKey) return false;
-                          return group.sizes.some((size) => normalize(size) === normalize(item.size));
-                        })
-                        .map((item) => item.id);
-                      navigation.navigate('ItemsList', {
-                        hideInbox: true,
-                        initialChildId: selectedChild.id,
-                        initialStatus: 'owned',
-                        initialBrandId: primaryBrandId,
-                        initialItemIds: itemIds,
-                      });
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open duplicate print group ${group.printName}`}
-                    style={({ pressed }) => [
-                      styles.duplicateLinkRow,
-                      pressed ? { opacity: 0.9 } : null,
-                    ]}
-                  >
-                    <Text style={styles.duplicateLinkText}>
-                      {group.printName}: {group.sizes.map((size) => `${size} (${group.sizeCounts[(size || '').trim() || 'N/A'] ?? 0})`).join(', ')}
-                    </Text>
-                    <Text style={styles.duplicateLinkChevron}>›</Text>
-                  </Pressable>
-                ))
-              ) : (
-                <Text style={styles.meta}>No duplicate print groups yet.</Text>
-              )
-            ) : null}
-          </Card>
-
-          <Card>
-            <Pressable onPress={() => setShowStyleDupesList((prev) => !prev)}>
-              <Text style={styles.sectionToggle}>Duplicate styles across sizes {showStyleDupesList ? '▾' : '▸'}</Text>
-            </Pressable>
-            <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
-            {showStyleDupesList ? (
-              duplicateStyles.length ? (
-                duplicateStyles.map((group) => (
-                  <Pressable
-                    key={`${group.brand ?? ''}|${group.label}|${group.sizes.join('|')}`}
-                    onPress={() => {
-                      const styleKey = normalizeStyleName(group.label);
-                      const brandKey = normalize(group.brand ?? '');
-                      const itemIds = filteredOwnedItems
-                        .filter((item) => {
-                          const itemStyleKey = normalizeStyleName(item.styleName || item.title || '');
-                          if (!itemStyleKey || itemStyleKey !== styleKey) return false;
-                          const itemBrandKey = normalize(item.brand || item.brandTags[0] || '');
-                          return itemBrandKey === brandKey && group.sizes.some((size) => normalize(size) === normalize(item.size));
-                        })
-                        .map((item) => item.id);
-                      navigation.navigate('ItemsList', {
-                        hideInbox: true,
-                        initialChildId: selectedChild.id,
-                        initialStatus: 'owned',
-                        initialBrandId: primaryBrandId,
-                        initialItemIds: itemIds,
-                      });
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open duplicate style group ${group.label}`}
-                    style={({ pressed }) => [
-                      styles.duplicateLinkRow,
-                      pressed ? { opacity: 0.9 } : null,
-                    ]}
-                  >
-                    <Text style={styles.duplicateLinkText}>
-                      {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.map((size) => `${size} (${group.sizeCounts[(size || '').trim() || 'N/A'] ?? 0})`).join(', ')}
-                    </Text>
-                    <Text style={styles.duplicateLinkChevron}>›</Text>
-                  </Pressable>
-                ))
-              ) : (
-                <Text style={styles.meta}>No duplicate style groups yet.</Text>
-              )
-            ) : null}
-          </Card>
         </>
       ) : null}
+
+      <Card>
+        <Pressable onPress={() => setShowDupes((prev) => !prev)}>
+          <Text style={styles.sectionToggle}>Duplicate prints across sizes {showDupes ? '▾' : '▸'}</Text>
+        </Pressable>
+        <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
+        {showDupes ? (
+          duplicatePrints.length ? (
+            duplicatePrints.map((group) => (
+              <Pressable
+                key={`${group.printName}-${group.sizes.join('|')}`}
+                onPress={() => {
+                  const groupKey = normalizePrintName(group.printName ?? '');
+                  const itemIds = filteredOwnedItems
+                    .filter((item) => {
+                      const key = item.printNameNorm || normalizePrintName(item.printName ?? '');
+                      if (!key || key !== groupKey) return false;
+                      return group.sizes.some((size) => normalize(size) === normalize(item.size));
+                    })
+                    .map((item) => item.id);
+                  navigation.navigate('ItemsList', {
+                    hideInbox: true,
+                    initialChildId: selectedChild.id,
+                    initialStatus: 'owned',
+                    initialBrandId: primaryBrandId,
+                    initialItemIds: itemIds,
+                  });
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Open duplicate print group ${group.printName}`}
+                style={({ pressed }) => [
+                  styles.duplicateLinkRow,
+                  pressed ? { opacity: 0.9 } : null,
+                ]}
+              >
+                <Text style={styles.duplicateLinkText}>
+                  {group.printName}: {group.sizes.map((size) => `${size} (${group.sizeCounts[(size || '').trim() || 'N/A'] ?? 0})`).join(', ')}
+                </Text>
+                <Text style={styles.duplicateLinkChevron}>›</Text>
+              </Pressable>
+            ))
+          ) : (
+            <Text style={styles.meta}>No duplicate print groups yet.</Text>
+          )
+        ) : null}
+      </Card>
+
+      <Card>
+        <Pressable onPress={() => setShowStyleDupesList((prev) => !prev)}>
+          <Text style={styles.sectionToggle}>Duplicate styles across sizes {showStyleDupesList ? '▾' : '▸'}</Text>
+        </Pressable>
+        <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
+        {showStyleDupesList ? (
+          duplicateStyles.length ? (
+            duplicateStyles.map((group) => (
+              <Pressable
+                key={`${group.brand ?? ''}|${group.label}|${group.sizes.join('|')}`}
+                onPress={() => {
+                  const styleKey = normalizeStyleName(group.label);
+                  const brandKey = normalize(group.brand ?? '');
+                  const itemIds = filteredOwnedItems
+                    .filter((item) => {
+                      const itemStyleKey = normalizeStyleName(item.styleName || item.title || '');
+                      if (!itemStyleKey || itemStyleKey !== styleKey) return false;
+                      const itemBrandKey = normalize(item.brand || item.brandTags[0] || '');
+                      return itemBrandKey === brandKey && group.sizes.some((size) => normalize(size) === normalize(item.size));
+                    })
+                    .map((item) => item.id);
+                  navigation.navigate('ItemsList', {
+                    hideInbox: true,
+                    initialChildId: selectedChild.id,
+                    initialStatus: 'owned',
+                    initialBrandId: primaryBrandId,
+                    initialItemIds: itemIds,
+                  });
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Open duplicate style group ${group.label}`}
+                style={({ pressed }) => [
+                  styles.duplicateLinkRow,
+                  pressed ? { opacity: 0.9 } : null,
+                ]}
+              >
+                <Text style={styles.duplicateLinkText}>
+                  {group.brand ? `${group.brand} • ` : ''}{group.label}: {group.sizes.map((size) => `${size} (${group.sizeCounts[(size || '').trim() || 'N/A'] ?? 0})`).join(', ')}
+                </Text>
+                <Text style={styles.duplicateLinkChevron}>›</Text>
+              </Pressable>
+            ))
+          ) : (
+            <Text style={styles.meta}>No duplicate style groups yet.</Text>
+          )
+        ) : null}
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionToggle}>Print word cloud</Text>
+        <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
+        {printWordCloud.length ? (
+          <PrintWordCloud
+            entries={printWordCloud}
+            colors={[
+              theme.colors.textPrimary,
+              theme.colors.accentPeriwinkle,
+              theme.colors.accentCoral,
+              theme.colors.textSecondary,
+            ]}
+            onPressWord={(entry) => {
+              navigation.navigate('ItemsList', {
+                hideInbox: true,
+                initialChildId: selectedChild.id,
+                initialStatus: 'owned',
+                initialBrandId: primaryBrandId,
+                initialItemIds: entry.itemIds,
+              });
+            }}
+            styles={styles}
+          />
+        ) : (
+          <Text style={styles.meta}>No repeat print words yet.</Text>
+        )}
+      </Card>
 
       {showClosetSnapshotRenderer ? (
         <View pointerEvents="none" style={styles.snapshotHiddenMount}>
