@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { inferSizeScheme, isShoeCategory, normalizeSize } from '@/lib/sizing';
 
 const DB_NAME = 'layetteout.db';
-const LATEST_DB_VERSION = 33;
+const LATEST_DB_VERSION = 35;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let initPromise: Promise<void> | null = null;
@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS settings (
   kidsPreviewCategories TEXT,
   inventoryRealityCheckOwnedThreshold INTEGER,
   developerModeEnabled INTEGER NOT NULL DEFAULT 0,
+  devProUnlocked INTEGER NOT NULL DEFAULT 0,
   betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0,
   proTeaserBannerDismissed INTEGER NOT NULL DEFAULT 0,
   missingPhotoRestoreNudgeShown INTEGER NOT NULL DEFAULT 1
@@ -189,6 +190,12 @@ CREATE TABLE IF NOT EXISTS purchase_state (
   isEntitled INTEGER NOT NULL,
   payloadJson TEXT NOT NULL,
   updatedAt TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS review_prompt_state (
+  id INTEGER PRIMARY KEY NOT NULL,
+  payloadJson TEXT NOT NULL,
+  updatedAt INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS filter_presets (
@@ -244,8 +251,8 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
   if ((row?.count ?? 0) > 0) return;
 
   await db.runAsync(
-    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     'app',
     'sometimes',
     'detailed',
@@ -266,6 +273,7 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
     '[]',
     null,
     null,
+    0,
     0,
     0,
     0,
@@ -902,6 +910,27 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
     }
     await db.execAsync('PRAGMA user_version = 33;');
     currentVersion = 33;
+  }
+
+  if (currentVersion < 34) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'devProUnlocked')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN devProUnlocked INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync('PRAGMA user_version = 34;');
+    currentVersion = 34;
+  }
+
+  if (currentVersion < 35) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS review_prompt_state (
+        id INTEGER PRIMARY KEY NOT NULL,
+        payloadJson TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+    `);
+    await db.execAsync('PRAGMA user_version = 35;');
+    currentVersion = 35;
   }
 
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');

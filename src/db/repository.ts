@@ -301,6 +301,7 @@ type SettingsRow = {
   kidsPreviewCategories: string | null;
   inventoryRealityCheckOwnedThreshold: number | null;
   developerModeEnabled: number | null;
+  devProUnlocked: number | null;
   betaKidLimitBannerDismissed: number | null;
   proTeaserBannerDismissed: number | null;
   missingPhotoRestoreNudgeShown: number | null;
@@ -352,6 +353,7 @@ const defaultSettings: AppSettings = {
   kidsPreviewCategories: undefined,
   inventoryRealityCheckOwnedThreshold: 5,
   developerModeEnabled: false,
+  devProUnlocked: false,
   betaKidLimitBannerDismissed: false,
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,
@@ -564,6 +566,7 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
     })(),
     inventoryRealityCheckOwnedThreshold: normalizeInventoryRealityThreshold(row.inventoryRealityCheckOwnedThreshold),
     developerModeEnabled: row.developerModeEnabled === 1,
+    devProUnlocked: row.devProUnlocked === 1,
     betaKidLimitBannerDismissed: row.betaKidLimitBannerDismissed === 1,
     proTeaserBannerDismissed: row.proTeaserBannerDismissed === 1,
     missingPhotoRestoreNudgeShown: row.missingPhotoRestoreNudgeShown === 1,
@@ -607,6 +610,21 @@ const mapPurchaseState = (row?: PurchaseStateRow | null): PurchaseStateSnapshot 
 
 const normalizeTagName = (name: string) => normalizeGenericToken(name).replace(/\s+/g, ' ').trim();
 const normalizeBrandName = (name: string) => normalizeGenericToken(name).replace(/\s+/g, ' ').trim();
+const normalizeChildName = (name: string) => normalizeWhitespace(name).trim().toLocaleLowerCase();
+
+const duplicateChildNameError = () => {
+  const error = new Error('There is already a child with that name.');
+  (error as Error & { code?: string }).code = 'DUPLICATE_CHILD_NAME';
+  return error;
+};
+
+const assertUniqueChildName = async (db: Awaited<ReturnType<typeof getDb>>, name: string, excludeId?: ID) => {
+  const normalizedName = normalizeChildName(name);
+  if (!normalizedName) return;
+  const rows = await db.getAllAsync<{ id: string; name: string }>('SELECT id, name FROM children WHERE deletedAt IS NULL;');
+  const duplicate = rows.find((row) => row.id !== excludeId && normalizeChildName(row.name) === normalizedName);
+  if (duplicate) throw duplicateChildNameError();
+};
 
 const getActivePrintAliases = async (): Promise<PrintAlias[]> => {
   const db = await getDb();
@@ -845,7 +863,7 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     await db.runAsync(
-      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ? WHERE id = ?;`,
+      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, devProUnlocked = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ? WHERE id = ?;`,
       'never',
       next.closetAddDefaultView,
       next.notificationsEnabled ? 1 : 0,
@@ -868,6 +886,7 @@ export const repository = {
         : null,
       next.inventoryRealityCheckOwnedThreshold ?? null,
       next.developerModeEnabled ? 1 : 0,
+      next.devProUnlocked ? 1 : 0,
       next.betaKidLimitBannerDismissed ? 1 : 0,
       next.proTeaserBannerDismissed ? 1 : 0,
       next.missingPhotoRestoreNudgeShown ? 1 : 0,
@@ -895,6 +914,7 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     const now = Date.now();
+    const normalizedName = normalizeWhitespace(input.name);
 
     const existingChildren = await db.getAllAsync<{ id: string }>('SELECT id FROM children WHERE deletedAt IS NULL;');
     const activeChildIds = existingChildren.map((row) => row.id);
@@ -943,9 +963,11 @@ export const repository = {
       throw error;
     }
 
+    await assertUniqueChildName(db, normalizedName);
+
     const child: Child = {
       id: makeId(),
-      name: normalizeWhitespace(input.name),
+      name: normalizedName,
       photoUri: normalizeUrl(input.photoUri) || undefined,
       notes: trimOrNull(input.notes) ?? undefined,
       usesMixedSizes: Boolean(input.usesMixedSizes),
@@ -1001,9 +1023,11 @@ export const repository = {
     if (!row) return undefined;
 
     const now = Date.now();
+    const updatedName = patch.name !== undefined ? normalizeWhitespace(patch.name) : row.name;
+    await assertUniqueChildName(db, updatedName, id);
     const updated: Child = {
       id: row.id,
-      name: patch.name !== undefined ? normalizeWhitespace(patch.name) : row.name,
+      name: updatedName,
       photoUri: patch.photoUri !== undefined ? normalizeUrl(patch.photoUri) || undefined : row.photoUri ?? undefined,
       notes: patch.notes !== undefined ? trimOrNull(patch.notes) ?? undefined : row.notes ?? undefined,
       usesMixedSizes: patch.usesMixedSizes !== undefined ? Boolean(patch.usesMixedSizes) : Boolean(row.usesMixedSizes ?? 0),

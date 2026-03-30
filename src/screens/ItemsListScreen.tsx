@@ -11,6 +11,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { RemoteImage } from '@/components/RemoteImage';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
+import { useReviewPrompt } from '@/hooks/useReviewPrompt';
 import { useUndoToast } from '@/hooks/useUndoToast';
 import { ClothingType, Item, ItemStatus } from '@/models';
 import { ItemsStackParamList } from '@/navigation/types';
@@ -182,6 +183,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
     saveFilterPreset,
     deleteFilterPreset,
   } = useData();
+  const { recordMeaningfulActionAndMaybePrompt } = useReviewPrompt();
   const { showToast } = useUndoToast();
   const theme = useAppTheme();
 
@@ -483,6 +485,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
           },
         });
       }
+      await recordMeaningfulActionAndMaybePrompt('quick_save', 'items_list_quick_save');
 
       setCaptureUrl('');
     } catch (error) {
@@ -698,6 +701,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
         }
       },
     });
+    await recordMeaningfulActionAndMaybePrompt('bulk_status_updated', 'items_list_bulk_status');
     setSelectedItemIds([]);
   };
 
@@ -707,6 +711,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     await bulkUpdateItems(selectedItemIds, { appendTag: bulkTag });
+    await recordMeaningfulActionAndMaybePrompt('bulk_tag_applied', 'items_list_bulk_tag');
     setBulkTag('');
     setSelectedItemIds([]);
   };
@@ -717,6 +722,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     await bulkAssignChild(selectedItemIds, bulkChildId);
+    await recordMeaningfulActionAndMaybePrompt('bulk_child_assigned', 'items_list_bulk_assign_child');
     setSelectedItemIds([]);
   };
 
@@ -735,6 +741,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
           const targetIds = [...selectedItemIds];
           void archiveItems(targetIds).then(() => {
             setSelectedItemIds([]);
+            void recordMeaningfulActionAndMaybePrompt('items_archived', 'items_list_bulk_archive');
             showToast({
               label: `Archived ${targetIds.length} Item${targetIds.length === 1 ? '' : 's'}`,
               doUndo: async () => {

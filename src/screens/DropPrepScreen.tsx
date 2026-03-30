@@ -12,6 +12,7 @@ import { UpsellModal } from '@/components/UpsellModal';
 import { appConfig } from '@/config';
 import { useData } from '@/db/DataContext';
 import { ClosetStackParamList } from '@/navigation/types';
+import { hasProAccess } from '@/services/proAccess';
 import { useAppTheme } from '@/theme';
 import { categoryCounts, getOwnedItemsForChild, getVisibleClosetCategories, topBrands } from '@/utils/closetViewInsights';
 import { closetCategories, closetCategoryToClothingType, closetLabel } from '@/utils/categories';
@@ -44,6 +45,7 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const selectedChild = children.find((child) => child.id === childId) ?? children[0];
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
+  const proAccessEnabled = hasProAccess(settings, purchaseState);
   const brandOptions = useMemo(() => (selectedChild ? ['All', ...topBrands(selectedChild.id, 'both', items, childItems, 5, selectedChild)] : ['All']), [
     selectedChild,
     items,
@@ -156,7 +158,7 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
         setUsageCount(count);
         if (!appConfig.monetizationEnabled) return;
         const shownRecently = Boolean(settings.lastUpsellShownAt && now - settings.lastUpsellShownAt < 24 * 60 * 60 * 1000);
-        if (count >= appConfig.upsellTriggerCount && !purchaseState?.isEntitled && !shownRecently) {
+        if (count >= appConfig.upsellTriggerCount && !proAccessEnabled && !shownRecently) {
           await updateSettings({ lastUpsellShownAt: now });
           await logEvent('upsell_shown', {
             context: 'drop_prep',
@@ -170,7 +172,7 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
       return () => {
         active = false;
       };
-    }, [brandId, getEventCount, logEvent, purchaseState?.isEntitled, selectedChild?.id, settings.lastUpsellShownAt, updateSettings]),
+    }, [brandId, getEventCount, logEvent, proAccessEnabled, selectedChild?.id, settings.lastUpsellShownAt, updateSettings]),
   );
 
   useEffect(() => {

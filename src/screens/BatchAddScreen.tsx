@@ -7,6 +7,7 @@ import { FormInput } from '@/components/FormInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
+import { useReviewPrompt } from '@/hooks/useReviewPrompt';
 import { useUndoToast } from '@/hooks/useUndoToast';
 import { ClothingType } from '@/models';
 import { ClosetStackParamList } from '@/navigation/types';
@@ -19,6 +20,7 @@ const typeOptions: ClothingType[] = BATCH_ADD_CLOTHING_TYPE_OPTIONS;
 
 export const BatchAddScreen: React.FC<Props> = ({ navigation }) => {
   const { children, addItemsBatch, archiveItems, logEvent } = useData();
+  const { recordMeaningfulActionAndMaybePrompt } = useReviewPrompt();
   const { showToast } = useUndoToast();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [size, setSize] = useState('');
@@ -101,6 +103,7 @@ export const BatchAddScreen: React.FC<Props> = ({ navigation }) => {
         clothingType,
         quantity,
       });
+      await recordMeaningfulActionAndMaybePrompt('batch_add_saved', 'batch_add_save');
       navigation.navigate('ItemsList', {
         hideInbox: true,
         initialStatus: 'owned',

@@ -7,6 +7,7 @@ import * as LegacyFileSystem from 'expo-file-system/legacy';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import { UndoToastHost } from './src/components/UndoToastHost';
 import { DataProvider } from './src/db/DataContext';
+import { ReviewPromptProvider } from './src/hooks/useReviewPrompt';
 import { linking } from './src/navigation/linking';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { useData } from './src/db/DataContext';
@@ -258,13 +259,15 @@ export default function App() {
   return (
     <ShareIntentProvider>
       <DataProvider>
-        <NavigationContainer linking={linking}>
-          <StatusBar style="dark" />
-          <ShareToAppBridge />
-          <MissingPhotoRestoreNudge />
-          <RootNavigator />
-          <UndoToastHost />
-        </NavigationContainer>
+        <ReviewPromptProvider>
+          <NavigationContainer linking={linking}>
+            <StatusBar style="dark" />
+            <ShareToAppBridge />
+            <MissingPhotoRestoreNudge />
+            <RootNavigator />
+            <UndoToastHost />
+          </NavigationContainer>
+        </ReviewPromptProvider>
       </DataProvider>
     </ShareIntentProvider>
   );

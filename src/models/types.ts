@@ -223,6 +223,7 @@ export interface AppSettings {
   kidsPreviewCategories?: string[];
   inventoryRealityCheckOwnedThreshold?: number;
   developerModeEnabled?: boolean;
+  devProUnlocked?: boolean;
   betaKidLimitBannerDismissed?: boolean;
   proTeaserBannerDismissed?: boolean;
   missingPhotoRestoreNudgeShown?: boolean;

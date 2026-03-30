@@ -8,6 +8,7 @@ import { FormInput } from '@/components/FormInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
+import { useReviewPrompt } from '@/hooks/useReviewPrompt';
 import { useUndoToast } from '@/hooks/useUndoToast';
 import { ClosetStackParamList } from '@/navigation/types';
 import { DRAWER_SCAN_CATEGORY_DEFS } from '@/utils/categories';
@@ -20,6 +21,7 @@ const isKidLimitReachedError = (error: unknown) => (error as { code?: string })?
 
 export const DrawerScanScreen: React.FC<Props> = ({ navigation }) => {
   const { children, items, childItems, addChild, addItemsBatch, archiveItems, logEvent, canCreateAnotherKid } = useData();
+  const { recordMeaningfulActionAndMaybePrompt } = useReviewPrompt();
   const { showToast } = useUndoToast();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [newChildName, setNewChildName] = useState('');
@@ -164,6 +166,7 @@ export const DrawerScanScreen: React.FC<Props> = ({ navigation }) => {
           },
         });
       }
+      await recordMeaningfulActionAndMaybePrompt('drawer_scan_saved', 'drawer_scan_save');
       navigation.replace('DrawerScanResults', { childId, size: activeSize, counts: summary });
     } finally {
       setSaving(false);

@@ -7,6 +7,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { RemoteImage } from '@/components/RemoteImage';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
+import { useReviewPrompt } from '@/hooks/useReviewPrompt';
 import { useUndoToast } from '@/hooks/useUndoToast';
 import { ItemsStackParamList } from '@/navigation/types';
 import { closetCategoryForItem } from '@/utils/closetViewInsights';
@@ -31,6 +32,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     listStorageLocations,
     assignChildItemToLocation,
   } = useData();
+  const { recordMeaningfulActionAndMaybePrompt } = useReviewPrompt();
   const { showToast } = useUndoToast();
   const brandFitLabel = (value?: string) => {
     if (value === 'tts') return 'True to size';
@@ -114,6 +116,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         }
       },
     });
+    await recordMeaningfulActionAndMaybePrompt('wishlist_item_purchased', 'item_detail_mark_purchased');
   };
 
   return (
@@ -154,6 +157,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               onPress={async () => {
                 const parsed = Number(targetResaleInput.trim());
                 await updateItem(item.id, { targetResalePrice: Number.isFinite(parsed) ? parsed : undefined });
+                await recordMeaningfulActionAndMaybePrompt('resale_target_saved', 'item_detail_resale_target');
               }}
             />
           </>
@@ -208,6 +212,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           variant="secondary"
           onPress={async () => {
             await markItemsWorn([item.id]);
+            await recordMeaningfulActionAndMaybePrompt('item_marked_worn', 'item_detail_mark_worn');
           }}
         />
       ) : null}

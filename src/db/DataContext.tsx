@@ -79,6 +79,7 @@ const defaultSettings: AppSettings = {
   hiddenWishlistCategories: [],
   kidsPreviewCategories: undefined,
   developerModeEnabled: false,
+  devProUnlocked: false,
   betaKidLimitBannerDismissed: false,
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,

@@ -26,6 +26,11 @@ const isKidLimitReachedError = (error: unknown) => {
   return code === 'KID_LIMIT_REACHED' || message === 'KID_LIMIT_REACHED';
 };
 
+const isDuplicateChildNameError = (error: unknown) => {
+  const code = (error as { code?: string })?.code;
+  return code === 'DUPLICATE_CHILD_NAME';
+};
+
 const pickerLabels = {
   next: 'Next Size',
 } as const;
@@ -306,6 +311,10 @@ export const KidFormScreen: React.FC<Props> = ({ route, navigation }) => {
         const canCreate = await canCreateAnotherKid().catch(() => ({ current: children.length } as any));
         setKidLimitCurrentCount(canCreate.current ?? children.length);
         setShowKidLimitModal(true);
+        return;
+      }
+      if (isDuplicateChildNameError(error)) {
+        Alert.alert('Duplicate Child Name', 'There is already a child with that name.');
         return;
       }
       Alert.alert('Save Failed', error instanceof Error ? error.message : 'Could not save kid profile. Please try again.');

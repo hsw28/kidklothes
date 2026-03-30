@@ -42,6 +42,7 @@ import { cacheRemoteImage } from '@/utils/imageCache';
 import { showActionMenu } from '@/utils/actionSheets';
 import { compareSizeLabels, getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
+import { hasProAccess } from '@/services/proAccess';
 import { getChildCurrentSizeText, getChildCurrentSizeTexts, getChildNextSizeText } from '@/utils/sizes';
 import { buildEmptyCategoryLabel } from '@/utils/closetEmptyLabel';
 import { buildBstPostCaption } from '@/utils/bstPost';
@@ -920,7 +921,7 @@ const RecentlyAddedItemCardComponent: React.FC<RecentlyAddedItemCardProps> = ({ 
 const RecentlyAddedItemCard = React.memo(RecentlyAddedItemCardComponent);
 
 export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { children, items, childItems, storageLocations, settings, loading, logEvent, updateChild, updateSettings, canCreateAnotherKid, updateItemCachedImage } = useData();
+  const { children, items, childItems, storageLocations, settings, purchaseState, loading, logEvent, updateChild, updateSettings, canCreateAnotherKid, updateItemCachedImage } = useData();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [sizeMode, setSizeMode] = useState<ClosetSizeMode>('now');
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
@@ -972,6 +973,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [canCreateAnotherKid, navigation]);
 
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
+  const proAccessEnabled = hasProAccess(settings, purchaseState);
   const selectedChild = children.find((child) => child.id === childId) ?? children[0];
 
   useEffect(() => {
@@ -2528,7 +2530,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         </Card>
       ) : null}
-      {!settings.proTeaserBannerDismissed ? (
+      {!settings.proTeaserBannerDismissed && !proAccessEnabled ? (
         <ProComingSoonTeaser
           variant="banner"
           onPress={() => setShowProModal(true)}

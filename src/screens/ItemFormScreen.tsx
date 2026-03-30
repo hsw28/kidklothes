@@ -8,6 +8,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { RemoteImage } from '@/components/RemoteImage';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
+import { useReviewPrompt } from '@/hooks/useReviewPrompt';
 import { BrandFit, ClothingType, Condition, FitBin, Item, ItemSizeScheme, ItemSizeSystem, ItemSizeType, ItemStatus, KidFit } from '@/models';
 import { ItemsStackParamList } from '@/navigation/types';
 import { ADD_ITEM_CATEGORY_OPTIONS, ClosetCategory, closetCategoryToClothingType, closetLabel, normalizeItemCategoryToClosetCategory } from '@/utils/categories';
@@ -264,6 +265,7 @@ const getStorageConfigForPreset = (preset: Exclude<StoragePresetOption, 'None'>)
 
 export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const { children, items, childItems, storageLocations, printAliases, settings, logEvent, addItem, updateItem, updateItemCachedImage, updateSettings, createStorageLocation } = useData();
+  const { recordMeaningfulActionAndMaybePrompt } = useReviewPrompt();
   const editing = route.params?.itemId;
   const duplicateFromItemId = route.params?.duplicateFromItemId;
   const shoppingMode = route.params?.shoppingMode === true;
@@ -870,6 +872,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     if (existing) {
       await updateItem(existing.id, payload);
       await maybeCacheSavedImage(existing.id, payload.imageUrl);
+      await recordMeaningfulActionAndMaybePrompt('item_updated', 'item_form_update');
       navigation.replace('ItemDetail', { itemId: existing.id });
       return;
     }
@@ -896,6 +899,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         itemId: created?.id ?? null,
       });
     }
+    await recordMeaningfulActionAndMaybePrompt('item_saved', quickMode ? 'item_form_quick_save' : 'item_form_save');
 
     if (!addAnother) {
       if (status === 'wishlist' && created) {

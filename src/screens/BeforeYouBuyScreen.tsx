@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
+import { useReviewPrompt } from '@/hooks/useReviewPrompt';
 import { ClothingType } from '@/models';
 import { ClosetStackParamList } from '@/navigation/types';
 import { useAppTheme } from '@/theme';
@@ -33,6 +34,7 @@ const normalize = (value: string) => value.toLowerCase().trim();
 
 export const BeforeYouBuyScreen: React.FC<Props> = ({ route, navigation }) => {
   const { children, items, childItems, storageLocations, settings, updateSettings, archiveItems, logEvent } = useData();
+  const { recordMeaningfulActionAndMaybePrompt } = useReviewPrompt();
   const [childId, setChildId] = useState(route.params?.childId ?? settings.lastShoppingChildId ?? children[0]?.id ?? '');
   const [brandId, setBrandId] = useState<string>('All');
   const [binType, setBinType] = useState<ClothingType>(settings.lastShoppingType ?? 'bottom');
@@ -465,6 +467,7 @@ export const BeforeYouBuyScreen: React.FC<Props> = ({ route, navigation }) => {
         variant="secondary"
         onPress={async () => {
           await logEvent('before_you_buy_used', { childId: childId || null, action: 'complete' });
+          await recordMeaningfulActionAndMaybePrompt('shopping_check_completed', 'before_you_buy_complete');
           navigation.goBack();
         }}
       />

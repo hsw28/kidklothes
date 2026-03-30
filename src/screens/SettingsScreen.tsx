@@ -13,6 +13,7 @@ import { useData } from '@/db/DataContext';
 import { repository } from '@/db/repository';
 import { AppSettings, BackupPayload, Child } from '@/models';
 import { SettingsStackParamList } from '@/navigation/types';
+import { getProAccessState } from '@/services/proAccess';
 import { debugPrintPurchasesDiagnostics } from '@/services/purchases';
 import {
   ClosetCategory,
@@ -61,6 +62,7 @@ export const SettingsScreen: React.FC = () => {
   const {
     refresh,
     refreshPurchaseState,
+    purchaseState,
     settings,
     updateSettings,
     children,
@@ -76,12 +78,12 @@ export const SettingsScreen: React.FC = () => {
     exportBackup,
     importBackup,
   } = useData();
-  const [versionTapCount, setVersionTapCount] = useState(0);
   const [repairingImages, setRepairingImages] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState({ total: 0, processed: 0, recovered: 0, failed: 0, noSource: 0 });
   const [showProModal, setShowProModal] = useState(false);
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
-  const showDeveloperTools = __DEV__ && Boolean(settings.developerModeEnabled);
+  const proAccess = getProAccessState(settings, purchaseState);
+  const showDeveloperSection = Boolean(settings.developerModeEnabled);
   const appVersionLabel = Constants.expoConfig?.version ?? 'dev';
 
   const openExternalLink = async (url: string, label: string) => {
@@ -478,7 +480,7 @@ export const SettingsScreen: React.FC = () => {
           Data stays local. Configure optional reminder nudges and backup/export.
         </Text>
       </Card>
-      <ProComingSoonTeaser variant="card" onPress={() => setShowProModal(true)} />
+      {!proAccess.hasProAccess ? <ProComingSoonTeaser variant="card" onPress={() => setShowProModal(true)} /> : null}
       <Card>
         <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Follow for Updates</Text>
         <Text style={{ color: '#6b7280' }}>
@@ -670,22 +672,35 @@ export const SettingsScreen: React.FC = () => {
           </Pressable>
         </View>
       </Card>
-      {showDeveloperTools ? (
+      {showDeveloperSection ? (
         <Card>
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Developer</Text>
-          <Text style={{ color: '#6b7280' }}>Local tools for QA, sample data, and debugging.</Text>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Developer Mode</Text>
+          <Text style={{ color: '#6b7280' }}>Hidden local-only controls for QA and Pro access testing.</Text>
           <ChipSelector
             label="Developer Mode"
             options={['Off', 'On']}
             value={settings.developerModeEnabled ? 'On' : 'Off'}
             onChange={(value) => updateSettings({ developerModeEnabled: value === 'On' })}
           />
-          <PrimaryButton label="Open Activity Log (Dev)" variant="secondary" onPress={() => navigation.navigate('ActivityLog')} />
-          <PrimaryButton label="Activity Snapshot (Dev)" variant="secondary" onPress={() => navigation.navigate('ActivitySnapshot')} />
-          <PrimaryButton label="Run QA Checklist (Dev)" variant="secondary" onPress={runDevQaChecklist} />
-          <PrimaryButton label="Generate Sample Closet" variant="secondary" onPress={() => void generateSampleCloset()} />
-          <PrimaryButton label="Reset Sample Data" variant="secondary" onPress={() => void resetSampleData()} />
-          {appConfig.monetizationEnabled ? (
+          <ChipSelector
+            label="Unlock Pro Features"
+            options={['Off', 'On']}
+            value={settings.devProUnlocked ? 'On' : 'Off'}
+            onChange={(value) => updateSettings({ devProUnlocked: value === 'On' })}
+          />
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            Pro access resolves as real entitlement OR this local override. Current access: {proAccess.hasProAccess ? 'Unlocked' : 'Normal'}.
+          </Text>
+          {__DEV__ ? (
+            <>
+              <PrimaryButton label="Open Activity Log (Dev)" variant="secondary" onPress={() => navigation.navigate('ActivityLog')} />
+              <PrimaryButton label="Activity Snapshot (Dev)" variant="secondary" onPress={() => navigation.navigate('ActivitySnapshot')} />
+              <PrimaryButton label="Run QA Checklist (Dev)" variant="secondary" onPress={runDevQaChecklist} />
+              <PrimaryButton label="Generate Sample Closet" variant="secondary" onPress={() => void generateSampleCloset()} />
+              <PrimaryButton label="Reset Sample Data" variant="secondary" onPress={() => void resetSampleData()} />
+            </>
+          ) : null}
+          {__DEV__ && appConfig.monetizationEnabled ? (
             <>
               <PrimaryButton
                 label="Refresh Purchase State (Dev)"
@@ -724,23 +739,19 @@ export const SettingsScreen: React.FC = () => {
         }}
       />
       <Pressable
-        onPress={async () => {
-          if (!__DEV__) return;
-          const next = versionTapCount + 1;
-          if (!settings.developerModeEnabled && next >= 7) {
-            setVersionTapCount(0);
+        onLongPress={async () => {
+          if (!settings.developerModeEnabled) {
             await updateSettings({ developerModeEnabled: true });
-            Alert.alert('Developer Mode Enabled', 'Developer tools are now visible in Settings.');
-            return;
+            Alert.alert('Developer Mode Enabled', 'Hidden developer controls are now visible in Settings.');
           }
-          setVersionTapCount(next);
         }}
+        delayLongPress={700}
         style={{ paddingVertical: 6, alignItems: 'center' }}
         accessibilityRole="button"
         accessibilityLabel="App version"
       >
         <Text style={{ color: '#9ca3af', fontSize: 12 }}>
-          Version {appVersionLabel}{__DEV__ && settings.developerModeEnabled ? ' • Developer Mode' : ''}
+          Version {appVersionLabel}{settings.developerModeEnabled ? ' • Developer Mode' : ''}
         </Text>
       </Pressable>
       <ProComingSoonModal
