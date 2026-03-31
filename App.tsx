@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import { ActionSheetIOS, Alert, AlertButton, Linking, Platform } from 'react-native';
+import { ActionSheetIOS, Alert, AlertButton, Linking, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import * as ExpoLinking from 'expo-linking';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
@@ -15,6 +15,66 @@ import { clearPendingSharePayload, getPendingSharePayload } from './src/utils/ap
 import { isAppOwnedImageUri } from './src/utils/imageCache';
 import { getItemDisplayImageUri, getItemLocalImageUri, getItemRemoteImageUri } from './src/utils/itemMedia';
 import { extractUrlFromShareIntent, toAddItemDeepLink } from './src/utils/shareIntent';
+
+class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    if (__DEV__) {
+      console.error('[AppErrorBoundary] startup failure', error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={appErrorStyles.safe}>
+          <View style={appErrorStyles.card}>
+            <Text style={appErrorStyles.title}>Layette Out couldn&apos;t start</Text>
+            <Text style={appErrorStyles.body}>
+              Please close and reopen the app. If this keeps happening, reinstalling the app should restore a clean local setup.
+            </Text>
+          </View>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const appErrorStyles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: '#F8F4EF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 520,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#EAE1D8',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1F1A17',
+  },
+  body: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#716A63',
+  },
+});
 
 const ShareToAppBridge = () => {
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
@@ -257,18 +317,20 @@ const MissingPhotoRestoreNudge = () => {
 
 export default function App() {
   return (
-    <ShareIntentProvider>
-      <DataProvider>
-        <ReviewPromptProvider>
-          <NavigationContainer linking={linking}>
-            <StatusBar style="dark" />
-            <ShareToAppBridge />
-            <MissingPhotoRestoreNudge />
-            <RootNavigator />
-            <UndoToastHost />
-          </NavigationContainer>
-        </ReviewPromptProvider>
-      </DataProvider>
-    </ShareIntentProvider>
+    <AppErrorBoundary>
+      <ShareIntentProvider>
+        <DataProvider>
+          <ReviewPromptProvider>
+            <NavigationContainer linking={linking}>
+              <StatusBar style="dark" />
+              <ShareToAppBridge />
+              <MissingPhotoRestoreNudge />
+              <RootNavigator />
+              <UndoToastHost />
+            </NavigationContainer>
+          </ReviewPromptProvider>
+        </DataProvider>
+      </ShareIntentProvider>
+    </AppErrorBoundary>
   );
 }

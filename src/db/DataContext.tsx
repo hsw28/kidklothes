@@ -156,7 +156,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   }, [refreshPurchaseState]);
 
   useEffect(() => {
-    refresh();
+    void refresh().catch(() => undefined);
   }, [refresh]);
 
   useEffect(() => {
