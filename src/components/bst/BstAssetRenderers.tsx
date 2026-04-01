@@ -413,15 +413,16 @@ export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, o
     },
     footer: {
       marginTop: 'auto',
-      paddingTop: 8 * scale,
+      paddingTop: 7 * scale,
     },
     footerText: {
-      fontSize: 23 * scale,
-      lineHeight: 31 * scale,
-      color: '#4C433C',
+      fontSize: 25 * scale,
+      lineHeight: 32 * scale,
+      color: '#3E352F',
       flex: 1,
-      fontWeight: brandingMode === 'pro' ? '600' : '700',
+      fontWeight: brandingMode === 'pro' ? '700' : '800',
       opacity: 1,
+      letterSpacing: 0.1,
     },
   });
 

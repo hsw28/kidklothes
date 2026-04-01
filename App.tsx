@@ -11,8 +11,10 @@ import { linking } from './src/navigation/linking';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { registerPostHogClient } from './src/services/analytics/posthog';
 import { useData } from './src/db/DataContext';
+import { clearPendingSharePayload, getPendingSharePayload } from './src/utils/appGroupStorage';
 import { isAppOwnedImageUri } from './src/utils/imageCache';
 import { getItemDisplayImageUri, getItemLocalImageUri, getItemRemoteImageUri } from './src/utils/itemMedia';
+import { toAddItemDeepLink } from './src/utils/shareIntent';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
   state = { hasError: false };
@@ -160,6 +162,112 @@ const AnalyticsRoot: React.FC<React.PropsWithChildren> = ({ children }) => {
   return <>{children}</>;
 };
 
+const ShareToAppBridge = () => {
+  const { children, settings } = useData();
+  const handlingShareRef = useRef(false);
+  const lastHandledUrlRef = useRef<string | null>(null);
+
+  const openAddItemFromPayload = React.useCallback((input: {
+    url: string;
+    destination?: 'closet' | 'wishlist' | null;
+    childMode?: 'auto' | 'choose';
+  }) => {
+    const finalStatus = input.destination === 'closet' ? 'owned' : 'wishlist';
+    const lastUsedChildId = settings.lastShoppingChildId;
+    const oneChildId = children.length === 1 ? children[0]?.id : undefined;
+    const autoChildId = lastUsedChildId || oneChildId;
+
+    const openForChild = (childId?: string) => {
+      const deepLink = toAddItemDeepLink(input.url, {
+        destination: input.destination === 'closet' ? 'closet' : 'wishlist',
+        status: finalStatus,
+        source: 'shareext',
+      });
+      const urlObj = new URL(deepLink);
+      if (childId) urlObj.searchParams.set('prefillChildId', childId);
+      ExpoLinking.openURL(urlObj.toString()).finally(() => {
+        handlingShareRef.current = false;
+      });
+    };
+
+    if (input.childMode === 'choose' && children.length > 0) {
+      const options = ['Cancel', ...children.map((child) => child.name)];
+      if (Platform.OS === 'ios') {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            title: 'Choose Child',
+            message: 'Which kid is this for?',
+            options,
+            cancelButtonIndex: 0,
+          },
+          (index) => {
+            if (!index) {
+              handlingShareRef.current = false;
+              return;
+            }
+            const selected = children[index - 1];
+            openForChild(selected?.id);
+          },
+        );
+        return;
+      }
+      const buttons: AlertButton[] = [
+        { text: 'Cancel', style: 'cancel', onPress: () => { handlingShareRef.current = false; } },
+        ...children.map((child) => ({ text: child.name, onPress: () => openForChild(child.id) })),
+      ];
+      Alert.alert('Choose Child', 'Which kid is this for?', buttons);
+      return;
+    }
+
+    openForChild(autoChildId);
+  }, [children, settings.lastShoppingChildId]);
+
+  const handleShareRoute = React.useCallback(async (incomingUrl: string) => {
+    try {
+      const parsed = new URL(incomingUrl);
+      const hostOrPath = `${parsed.host}${parsed.pathname}`;
+      const looksLikeShareRoute =
+        parsed.protocol.replace(':', '') === 'layetteout' &&
+        (parsed.host === 'share' || parsed.pathname === '/share' || hostOrPath.endsWith('/share'));
+      if (!looksLikeShareRoute) return false;
+
+      if (lastHandledUrlRef.current === incomingUrl) return true;
+      lastHandledUrlRef.current = incomingUrl;
+      handlingShareRef.current = true;
+
+      const payload = await getPendingSharePayload();
+      await clearPendingSharePayload();
+      if (!payload?.url) {
+        handlingShareRef.current = false;
+        if (__DEV__) console.warn('[ShareToAppBridge] /share opened without pending payload');
+        return true;
+      }
+
+      openAddItemFromPayload({
+        url: payload.url,
+        destination: payload.destination ?? null,
+        childMode: payload.childMode ?? 'auto',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [openAddItemFromPayload]);
+
+  useEffect(() => {
+    void Linking.getInitialURL().then((url) => {
+      if (!url) return;
+      void handleShareRoute(url);
+    });
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      void handleShareRoute(url);
+    });
+    return () => sub.remove();
+  }, [handleShareRoute]);
+
+  return null;
+};
+
 const appBootStyles = StyleSheet.create({
   safe: {
     flex: 1,
@@ -235,6 +343,7 @@ export default function App() {
             <NavigationContainer linking={linking}>
               <StatusBar style="dark" />
               <MissingPhotoRestoreNudge />
+              <ShareToAppBridge />
               <RootNavigator />
               <UndoToastHost />
             </NavigationContainer>
