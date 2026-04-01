@@ -36,6 +36,7 @@ import { PrivacySummaryScreen } from '@/screens/PrivacySummaryScreen';
 import { SellBinScreen } from '@/screens/SellBinScreen';
 import { TermsOfServiceScreen } from '@/screens/TermsOfServiceScreen';
 import { TermsSummaryScreen } from '@/screens/TermsSummaryScreen';
+import { useData } from '@/db/DataContext';
 import { useAppTheme } from '@/theme';
 import {
   ClosetStackParamList,
@@ -53,6 +54,7 @@ const SettingsStack = createNativeStackNavigator<SettingsStackParamList>();
 
 const ClosetStackNavigator = () => {
   const theme = useAppTheme();
+  const { settings } = useData();
   const brandedTitle = (title: string) => () => <BrandedHeaderTitle title={title} />;
   return (
   <ClosetStack.Navigator
@@ -80,10 +82,10 @@ const ClosetStackNavigator = () => {
     <ClosetStack.Screen name="ItemsList" component={ItemsListScreen} options={{ title: 'Items' }} />
     <ClosetStack.Screen name="SellBin" component={SellBinScreen} options={{ title: 'Sell Bin' }} />
     <ClosetStack.Screen name="ProPaywall" component={ProPaywallScreen} options={{ title: 'Unlock Pro' }} />
-    <ClosetStack.Screen name="BstSaleDraftList" component={BstSaleDraftListScreen} options={{ title: 'BST Drafts' }} />
-    <ClosetStack.Screen name="BstSaleDraftCreate" component={BstSaleDraftCreateScreen} options={{ title: 'New BST Draft' }} />
-    <ClosetStack.Screen name="BstSaleDraftEditor" component={BstSaleDraftEditorScreen} options={{ title: 'Edit BST Draft' }} />
-    <ClosetStack.Screen name="BstSaleDraftPreview" component={BstSaleDraftPreviewScreen} options={{ title: 'BST Preview + Export' }} />
+    {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftList" component={BstSaleDraftListScreen} options={{ title: 'BST Drafts' }} /> : null}
+    {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftCreate" component={BstSaleDraftCreateScreen} options={{ title: 'New BST Draft' }} /> : null}
+    {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftEditor" component={BstSaleDraftEditorScreen} options={{ title: 'Edit BST Draft' }} /> : null}
+    {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftPreview" component={BstSaleDraftPreviewScreen} options={{ title: 'BST Preview + Export' }} /> : null}
     <ClosetStack.Screen name="CategorySnapshot" component={CategorySnapshotScreen} options={{ headerTitle: brandedTitle('Category Snapshot') }} />
     <ClosetStack.Screen name="OutfitsList" component={OutfitsListScreen} options={{ title: 'Outfits (Optional)' }} />
     <ClosetStack.Screen name="OutfitBuilder" component={OutfitBuilderScreen} options={{ title: 'Outfit Builder (Optional)' }} />

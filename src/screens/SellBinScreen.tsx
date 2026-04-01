@@ -265,24 +265,26 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
         <ChipSelector label="Listed" options={listedOptions} value={listedFilter} onChange={(value) => setListedFilter(value as ListedFilter)} />
       </Card>
 
-      <Card>
-        <Text style={styles.summary}>BST Listing Generator</Text>
-        <Text style={styles.meta}>Sell Bin is your holding area. BST Sale Drafts are separate sale posts built from selected Sell Bin items.</Text>
-        {!isPro ? (
-          <Text style={styles.meta}>
-            Free includes {FREE_BST_DRAFT_LIMIT} active BST draft, full collage generation, and cards for up to {FREE_BST_ITEM_CARD_LIMIT} items per draft.
-          </Text>
-        ) : null}
-        <PrimaryButton
-          label="Create BST Post"
-          onPress={() => navigation.navigate('BstSaleDraftCreate', selectedItems.length ? { prefillItemIds: selectedItems.map((item) => item.id) } : undefined)}
-        />
-        <PrimaryButton
-          label="Open BST Sale Drafts"
-          variant="secondary"
-          onPress={() => navigation.navigate('BstSaleDraftList')}
-        />
-      </Card>
+      {settings.developerModeEnabled ? (
+        <Card>
+          <Text style={styles.summary}>BST Listing Generator</Text>
+          <Text style={styles.meta}>Sell Bin is your holding area. BST Sale Drafts are separate sale posts built from selected Sell Bin items.</Text>
+          {!isPro ? (
+            <Text style={styles.meta}>
+              Free includes {FREE_BST_DRAFT_LIMIT} active BST draft, full collage generation, and cards for up to {FREE_BST_ITEM_CARD_LIMIT} items per draft.
+            </Text>
+          ) : null}
+          <PrimaryButton
+            label="Create BST Post"
+            onPress={() => navigation.navigate('BstSaleDraftCreate', selectedItems.length ? { prefillItemIds: selectedItems.map((item) => item.id) } : undefined)}
+          />
+          <PrimaryButton
+            label="Open BST Sale Drafts"
+            variant="secondary"
+            onPress={() => navigation.navigate('BstSaleDraftList')}
+          />
+        </Card>
+      ) : null}
 
       <Card style={styles.summaryCard}>
         <Text style={styles.summary}>For sale items: {forSale.length}</Text>
@@ -311,18 +313,20 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.meta}>{selectedItems.length} selected</Text>
           <View style={styles.actionsRow}>
             <PrimaryButton label="Export Selected" variant="secondary" onPress={() => void shareSelected()} />
-            <PrimaryButton
-              label="BST Draft"
-              variant="secondary"
-              onPress={() => navigation.navigate('BstSaleDraftCreate', { prefillItemIds: selectedItems.map((item) => item.id) })}
-            />
+            {settings.developerModeEnabled ? (
+              <PrimaryButton
+                label="BST Draft"
+                variant="secondary"
+                onPress={() => navigation.navigate('BstSaleDraftCreate', { prefillItemIds: selectedItems.map((item) => item.id) })}
+              />
+            ) : null}
             <PrimaryButton label="Create Bundle" variant="secondary" onPress={() => void createBundleFromSelected()} />
           </View>
         </Card>
       ) : null}
 
       {forSale.length === 0 ? (
-        <EmptyState title="No items in Sell Bin" subtitle="Mark owned items as for-sale first. Once they are here, you can turn them into a BST sale draft." />
+        <EmptyState title="No items in Sell Bin" subtitle="Mark owned items as for-sale first so you can track what is ready to list and what already sold." />
       ) : (
         forSale.map((item) => (
           <Card key={item.id}>

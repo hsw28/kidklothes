@@ -5,9 +5,7 @@ import { ActionSheetIOS, Alert, AlertButton, Linking, Platform, SafeAreaView, St
 import * as ExpoLinking from 'expo-linking';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
-import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { UndoToastHost } from './src/components/UndoToastHost';
-import { appConfig } from './src/config';
 import { DataProvider } from './src/db/DataContext';
 import { ReviewPromptProvider } from './src/hooks/useReviewPrompt';
 import { linking } from './src/navigation/linking';
@@ -318,32 +316,13 @@ const MissingPhotoRestoreNudge = () => {
   return null;
 };
 
-const PostHogBridge = () => {
-  const posthog = usePostHog();
-
-  useEffect(() => {
-    registerPostHogClient(posthog ?? null);
-    return () => registerPostHogClient(null);
-  }, [posthog]);
-
-  return null;
-};
-
 const AnalyticsRoot: React.FC<React.PropsWithChildren> = ({ children }) => {
-  if (!appConfig.posthog.apiKey || !appConfig.posthog.host) {
-    return <>{children}</>;
-  }
+  useEffect(() => {
+    registerPostHogClient(null);
+    return () => registerPostHogClient(null);
+  }, []);
 
-  return (
-    <PostHogProvider
-      apiKey={appConfig.posthog.apiKey}
-      options={{ host: appConfig.posthog.host }}
-      autocapture={false}
-    >
-      <PostHogBridge />
-      {children}
-    </PostHogProvider>
-  );
+  return <>{children}</>;
 };
 
 export default function App() {

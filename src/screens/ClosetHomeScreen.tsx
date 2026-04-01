@@ -2311,9 +2311,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               <Pressable onPress={() => void shareClosetSnapshot()}>
                 <Text style={styles.headerAction}>{preparingClosetSnapshot ? 'Preparing...' : 'Share'}</Text>
               </Pressable>
-              <Pressable onPress={() => navigation.navigate('SellBin')}>
-                <Text style={styles.headerAction}>Sell Bin</Text>
-              </Pressable>
+              {settings.developerModeEnabled ? (
+                <Pressable onPress={() => navigation.navigate('SellBin')}>
+                  <Text style={styles.headerAction}>Sell Bin</Text>
+                </Pressable>
+              ) : null}
             </>
           ) : null}
           <Pressable onPress={() => selectedChild && navigation.navigate('DropPrep', { childId: selectedChild.id })}>
@@ -2325,7 +2327,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
       ),
     });
-  }, [navigation, selectedChild?.id, shareClosetSnapshot, preparingClosetSnapshot, styles.headerAction]);
+  }, [navigation, preparingClosetSnapshot, selectedChild?.id, settings.developerModeEnabled, shareClosetSnapshot, styles.headerAction]);
 
   if (!selectedChild) {
     return (
