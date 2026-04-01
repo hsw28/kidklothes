@@ -5,6 +5,10 @@ import { BrandedHeaderTitle } from '@/components/BrandedHeaderTitle';
 import { BeforeYouBuyScreen } from '@/screens/BeforeYouBuyScreen';
 import { BatchAddScreen } from '@/screens/BatchAddScreen';
 import { BrandSnapshotScreen } from '@/screens/BrandSnapshotScreen';
+import { BstSaleDraftCreateScreen } from '@/screens/bst/BstSaleDraftCreateScreen';
+import { BstSaleDraftEditorScreen } from '@/screens/bst/BstSaleDraftEditorScreen';
+import { BstSaleDraftListScreen } from '@/screens/bst/BstSaleDraftListScreen';
+import { BstSaleDraftPreviewScreen } from '@/screens/bst/BstSaleDraftPreviewScreen';
 import { CategorySnapshotScreen } from '@/screens/CategorySnapshotScreen';
 import { ClosetHomeScreen } from '@/screens/ClosetHomeScreen';
 import { DrawerScanResultsScreen } from '@/screens/DrawerScanResultsScreen';
@@ -23,6 +27,7 @@ import { KidsListScreen } from '@/screens/KidsListScreen';
 import { OutfitBuilderScreen } from '@/screens/OutfitBuilderScreen';
 import { OutfitsListScreen } from '@/screens/OutfitsListScreen';
 import { PrintDupGroupsScreen } from '@/screens/PrintDupGroupsScreen';
+import { ProPaywallScreen } from '@/screens/ProPaywallScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { MissingPhotoRepairScreen } from '@/screens/MissingPhotoRepairScreen';
 import { ActivityLogScreen } from '@/screens/ActivityLogScreen';
@@ -74,6 +79,11 @@ const ClosetStackNavigator = () => {
     <ClosetStack.Screen name="BatchAdd" component={BatchAddScreen} options={{ title: 'Batch Add' }} />
     <ClosetStack.Screen name="ItemsList" component={ItemsListScreen} options={{ title: 'Items' }} />
     <ClosetStack.Screen name="SellBin" component={SellBinScreen} options={{ title: 'Sell Bin' }} />
+    <ClosetStack.Screen name="ProPaywall" component={ProPaywallScreen} options={{ title: 'Unlock Pro' }} />
+    <ClosetStack.Screen name="BstSaleDraftList" component={BstSaleDraftListScreen} options={{ title: 'BST Drafts' }} />
+    <ClosetStack.Screen name="BstSaleDraftCreate" component={BstSaleDraftCreateScreen} options={{ title: 'New BST Draft' }} />
+    <ClosetStack.Screen name="BstSaleDraftEditor" component={BstSaleDraftEditorScreen} options={{ title: 'Edit BST Draft' }} />
+    <ClosetStack.Screen name="BstSaleDraftPreview" component={BstSaleDraftPreviewScreen} options={{ title: 'BST Preview + Export' }} />
     <ClosetStack.Screen name="CategorySnapshot" component={CategorySnapshotScreen} options={{ headerTitle: brandedTitle('Category Snapshot') }} />
     <ClosetStack.Screen name="OutfitsList" component={OutfitsListScreen} options={{ title: 'Outfits (Optional)' }} />
     <ClosetStack.Screen name="OutfitBuilder" component={OutfitBuilderScreen} options={{ title: 'Outfit Builder (Optional)' }} />
@@ -102,6 +112,7 @@ const WishlistStackNavigator = () => {
         initialParams={{ initialStatus: 'wishlist', hideInbox: true }}
         options={{ headerTitle: brandedTitle('Wishlist') }}
       />
+      <WishlistStack.Screen name="ProPaywall" component={ProPaywallScreen} options={{ title: 'Unlock Pro' }} />
       <WishlistStack.Screen name="AddItem" component={ItemFormScreen} options={{ headerTitle: brandedTitle('Add / Edit Item') }} />
       <WishlistStack.Screen name="ItemDetail" component={ItemDetailScreen} options={{ title: 'Item Details' }} />
     </WishlistStack.Navigator>

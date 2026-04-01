@@ -52,6 +52,13 @@ export type FitException = 'fits-small' | 'fits-big' | 'runs-true' | 'bamboo-str
 export type BrandFit = 'tts' | 'small' | 'big';
 export type KidFit = 'fits' | 'big' | 'small' | 'unknown';
 export type Condition = 'new-with-tags' | 'like-new' | 'good' | 'play' | 'donate';
+export type BstSaleDraftStatus = 'draft' | 'exported' | 'archived';
+export type BstCondition = 'NWT' | 'NWOT' | 'Like New' | 'Good' | 'Play';
+export type BstFlawTag = 'wash wear' | 'pilling' | 'stain' | 'hole' | 'fade' | 'cracking' | 'loose snap' | 'seam issue' | 'other';
+export type BstDryingMethod = 'line dried' | 'machine dried';
+export type BstSmokeNote = 'smoke-free home' | 'smoking home';
+export type BstPetType = 'none' | 'dog' | 'cat' | 'other';
+export type BstCollageGridSize = 'Auto' | '2' | '4' | '6' | '8';
 export type AddItemDefaultViewMode = 'simple' | 'detailed';
 export type FitBin = 'current' | 'next' | 'later' | 'unsure';
 export type ItemSizeType = 'apparel' | 'shoe';
@@ -59,6 +66,12 @@ export type ItemSizeSystem = 'APPAREL' | 'US_SHOE';
 export type ItemSizeScheme = 'AGE' | 'ALPHA' | 'CUSTOM' | 'SHOE';
 export const ITEM_STATUSES = ['wishlist', 'owned', 'for-sale', 'sold'] as const;
 export const CLOTHING_TYPES = ['sleeper', 'romper', 'top', 'bottom', 'dress', 'outerwear', 'shoes', 'accessory'] as const;
+export const BST_CONDITIONS = ['NWT', 'NWOT', 'Like New', 'Good', 'Play'] as const;
+export const BST_FLAW_TAGS = ['wash wear', 'pilling', 'stain', 'hole', 'fade', 'cracking', 'loose snap', 'seam issue', 'other'] as const;
+export const BST_DRYING_METHODS = ['line dried', 'machine dried'] as const;
+export const BST_SMOKE_NOTES = ['smoke-free home', 'smoking home'] as const;
+export const BST_PET_TYPES = ['none', 'dog', 'cat', 'other'] as const;
+export const BST_COLLAGE_GRID_SIZES = ['Auto', '2', '4', '6', '8'] as const;
 
 export interface BaseItem {
   id: ID;
@@ -126,6 +139,18 @@ export interface Item extends BaseItem {
   fitRating?: FitRating;
   fitException?: FitException;
   condition?: Condition;
+  bstSelectedPhotoUri?: string;
+  bstCondition?: BstCondition;
+  bstConditionNotes?: string;
+  bstFlawTags: BstFlawTag[];
+  bstFlawNotes?: string;
+  bstWashNotes?: string;
+  bstDryingMethod?: BstDryingMethod;
+  bstSmokeNote?: BstSmokeNote;
+  bstPetTypes?: BstPetType[];
+  bstPetNote?: string;
+  bstOffersAccepted?: boolean;
+  bstBundleOffersAccepted?: boolean;
   seasonTags: string[];
   lastWornAt?: number;
   wornCount: number;
@@ -186,6 +211,51 @@ export interface Outfit {
   weatherHint?: string;
 }
 
+export interface SaleDraft {
+  id: ID;
+  title?: string;
+  status: BstSaleDraftStatus;
+  defaultSmokeNote?: BstSmokeNote;
+  defaultPetTypes?: BstPetType[];
+  defaultPetNote?: string;
+  defaultWashNote?: string;
+  defaultDryingMethod?: BstDryingMethod;
+  defaultBundleOffersAccepted?: boolean;
+  defaultOffersAccepted?: boolean;
+  defaultShippingNote?: string;
+  defaultPaymentNote?: string;
+  collageGridSize: BstCollageGridSize;
+  customHeaderImageUri?: string;
+  freeGeneratedCardItemIds: ID[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SaleDraftItem {
+  id: ID;
+  saleDraftId: ID;
+  itemId: ID;
+  listingOrder: number;
+  included: boolean;
+  itemNumber: number;
+  selectedPhotoUri?: string;
+  price?: number;
+  condition?: BstCondition;
+  conditionNotes?: string;
+  flawTags: BstFlawTag[];
+  flawNotes?: string;
+  washNotesOverride?: string;
+  dryingMethodOverride?: BstDryingMethod;
+  smokeNoteOverride?: BstSmokeNote;
+  petTypesOverride?: BstPetType[];
+  petNoteOverride?: string;
+  offersAcceptedOverride?: boolean;
+  bundleOffersAcceptedOverride?: boolean;
+  generatedStatus?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Tag {
   id: ID;
   name: string;
@@ -223,7 +293,7 @@ export interface AppSettings {
   kidsPreviewCategories?: string[];
   inventoryRealityCheckOwnedThreshold?: number;
   developerModeEnabled?: boolean;
-  devProUnlocked?: boolean;
+  developerForceProAccessEnabled?: boolean;
   betaKidLimitBannerDismissed?: boolean;
   proTeaserBannerDismissed?: boolean;
   missingPhotoRestoreNudgeShown?: boolean;
@@ -256,5 +326,7 @@ export interface BackupPayload {
   purchaseState?: PurchaseStateSnapshot;
   outfits: Outfit[];
   filterPresets: FilterPreset[];
+  saleDrafts?: SaleDraft[];
+  saleDraftItems?: SaleDraftItem[];
   settings: AppSettings;
 }

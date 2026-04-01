@@ -35,6 +35,17 @@ export type PurchaseResult = {
   errorMessage?: string;
 };
 
+export type ProPaywallOption = {
+  kind: 'monthly' | 'lifetime';
+  packageIdentifier?: string;
+  productId?: string;
+  title: string;
+  subtitle?: string;
+  priceString: string;
+  badge?: string;
+  available: boolean;
+};
+
 let initialized = false;
 
 const shouldRun = () => appConfig.monetizationEnabled;
@@ -113,6 +124,65 @@ const findPackage = (offerings: any, packageIdentifier: string): any | undefined
     if (found) return found;
   }
   return undefined;
+};
+
+const normalizeToken = (value: string): string => value.toLowerCase().trim();
+
+const findPackageByKind = (offerings: any, kind: ProPaywallOption['kind']): any | undefined => {
+  const allPackages = normalizeOfferings(offerings).offerings.flatMap((entry) => entry.packages);
+  const scored = allPackages
+    .map((pkg) => {
+      const haystack = [pkg.identifier, pkg.productId, pkg.title, pkg.period, pkg.type].map((value) => normalizeToken(value ?? '')).join(' ');
+      const isSubscription = Boolean(pkg.period) || haystack.includes('monthly') || haystack.includes('month') || haystack.includes('subscription');
+      const isLifetime = haystack.includes('lifetime') || haystack.includes('forever') || haystack.includes('early') || haystack.includes('one_time') || (!pkg.period && !isSubscription);
+      const score = kind === 'monthly'
+        ? (isSubscription ? 3 : 0) + (haystack.includes('month') ? 2 : 0) + (haystack.includes('2.99') ? 1 : 0)
+        : (isLifetime ? 3 : 0) + (haystack.includes('lifetime') ? 2 : 0) + (haystack.includes('9.99') ? 1 : 0);
+      return { pkg, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.pkg;
+};
+
+export const getBstProPaywallOptions = async (): Promise<ProPaywallOption[]> => {
+  const defaults: ProPaywallOption[] = [
+    {
+      kind: 'monthly',
+      title: '$2.99/month',
+      subtitle: 'Monthly subscription',
+      priceString: '$2.99 / month',
+      available: false,
+    },
+    {
+      kind: 'lifetime',
+      title: '$9.99 lifetime',
+      subtitle: 'Early access lifetime',
+      priceString: '$9.99 one-time',
+      badge: 'Early access',
+      available: false,
+    },
+  ];
+
+  if (!shouldRun()) return defaults;
+
+  try {
+    await initPurchases();
+    const offerings = await Purchases.getOfferings();
+    return defaults.map((entry) => {
+      const pkg = findPackageByKind(offerings, entry.kind);
+      if (!pkg) return entry;
+      return {
+        ...entry,
+        packageIdentifier: pkg.identifier,
+        productId: pkg.productId,
+        priceString: pkg.priceString || entry.priceString,
+        available: Boolean(pkg.identifier),
+      };
+    });
+  } catch {
+    return defaults;
+  }
 };
 
 export const initPurchases = async (): Promise<void> => {
@@ -278,4 +348,3 @@ export const debugPrintPurchasesDiagnostics = async (): Promise<void> => {
   // eslint-disable-next-line no-console
   console.log('[monetization] customerInfo', customerInfo);
 };
-

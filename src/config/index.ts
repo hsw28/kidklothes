@@ -9,6 +9,8 @@ type ExtraConfig = {
   MONETIZATION_ENABLED?: boolean | string;
   DEFAULT_PACKAGE_IDENTIFIER?: string;
   UPSELL_TRIGGER_COUNT?: number | string;
+  POSTHOG_API_KEY?: string;
+  POSTHOG_HOST?: string;
 };
 
 const extra = (Constants.expoConfig?.extra ?? {}) as ExtraConfig;
@@ -73,5 +75,9 @@ export const appConfig = {
   revenueCat: {
     iosApiKey: (extra.REVENUECAT_IOS_API_KEY ?? '').trim(),
     androidApiKey: (extra.REVENUECAT_ANDROID_API_KEY ?? '').trim(),
+  },
+  posthog: {
+    apiKey: (extra.POSTHOG_API_KEY ?? '').trim(),
+    host: (extra.POSTHOG_HOST ?? '').trim(),
   },
 };

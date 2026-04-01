@@ -4,6 +4,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
 import { ChipSelector } from '@/components/ChipSelector';
 import { FormInput } from '@/components/FormInput';
+import { ItemPhotoGallery } from '@/components/ItemPhotoGallery';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { RemoteImage } from '@/components/RemoteImage';
 import { Screen } from '@/components/Screen';
@@ -11,6 +12,8 @@ import { useData } from '@/db/DataContext';
 import { useReviewPrompt } from '@/hooks/useReviewPrompt';
 import { BrandFit, ClothingType, Condition, FitBin, Item, ItemSizeScheme, ItemSizeSystem, ItemSizeType, ItemStatus, KidFit } from '@/models';
 import { ItemsStackParamList } from '@/navigation/types';
+import { trackItemPhotoAdded, trackItemPhotoRemoved, trackItemPhotoReordered, trackSecondPhotoLimitHit } from '@/services/bst/bstAnalytics';
+import { canUseMultipleItemPhotos } from '@/services/proAccess';
 import { ADD_ITEM_CATEGORY_OPTIONS, ClosetCategory, closetCategoryToClothingType, closetLabel, normalizeItemCategoryToClosetCategory } from '@/utils/categories';
 import { getWishlistAwareness } from '@/utils/fitInsights';
 import { canonicalizeBrand, prettyBrandFallback } from '@/utils/brandNormalize';
@@ -139,6 +142,9 @@ const normalizeImageCandidate = (value?: string): string => {
   return trimmed;
 };
 
+const parseImageUrlList = (primary: string, extras: string): string[] =>
+  Array.from(new Set([primary, ...extras.split(',')].map((value) => normalizeImageCandidate(value)).filter(Boolean)));
+
 const prettifyWord = (token: string) => token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
 
 const kqSlugToTitle = (value: string): string | undefined => {
@@ -264,7 +270,7 @@ const getStorageConfigForPreset = (preset: Exclude<StoragePresetOption, 'None'>)
 };
 
 export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { children, items, childItems, storageLocations, printAliases, settings, logEvent, addItem, updateItem, updateItemCachedImage, updateSettings, createStorageLocation } = useData();
+  const { children, items, childItems, storageLocations, printAliases, settings, purchaseState, logEvent, addItem, updateItem, updateItemCachedImage, updateSettings, createStorageLocation } = useData();
   const { recordMeaningfulActionAndMaybePrompt } = useReviewPrompt();
   const editing = route.params?.itemId;
   const duplicateFromItemId = route.params?.duplicateFromItemId;
@@ -365,6 +371,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const lastAutoSuccessUrlRef = useRef('');
   const autofillMetaRef = useRef<{ titleAutoValue?: string; brandAutoValue?: string; imageAutoValue?: string }>({});
   const showLocationFeatures = children.length > 0;
+  const hasMultiPhotoAccess = canUseMultipleItemPhotos(settings, purchaseState);
   const scopedStorageLocations = useMemo(
     () => storageLocations.filter((location) => !location.childId || location.childId === primaryChildId),
     [storageLocations, primaryChildId],
@@ -375,6 +382,27 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     imageUrlRef.current = imageUrl;
   }, [imageUrl]);
+
+  const photoUris = useMemo(() => parseImageUrlList(imageUrl, extraImageUrls), [extraImageUrls, imageUrl]);
+
+  const syncPhotoFields = (nextPhotoUris: string[]) => {
+    const normalized = Array.from(new Set(nextPhotoUris.map((entry) => normalizeImageCandidate(entry)).filter(Boolean)));
+    imageTouchedRef.current = normalized.length > 0;
+    imageUrlRef.current = normalized[0] ?? '';
+    setImageTouched(normalized.length > 0);
+    setImageUrl(normalized[0] ?? '');
+    setExtraImageUrls(normalized.slice(1).join(', '));
+  };
+
+  const openPhotoPaywall = () => {
+    void trackSecondPhotoLimitHit(logEvent, {
+      itemId: editing || undefined,
+      itemCount: photoUris.length,
+      isPro: hasMultiPhotoAccess,
+      triggeredFrom: 'item_form',
+    });
+    navigation.navigate('ProPaywall', { source: 'item_multi_photo' });
+  };
 
   const defaultWearingSize = useMemo(() => {
     if (!quickMode || !primaryChildId) return '';
@@ -644,8 +672,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       setImageUrl(primaryImage);
       imageUrlRef.current = primaryImage;
       autofillMetaRef.current.imageAutoValue = primaryImage;
-      const extras = previewImages.filter((entry) => entry !== primaryImage).slice(0, 5);
-      if (extras.length > 0) setExtraImageUrls(extras.join(', '));
+      const extras = previewImages.filter((entry) => entry !== primaryImage).slice(0, hasMultiPhotoAccess ? 5 : 0);
+      setExtraImageUrls(extras.join(', '));
     }
   };
 
@@ -733,8 +761,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       styleName,
       printName,
       brandTags: brand,
-      imageUrl,
-      extraImageUrls,
+      imageUrl: photoUris[0] ?? '',
+      extraImageUrls: photoUris.slice(1).join(', '),
       clothingTypeLabelFallback: clothingType,
       size,
       sizeNormalized,
@@ -1059,6 +1087,10 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   };
 
   const chooseImageFromLibrary = async () => {
+    if (!hasMultiPhotoAccess && photoUris.length >= 1) {
+      openPhotoPaywall();
+      return;
+    }
     Alert.alert('Add Item Photo', 'Choose a photo source', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -1069,10 +1101,13 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             if (!asset?.uri) return;
             if (__DEV__) console.log('[ItemForm] picked photo', asset);
             const persistentUri = await persistLocalImage(asset.uri);
-            imageTouchedRef.current = true;
-            imageUrlRef.current = persistentUri;
-            setImageTouched(true);
-            setImageUrl(persistentUri);
+            syncPhotoFields([...photoUris, persistentUri]);
+            await trackItemPhotoAdded(logEvent, {
+              itemId: editing || undefined,
+              itemCount: photoUris.length + 1,
+              isPro: hasMultiPhotoAccess,
+              triggeredFrom: 'item_form_library',
+            });
           })();
         },
       },
@@ -1084,10 +1119,13 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             if (!asset?.uri) return;
             if (__DEV__) console.log('[ItemForm] captured photo', asset);
             const persistentUri = await persistLocalImage(asset.uri);
-            imageTouchedRef.current = true;
-            imageUrlRef.current = persistentUri;
-            setImageTouched(true);
-            setImageUrl(persistentUri);
+            syncPhotoFields([...photoUris, persistentUri]);
+            await trackItemPhotoAdded(logEvent, {
+              itemId: editing || undefined,
+              itemCount: photoUris.length + 1,
+              isPro: hasMultiPhotoAccess,
+              triggeredFrom: 'item_form_camera',
+            });
           })();
         },
       },
@@ -1262,40 +1300,57 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                 label="Image URL"
                 value={imageUrl}
                 onChangeText={(value) => {
-                  imageTouchedRef.current = true;
-                  imageUrlRef.current = value;
-                  setImageTouched(true);
-                  setImageUrl(value);
+                  syncPhotoFields([value, ...photoUris.slice(1)]);
                 }}
                 placeholder="Optional"
                 autoCapitalize="none"
               />
-              <FormInput
-                label="More image URLs (comma-separated)"
-                value={extraImageUrls}
-                onChangeText={setExtraImageUrls}
-                placeholder="https://..., https://..."
-                autoCapitalize="none"
-              />
+              {hasMultiPhotoAccess ? (
+                <FormInput
+                  label="More image URLs (comma-separated)"
+                  value={extraImageUrls}
+                  onChangeText={setExtraImageUrls}
+                  placeholder="https://..., https://..."
+                  autoCapitalize="none"
+                />
+              ) : (
+                <Text style={styles.urlTip}>Multiple photos per item are part of Pro.</Text>
+              )}
             </>
           ) : null}
           </>
         ) : null}
       </>
 
-      {(quickMode || status !== 'wishlist') ? (
-        <PrimaryButton
-          label={url.trim() ? 'Replace Photo' : 'Add Photo'}
-          variant="secondary"
-          onPress={chooseImageFromLibrary}
-        />
-      ) : null}
-      {imageUrl.trim() ? (
-        <Card>
-          <Text style={styles.previewDomain}>Selected Image</Text>
-          <RemoteImage uri={imageUrl.trim()} style={styles.previewImage} fallbackLabel={title || 'Item'} />
-        </Card>
-      ) : null}
+      <ItemPhotoGallery
+        photoUris={photoUris}
+        canAddMore={hasMultiPhotoAccess || photoUris.length === 0}
+        onAddPhoto={() => void chooseImageFromLibrary()}
+        onLockedPress={openPhotoPaywall}
+        onMakePrimary={(index) => {
+          const next = [...photoUris];
+          const [chosen] = next.splice(index, 1);
+          next.unshift(chosen);
+          syncPhotoFields(next);
+          void trackItemPhotoReordered(logEvent, {
+            itemId: editing || undefined,
+            itemCount: next.length,
+            isPro: hasMultiPhotoAccess,
+            triggeredFrom: 'item_form',
+          });
+        }}
+        onRemove={(index) => {
+          const next = photoUris.filter((_, entryIndex) => entryIndex !== index);
+          syncPhotoFields(next);
+          void trackItemPhotoRemoved(logEvent, {
+            itemId: editing || undefined,
+            itemCount: next.length,
+            isPro: hasMultiPhotoAccess,
+            triggeredFrom: 'item_form',
+          });
+        }}
+        lockedMessage="Free includes 1 photo per item. Existing extra photos stay visible. Add back/tag/flaw photos with Pro."
+      />
 
       {children.length === 1 ? (
         <Text style={styles.assignmentMeta}>Assigned to {children[0]?.name}</Text>

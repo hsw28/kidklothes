@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { inferSizeScheme, isShoeCategory, normalizeSize } from '@/lib/sizing';
 
 const DB_NAME = 'layetteout.db';
-const LATEST_DB_VERSION = 35;
+const LATEST_DB_VERSION = 39;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let initPromise: Promise<void> | null = null;
@@ -76,6 +76,18 @@ CREATE TABLE IF NOT EXISTS items (
   fitRating TEXT,
   fitException TEXT,
   condition TEXT,
+  bstSelectedPhotoUri TEXT,
+  bstCondition TEXT,
+  bstConditionNotes TEXT,
+  bstFlawTagsJson TEXT,
+  bstFlawNotes TEXT,
+  bstWashNotes TEXT,
+  bstDryingMethod TEXT,
+  bstSmokeNote TEXT,
+  bstPetType TEXT,
+  bstPetNote TEXT,
+  bstOffersAccepted INTEGER,
+  bstBundleOffersAccepted INTEGER,
   seasonTags TEXT,
   lastWornAt INTEGER,
   wornCount INTEGER NOT NULL DEFAULT 0,
@@ -167,9 +179,55 @@ CREATE TABLE IF NOT EXISTS settings (
   inventoryRealityCheckOwnedThreshold INTEGER,
   developerModeEnabled INTEGER NOT NULL DEFAULT 0,
   devProUnlocked INTEGER NOT NULL DEFAULT 0,
+  developerForceProAccessEnabled INTEGER NOT NULL DEFAULT 0,
   betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0,
   proTeaserBannerDismissed INTEGER NOT NULL DEFAULT 0,
   missingPhotoRestoreNudgeShown INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS sale_drafts (
+  id TEXT PRIMARY KEY NOT NULL,
+  title TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  defaultSmokeNote TEXT,
+  defaultPetType TEXT,
+  defaultPetNote TEXT,
+  defaultWashNote TEXT,
+  defaultDryingMethod TEXT,
+  defaultBundleOffersAccepted INTEGER,
+  defaultOffersAccepted INTEGER,
+  defaultShippingNote TEXT,
+  defaultPaymentNote TEXT,
+  collageGridSize TEXT NOT NULL DEFAULT 'Auto',
+  customHeaderImageUri TEXT,
+  freeGeneratedCardItemIdsJson TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sale_draft_items (
+  id TEXT PRIMARY KEY NOT NULL,
+  saleDraftId TEXT NOT NULL,
+  itemId TEXT NOT NULL,
+  listingOrder INTEGER NOT NULL,
+  included INTEGER NOT NULL DEFAULT 1,
+  itemNumber INTEGER NOT NULL,
+  selectedPhotoUri TEXT,
+  price REAL,
+  condition TEXT,
+  conditionNotes TEXT,
+  flawTagsJson TEXT,
+  flawNotes TEXT,
+  washNotesOverride TEXT,
+  dryingMethodOverride TEXT,
+  smokeNoteOverride TEXT,
+  petTypeOverride TEXT,
+  petNoteOverride TEXT,
+  offersAcceptedOverride INTEGER,
+  bundleOffersAcceptedOverride INTEGER,
+  generatedStatus TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -244,6 +302,9 @@ CREATE INDEX IF NOT EXISTS idx_items_bundle ON items(bundleId, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_storage_locations_child ON storage_locations(childId, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_print_aliases_canonical ON print_aliases(canonical, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_print_aliases_alias ON print_aliases(alias, deletedAt);
+CREATE INDEX IF NOT EXISTS idx_sale_drafts_updated ON sale_drafts(updatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_sale_draft_items_draft ON sale_draft_items(saleDraftId, listingOrder);
+CREATE INDEX IF NOT EXISTS idx_sale_draft_items_item ON sale_draft_items(itemId);
 `;
 
 const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
@@ -251,11 +312,12 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
   if ((row?.count ?? 0) > 0) return;
 
   await db.runAsync(
-    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, developerForceProAccessEnabled, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     'app',
     'sometimes',
     'detailed',
+    0,
     0,
     0,
     0,
@@ -931,6 +993,108 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
     `);
     await db.execAsync('PRAGMA user_version = 35;');
     currentVersion = 35;
+  }
+
+  if (currentVersion < 36) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'developerForceProAccessEnabled')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN developerForceProAccessEnabled INTEGER NOT NULL DEFAULT 0;');
+      if (settingsColumns.some((column) => column.name === 'devProUnlocked')) {
+        await db.execAsync('UPDATE settings SET developerForceProAccessEnabled = COALESCE(devProUnlocked, 0);');
+      }
+    }
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS sale_drafts (
+        id TEXT PRIMARY KEY NOT NULL,
+        title TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        defaultSmokeNote TEXT,
+        defaultPetType TEXT,
+        defaultPetNote TEXT,
+        defaultWashNote TEXT,
+        defaultDryingMethod TEXT,
+        defaultBundleOffersAccepted INTEGER,
+        defaultOffersAccepted INTEGER,
+        defaultShippingNote TEXT,
+        defaultPaymentNote TEXT,
+        collageGridSize TEXT NOT NULL DEFAULT 'Auto',
+        customHeaderImageUri TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+    `);
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS sale_draft_items (
+        id TEXT PRIMARY KEY NOT NULL,
+        saleDraftId TEXT NOT NULL,
+        itemId TEXT NOT NULL,
+        listingOrder INTEGER NOT NULL,
+        included INTEGER NOT NULL DEFAULT 1,
+        itemNumber INTEGER NOT NULL,
+        selectedPhotoUri TEXT,
+        price REAL,
+        condition TEXT,
+        conditionNotes TEXT,
+        flawTagsJson TEXT,
+        flawNotes TEXT,
+        washNotesOverride TEXT,
+        dryingMethodOverride TEXT,
+        smokeNoteOverride TEXT,
+        petTypeOverride TEXT,
+        petNoteOverride TEXT,
+        offersAcceptedOverride INTEGER,
+        bundleOffersAcceptedOverride INTEGER,
+        generatedStatus TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+    `);
+    await db.execAsync('CREATE INDEX IF NOT EXISTS idx_sale_drafts_updated ON sale_drafts(updatedAt DESC);');
+    await db.execAsync('CREATE INDEX IF NOT EXISTS idx_sale_draft_items_draft ON sale_draft_items(saleDraftId, listingOrder);');
+    await db.execAsync('CREATE INDEX IF NOT EXISTS idx_sale_draft_items_item ON sale_draft_items(itemId);');
+    await db.execAsync('PRAGMA user_version = 36;');
+    currentVersion = 36;
+  }
+
+  if (currentVersion < 37) {
+    const itemColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('items');`);
+    const ensureColumn = async (name: string, sql: string) => {
+      if (!itemColumns.some((column) => column.name === name)) {
+        await db.execAsync(sql);
+      }
+    };
+    await ensureColumn('bstSelectedPhotoUri', 'ALTER TABLE items ADD COLUMN bstSelectedPhotoUri TEXT;');
+    await ensureColumn('bstCondition', 'ALTER TABLE items ADD COLUMN bstCondition TEXT;');
+    await ensureColumn('bstConditionNotes', 'ALTER TABLE items ADD COLUMN bstConditionNotes TEXT;');
+    await ensureColumn('bstFlawTagsJson', 'ALTER TABLE items ADD COLUMN bstFlawTagsJson TEXT;');
+    await ensureColumn('bstFlawNotes', 'ALTER TABLE items ADD COLUMN bstFlawNotes TEXT;');
+    await ensureColumn('bstWashNotes', 'ALTER TABLE items ADD COLUMN bstWashNotes TEXT;');
+    await ensureColumn('bstDryingMethod', 'ALTER TABLE items ADD COLUMN bstDryingMethod TEXT;');
+    await ensureColumn('bstSmokeNote', 'ALTER TABLE items ADD COLUMN bstSmokeNote TEXT;');
+    await ensureColumn('bstPetType', 'ALTER TABLE items ADD COLUMN bstPetType TEXT;');
+    await ensureColumn('bstPetNote', 'ALTER TABLE items ADD COLUMN bstPetNote TEXT;');
+    await ensureColumn('bstOffersAccepted', 'ALTER TABLE items ADD COLUMN bstOffersAccepted INTEGER;');
+    await ensureColumn('bstBundleOffersAccepted', 'ALTER TABLE items ADD COLUMN bstBundleOffersAccepted INTEGER;');
+    await db.execAsync('PRAGMA user_version = 37;');
+    currentVersion = 37;
+  }
+
+  if (currentVersion < 38) {
+    const saleDraftColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('sale_drafts');`);
+    if (!saleDraftColumns.some((column) => column.name === 'freeGeneratedCardItemIdsJson')) {
+      await db.execAsync('ALTER TABLE sale_drafts ADD COLUMN freeGeneratedCardItemIdsJson TEXT;');
+    }
+    await db.execAsync('PRAGMA user_version = 38;');
+    currentVersion = 38;
+  }
+
+  if (currentVersion < 39) {
+    const saleDraftColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('sale_drafts');`);
+    if (!saleDraftColumns.some((column) => column.name === 'customHeaderImageUri')) {
+      await db.execAsync('ALTER TABLE sale_drafts ADD COLUMN customHeaderImageUri TEXT;');
+    }
+    await db.execAsync('PRAGMA user_version = 39;');
+    currentVersion = 39;
   }
 
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');

@@ -11,10 +11,12 @@ import { Screen } from '@/components/Screen';
 import { appConfig } from '@/config';
 import { useData } from '@/db/DataContext';
 import { repository } from '@/db/repository';
-import { AppSettings, BackupPayload, Child } from '@/models';
+import { ActivityEvent, AppSettings, BackupPayload, Child } from '@/models';
 import { SettingsStackParamList } from '@/navigation/types';
+import { getPostHogDebugState } from '@/services/analytics/posthog';
+import { FREE_BST_DRAFT_LIMIT, countActiveSaleDrafts } from '@/services/bst/bstLimits';
 import { getProAccessState } from '@/services/proAccess';
-import { debugPrintPurchasesDiagnostics } from '@/services/purchases';
+import { debugPrintPurchasesDiagnostics, getBstProPaywallOptions } from '@/services/purchases';
 import {
   ClosetCategory,
   closetCategories,
@@ -68,6 +70,7 @@ export const SettingsScreen: React.FC = () => {
     children,
     childItems,
     items,
+    saleDrafts,
     storageLocations,
     addChild,
     addItem,
@@ -76,15 +79,67 @@ export const SettingsScreen: React.FC = () => {
     deleteChild,
     deleteStorageLocation,
     exportBackup,
+    getEvents,
     importBackup,
   } = useData();
   const [repairingImages, setRepairingImages] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState({ total: 0, processed: 0, recovered: 0, failed: 0, noSource: 0 });
   const [showProModal, setShowProModal] = useState(false);
+  const [bstDebugEvents, setBstDebugEvents] = useState<ActivityEvent[]>([]);
+  const [paywallProductsReady, setPaywallProductsReady] = useState<boolean | null>(null);
+  const [paywallProductDebug, setPaywallProductDebug] = useState<Array<{ kind: string; title: string; packageIdentifier?: string; available: boolean }>>([]);
+  const [posthogDebug, setPosthogDebug] = useState(getPostHogDebugState());
+  const versionTapTimesRef = useRef<number[]>([]);
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
   const proAccess = getProAccessState(settings, purchaseState);
   const showDeveloperSection = Boolean(settings.developerModeEnabled);
   const appVersionLabel = Constants.expoConfig?.version ?? 'dev';
+  const activeSaleDraftCount = countActiveSaleDrafts(saleDrafts);
+  const bstEventTypes = useMemo(
+    () => new Set([
+      'bst_create_started',
+      'bst_draft_created',
+      'bst_collage_generated',
+      'bst_item_card_generated',
+      'bst_card_limit_hit',
+      'pro_paywall_viewed',
+      'pro_purchase_started',
+      'pro_purchase_completed',
+      'second_photo_limit_hit',
+    ]),
+    [],
+  );
+  const latestActiveDraft = useMemo(
+    () => [...saleDrafts].filter((draft) => draft.status !== 'archived').sort((a, b) => b.updatedAt - a.updatedAt)[0],
+    [saleDrafts],
+  );
+
+  const loadDevBstDebug = React.useCallback(async () => {
+    if (!showDeveloperSection) return;
+    try {
+      const [events, paywallOptions] = await Promise.all([
+        getEvents(120),
+        getBstProPaywallOptions(),
+      ]);
+      setBstDebugEvents(events.filter((event) => bstEventTypes.has(event.type)).slice(0, 12));
+      setPaywallProductsReady(paywallOptions.some((option) => option.available));
+      setPaywallProductDebug(paywallOptions.map((option) => ({
+        kind: option.kind,
+        title: option.title,
+        packageIdentifier: option.packageIdentifier,
+        available: option.available,
+      })));
+      setPosthogDebug(getPostHogDebugState());
+    } catch {
+      setPaywallProductsReady(false);
+      setPaywallProductDebug([]);
+      setPosthogDebug(getPostHogDebugState());
+    }
+  }, [bstEventTypes, getEvents, showDeveloperSection]);
+
+  useEffect(() => {
+    void loadDevBstDebug();
+  }, [loadDevBstDebug]);
 
   const openExternalLink = async (url: string, label: string) => {
     try {
@@ -674,23 +729,76 @@ export const SettingsScreen: React.FC = () => {
       </Card>
       {showDeveloperSection ? (
         <Card>
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Developer Mode</Text>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Developer Options</Text>
           <Text style={{ color: '#6b7280' }}>Hidden local-only controls for QA and Pro access testing.</Text>
           <ChipSelector
-            label="Developer Mode"
+            label="Force Pro Access"
             options={['Off', 'On']}
-            value={settings.developerModeEnabled ? 'On' : 'Off'}
-            onChange={(value) => updateSettings({ developerModeEnabled: value === 'On' })}
-          />
-          <ChipSelector
-            label="Unlock Pro Features"
-            options={['Off', 'On']}
-            value={settings.devProUnlocked ? 'On' : 'Off'}
-            onChange={(value) => updateSettings({ devProUnlocked: value === 'On' })}
+            value={settings.developerForceProAccessEnabled ? 'On' : 'Off'}
+            onChange={(value) => updateSettings({ developerForceProAccessEnabled: value === 'On' })}
           />
           <Text style={{ color: '#6b7280', fontSize: 12 }}>
-            Pro access resolves as real entitlement OR this local override. Current access: {proAccess.hasProAccess ? 'Unlocked' : 'Normal'}.
+            Pro access resolves as real entitlement OR this hidden local override. Current access: {proAccess.hasProAccess ? 'Unlocked' : 'Normal'}.
           </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            BST capabilities: drafts {proAccess.capabilities.canCreateMultipleDrafts ? 'unlimited' : `free ${FREE_BST_DRAFT_LIMIT}`} • cards {proAccess.capabilities.canGenerateUnlimitedCards ? 'unlimited' : '2 per draft'} • photos {proAccess.capabilities.canUseMultipleItemPhotos ? 'multiple' : '1 per item'}.
+          </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            Current counters: active BST drafts {activeSaleDraftCount}/{proAccess.capabilities.canCreateMultipleDrafts ? '∞' : FREE_BST_DRAFT_LIMIT}.
+          </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            Latest active draft: {latestActiveDraft ? `${latestActiveDraft.title || 'Untitled BST Draft'} • ${latestActiveDraft.freeGeneratedCardItemIds.length}/2 free item cards used` : 'No active BST drafts'}.
+          </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            RevenueCat BST products: {paywallProductsReady === null ? 'Checking…' : paywallProductsReady ? 'Loaded successfully' : 'Not loaded / fallback only'}.
+          </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            PostHog: {posthogDebug.configured ? 'configured' : 'not configured'} • client {posthogDebug.clientReady ? 'ready' : 'not ready'}.
+          </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            Host: {posthogDebug.host || 'none'} • API key present: {posthogDebug.apiKeyPresent ? 'yes' : 'no'}.
+          </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            Last send attempt: {posthogDebug.lastAttemptedEvent ? `${posthogDebug.lastAttemptedEvent} @ ${new Date(posthogDebug.lastAttemptedAt ?? 0).toLocaleTimeString()}` : 'none yet'}.
+          </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            Last send result: {posthogDebug.lastFailureEvent
+              ? `failed on ${posthogDebug.lastFailureEvent}${posthogDebug.lastFailureReason ? ` (${posthogDebug.lastFailureReason})` : ''}`
+              : posthogDebug.lastSuccessfulEvent
+                ? `sent ${posthogDebug.lastSuccessfulEvent}`
+                : 'no sends yet'}
+            .
+          </Text>
+          {paywallProductDebug.length ? paywallProductDebug.map((product) => (
+            <Text key={product.kind} style={{ color: '#6b7280', fontSize: 12 }}>
+              {product.kind}: {product.title} • {product.packageIdentifier || 'no package id'} • {product.available ? 'available' : 'fallback'}
+            </Text>
+          )) : null}
+          <PrimaryButton label="Refresh BST Debug (Dev)" variant="secondary" onPress={() => void loadDevBstDebug()} />
+          <PrimaryButton
+            label="Print BST Funnel Events (Dev)"
+            variant="secondary"
+            onPress={() => {
+              if (__DEV__) {
+                console.log('[BST Debug Events]', bstDebugEvents.map((event) => ({
+                  type: event.type,
+                  createdAt: event.createdAt,
+                  payload: event.payload,
+                })));
+              }
+              Alert.alert('Printed', 'Recent BST funnel events were sent to the console.');
+            }}
+          />
+          <View style={{ gap: 8, marginTop: 6 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827' }}>Recent BST Funnel Events</Text>
+            {bstDebugEvents.length ? bstDebugEvents.map((event) => (
+              <View key={event.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#111827' }}>{event.type}</Text>
+                <Text style={{ fontSize: 11, color: '#6b7280' }}>{new Date(event.createdAt).toLocaleString()}</Text>
+                <Text style={{ fontSize: 11, color: '#6b7280' }}>{JSON.stringify(event.payload ?? {})}</Text>
+              </View>
+            )) : <Text style={{ fontSize: 12, color: '#6b7280' }}>No BST funnel events logged yet in this local session.</Text>}
+          </View>
           {__DEV__ ? (
             <>
               <PrimaryButton label="Open Activity Log (Dev)" variant="secondary" onPress={() => navigation.navigate('ActivityLog')} />
@@ -739,13 +847,20 @@ export const SettingsScreen: React.FC = () => {
         }}
       />
       <Pressable
-        onLongPress={async () => {
-          if (!settings.developerModeEnabled) {
+        onPress={async () => {
+          const now = Date.now();
+          versionTapTimesRef.current = [...versionTapTimesRef.current.filter((value) => now - value < 6000), now];
+          if (versionTapTimesRef.current.length >= 7 && !settings.developerModeEnabled) {
+            versionTapTimesRef.current = [];
             await updateSettings({ developerModeEnabled: true });
             Alert.alert('Developer Mode Enabled', 'Hidden developer controls are now visible in Settings.');
           }
         }}
-        delayLongPress={700}
+        onLongPress={async () => {
+          if (!settings.developerModeEnabled) {
+            return;
+          }
+        }}
         style={{ paddingVertical: 6, alignItems: 'center' }}
         accessibilityRole="button"
         accessibilityLabel="App version"

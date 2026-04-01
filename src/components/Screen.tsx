@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, SafeAreaView, ScrollView, ScrollViewProps, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useData } from '@/db/DataContext';
 import { useAppTheme } from '@/theme';
@@ -12,9 +12,10 @@ interface ScreenProps {
   disableDataStateGate?: boolean;
   overlay?: React.ReactNode;
   scrollRef?: React.RefObject<ScrollView | null>;
+  scrollViewProps?: ScrollViewProps;
 }
 
-export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, scrollEnabled = true, style, disableDataStateGate = false, overlay, scrollRef }) => {
+export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, scrollEnabled = true, style, disableDataStateGate = false, overlay, scrollRef, scrollViewProps }) => {
   const theme = useAppTheme();
   const data = useData();
   const styles = StyleSheet.create({
@@ -93,7 +94,7 @@ export const Screen: React.FC<ScreenProps> = ({ children, scroll = true, scrollE
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.root}>
-          <ScrollView ref={scrollRef} scrollEnabled={scrollEnabled} contentContainerStyle={[styles.content, style]}>{children}</ScrollView>
+          <ScrollView ref={scrollRef} scrollEnabled={scrollEnabled} contentContainerStyle={[styles.content, style]} {...scrollViewProps}>{children}</ScrollView>
           {overlay}
         </View>
       </SafeAreaView>

@@ -1,12 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
-import { ActivityEvent, AppSettings, BackupPayload, Child, ChildItem, FilterPreset, ID, Item, Outfit, PrintAlias, PurchaseStateSnapshot, StorageLocation } from '@/models';
+import { ActivityEvent, AppSettings, BackupPayload, Child, ChildItem, FilterPreset, ID, Item, Outfit, PrintAlias, PurchaseStateSnapshot, SaleDraft, SaleDraftItem, StorageLocation } from '@/models';
 import { appConfig } from '@/config';
 import { getEntitlementSnapshot, initPurchases } from '@/services/purchases';
+import { trackBstDraftArchived, trackBstDraftCreated } from '@/services/bst/bstAnalytics';
+import { hasProAccess } from '@/services/proAccess';
 import { setAppGroupInt } from '@/utils/appGroupStorage';
 import { cacheRemoteImage, findPersistedImageByFilename, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
 import { getItemLocalImageUri, getItemRemoteImageUri } from '@/utils/itemMedia';
-import { BatchAddInput, BulkItemPatchInput, ListRecentItemsInput, NewChildInput, NewItemInput, NewOutfitInput, SaveFilterPresetInput, repository } from './repository';
+import { BatchAddInput, BulkItemPatchInput, BulkUpdateSaleDraftItemsInput, CreateSaleDraftInput, ListRecentItemsInput, NewChildInput, NewItemInput, NewOutfitInput, SaveFilterPresetInput, UpdateSaleDraftInput, UpdateSaleDraftItemInput, repository } from './repository';
 
 interface DataContextValue {
   loading: boolean;
@@ -20,6 +22,8 @@ interface DataContextValue {
   outfits: Outfit[];
   filterPresets: FilterPreset[];
   brands: string[];
+  saleDrafts: SaleDraft[];
+  saleDraftItems: SaleDraftItem[];
   settings: AppSettings;
   refresh: () => Promise<void>;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
@@ -49,6 +53,12 @@ interface DataContextValue {
   addOutfit: (input: NewOutfitInput) => Promise<Outfit | undefined>;
   updateOutfit: (id: ID, patch: Partial<NewOutfitInput>) => Promise<void>;
   deleteOutfit: (id: ID) => Promise<void>;
+  createSaleDraft: (input: CreateSaleDraftInput) => Promise<SaleDraft | undefined>;
+  updateSaleDraft: (id: ID, patch: UpdateSaleDraftInput) => Promise<void>;
+  updateSaleDraftItem: (id: ID, patch: UpdateSaleDraftItemInput) => Promise<void>;
+  bulkUpdateSaleDraftItems: (saleDraftId: ID, patch: BulkUpdateSaleDraftItemsInput) => Promise<void>;
+  removeSaleDraftItem: (id: ID) => Promise<void>;
+  reorderSaleDraftItems: (saleDraftId: ID, orderedDraftItemIds: ID[]) => Promise<void>;
   saveFilterPreset: (input: SaveFilterPresetInput) => Promise<void>;
   deleteFilterPreset: (id: ID) => Promise<void>;
   logEvent: (type: string, payload?: Record<string, unknown>) => Promise<void>;
@@ -79,7 +89,7 @@ const defaultSettings: AppSettings = {
   hiddenWishlistCategories: [],
   kidsPreviewCategories: undefined,
   developerModeEnabled: false,
-  devProUnlocked: false,
+  developerForceProAccessEnabled: false,
   betaKidLimitBannerDismissed: false,
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,
@@ -99,6 +109,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [allOutfits, setOutfits] = useState<Outfit[]>([]);
   const [allFilterPresets, setFilterPresets] = useState<FilterPreset[]>([]);
   const [allBrands, setBrands] = useState<string[]>([]);
+  const [allSaleDrafts, setSaleDrafts] = useState<SaleDraft[]>([]);
+  const [allSaleDraftItems, setSaleDraftItems] = useState<SaleDraftItem[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const imagePersistInFlightRef = useRef(false);
   const startupImageMigrationDoneRef = useRef(false);
@@ -140,6 +152,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       setOutfits(data.outfits);
       setFilterPresets(data.filterPresets);
       setBrands(data.brands);
+      setSaleDrafts(data.saleDrafts);
+      setSaleDraftItems(data.saleDraftItems);
       setSettings(data.settings);
 
       if (appConfig.monetizationEnabled) {
@@ -405,6 +419,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       outfits: allOutfits,
       filterPresets: allFilterPresets,
       brands: allBrands,
+      saleDrafts: allSaleDrafts,
+      saleDraftItems: allSaleDraftItems,
       settings,
       refresh,
       updateSettings: async (patch) => runAndRefresh(() => repository.updateSettings(patch)),
@@ -458,6 +474,37 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       addOutfit: async (input) => runAndRefreshWithResult(() => repository.addOutfit(input)),
       updateOutfit: async (id, patch) => runAndRefresh(() => repository.updateOutfit(id, patch)),
       deleteOutfit: async (id) => runAndRefresh(() => repository.deleteOutfit(id)),
+      createSaleDraft: async (input) => {
+        const created = await runAndRefreshWithResult(() => repository.createSaleDraft(input));
+        if (created) {
+          await trackBstDraftCreated(async (type, payload) => {
+            await repository.logEvent({ type, payload });
+          }, {
+            draftId: created.id,
+            itemCount: input.itemIds.length,
+            isPro: hasProAccess(settings, purchaseState),
+            triggeredFrom: 'create_screen',
+          });
+        }
+        return created;
+      },
+      updateSaleDraft: async (id, patch) => {
+        const existingDraft = allSaleDrafts.find((draft) => draft.id === id);
+        await runAndRefresh(() => repository.updateSaleDraft(id, patch));
+        if (patch.status === 'archived' && existingDraft?.status !== 'archived') {
+          await trackBstDraftArchived(async (type, payload) => {
+            await repository.logEvent({ type, payload });
+          }, {
+            draftId: id,
+            itemCount: allSaleDraftItems.filter((item) => item.saleDraftId === id && item.included).length,
+            isPro: hasProAccess(settings, purchaseState),
+          });
+        }
+      },
+      updateSaleDraftItem: async (id, patch) => runAndRefresh(() => repository.updateSaleDraftItem(id, patch)),
+      bulkUpdateSaleDraftItems: async (saleDraftId, patch) => runAndRefresh(() => repository.bulkUpdateSaleDraftItems(saleDraftId, patch)),
+      removeSaleDraftItem: async (id) => runAndRefresh(() => repository.removeSaleDraftItem(id)),
+      reorderSaleDraftItems: async (saleDraftId, orderedDraftItemIds) => runAndRefresh(() => repository.reorderSaleDraftItems(saleDraftId, orderedDraftItemIds)),
       saveFilterPreset: async (input) => runAndRefresh(() => repository.saveFilterPreset(input)),
       deleteFilterPreset: async (id) => runAndRefresh(() => repository.deleteFilterPreset(id)),
       logEvent: async (type, payload) => {
@@ -472,7 +519,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       exportBackup: async () => repository.exportBackup(),
       importBackup: async (payload) => runAndRefresh(() => repository.importBackup(payload)),
     }),
-    [allChildren, allItems, allChildItems, allStorageLocations, allPrintAliases, purchaseState, allOutfits, allFilterPresets, allBrands, loading, errorMessage, settings, refresh, runAndRefresh, runAndRefreshWithResult, refreshPurchaseState, prepareInputWithPersistentImage, ensureItemHasPersistentCopy, warnIfMissingPersistentImage],
+    [allChildren, allItems, allChildItems, allStorageLocations, allPrintAliases, purchaseState, allOutfits, allFilterPresets, allBrands, allSaleDrafts, allSaleDraftItems, loading, errorMessage, settings, refresh, runAndRefresh, runAndRefreshWithResult, refreshPurchaseState, prepareInputWithPersistentImage, ensureItemHasPersistentCopy, warnIfMissingPersistentImage],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

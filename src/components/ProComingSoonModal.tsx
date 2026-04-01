@@ -7,10 +7,37 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onFeedback?: () => void;
+  title?: string;
+  bodyLines?: string[];
+  bulletLines?: string[];
+  footerText?: string;
+  buttonLabel?: string;
 };
 
-export const ProComingSoonModal: React.FC<Props> = ({ visible, onClose, onFeedback }) => {
+export const ProComingSoonModal: React.FC<Props> = ({
+  visible,
+  onClose,
+  onFeedback,
+  title,
+  bodyLines,
+  bulletLines,
+  footerText,
+  buttonLabel,
+}) => {
   const theme = useAppTheme();
+  const resolvedTitle = title ?? 'Layette Out Pro is coming soon';
+  const resolvedBodyLines = bodyLines ?? [
+    'We\'re working on optional premium features for families who want more advanced closet organization tools.',
+    'Thanks for being an early user — you\'ll receive special perks when Pro launches.',
+  ];
+  const resolvedBulletLines = bulletLines ?? [
+    'BST listings with photo grids',
+    'Multiple photos per item',
+    'Sibling print matching',
+    'Custom categories and advanced tags',
+  ];
+  const resolvedFooterText = footerText ?? 'Early feedback from users like you helps shape what features come next.';
+  const resolvedButtonLabel = buttonLabel ?? 'Got it';
   const styles = StyleSheet.create({
     backdrop: {
       flex: 1,
@@ -71,33 +98,28 @@ export const ProComingSoonModal: React.FC<Props> = ({ visible, onClose, onFeedba
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.card} onPress={() => undefined}>
-          <Text style={styles.title}>Layette Out Pro is coming soon</Text>
-          <Text style={styles.body}>
-            We&apos;re working on optional premium features for families who want more advanced closet organization tools.
-          </Text>
-          <Text style={styles.body}>
-            Thanks for being an early user — you&apos;ll receive special perks when Pro launches.
-          </Text>
+          <Text style={styles.title}>{resolvedTitle}</Text>
+          {resolvedBodyLines.map((line, index) => (
+            <Text key={`body-${index}`} style={styles.body}>
+              {line}
+            </Text>
+          ))}
 
-          <Text style={styles.sectionTitle}>Planned Pro features may include:</Text>
-          <Text style={styles.bullet}>• BST listings with photo grids</Text>
-          <Text style={styles.bullet}>• Multiple photos per item</Text>
-          <Text style={styles.bullet}>• Sibling print matching</Text>
-          <Text style={styles.bullet}>• Custom categories and advanced tags</Text>
+          {resolvedBulletLines.length ? <Text style={styles.sectionTitle}>Planned Pro features may include:</Text> : null}
+          {resolvedBulletLines.map((line, index) => (
+            <Text key={`bullet-${index}`} style={styles.bullet}>• {line}</Text>
+          ))}
 
-          <Text style={styles.footer}>
-            Early feedback from users like you helps shape what features come next.
-          </Text>
+          <Text style={styles.footer}>{resolvedFooterText}</Text>
 
           {onFeedback ? (
             <Pressable style={styles.feedbackButton} onPress={onFeedback} accessibilityRole="button">
               <Text style={styles.feedbackText}>Send Feedback</Text>
             </Pressable>
           ) : null}
-          <PrimaryButton label="Got it" onPress={onClose} />
+          <PrimaryButton label={resolvedButtonLabel} onPress={onClose} />
         </Pressable>
       </Pressable>
     </Modal>
   );
 };
-

@@ -11,6 +11,7 @@ export type RootTabParamList = {
 };
 
 export type ItemsStackParamList = {
+  ProPaywall: { source?: 'bst_card_limit' | 'bst_draft_limit' | 'bst_locked_export' | 'item_multi_photo' } | undefined;
   ItemsList:
     | {
         initialStatus?: ItemStatus;
@@ -68,6 +69,11 @@ export type ClosetStackParamList = {
       }
     | undefined;
   SellBin: undefined;
+  ProPaywall: { source?: 'bst_card_limit' | 'bst_draft_limit' | 'bst_locked_export' | 'item_multi_photo' } | undefined;
+  BstSaleDraftList: undefined;
+  BstSaleDraftCreate: { prefillItemIds?: ID[] } | undefined;
+  BstSaleDraftEditor: { draftId: ID; editDraftItemId?: ID };
+  BstSaleDraftPreview: { draftId: ID; previewMode?: 'full' | 'teaser' };
   CategorySnapshot: { childId: ID; category: string; sizeMode?: ClosetSizeMode; brandId?: string; brandIds?: string[]; season?: string; query?: string; locationFilter?: string };
   OutfitsList: undefined;
   OutfitBuilder: { outfitId?: ID } | undefined;

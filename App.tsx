@@ -5,11 +5,14 @@ import { ActionSheetIOS, Alert, AlertButton, Linking, Platform, SafeAreaView, St
 import * as ExpoLinking from 'expo-linking';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
+import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { UndoToastHost } from './src/components/UndoToastHost';
+import { appConfig } from './src/config';
 import { DataProvider } from './src/db/DataContext';
 import { ReviewPromptProvider } from './src/hooks/useReviewPrompt';
 import { linking } from './src/navigation/linking';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { registerPostHogClient } from './src/services/analytics/posthog';
 import { useData } from './src/db/DataContext';
 import { clearPendingSharePayload, getPendingSharePayload } from './src/utils/appGroupStorage';
 import { isAppOwnedImageUri } from './src/utils/imageCache';
@@ -315,21 +318,51 @@ const MissingPhotoRestoreNudge = () => {
   return null;
 };
 
+const PostHogBridge = () => {
+  const posthog = usePostHog();
+
+  useEffect(() => {
+    registerPostHogClient(posthog ?? null);
+    return () => registerPostHogClient(null);
+  }, [posthog]);
+
+  return null;
+};
+
+const AnalyticsRoot: React.FC<React.PropsWithChildren> = ({ children }) => {
+  if (!appConfig.posthog.apiKey || !appConfig.posthog.host) {
+    return <>{children}</>;
+  }
+
+  return (
+    <PostHogProvider
+      apiKey={appConfig.posthog.apiKey}
+      options={{ host: appConfig.posthog.host }}
+      autocapture={false}
+    >
+      <PostHogBridge />
+      {children}
+    </PostHogProvider>
+  );
+};
+
 export default function App() {
   return (
     <AppErrorBoundary>
       <ShareIntentProvider>
-        <DataProvider>
-          <ReviewPromptProvider>
-            <NavigationContainer linking={linking}>
-              <StatusBar style="dark" />
-              <ShareToAppBridge />
-              <MissingPhotoRestoreNudge />
-              <RootNavigator />
-              <UndoToastHost />
-            </NavigationContainer>
-          </ReviewPromptProvider>
-        </DataProvider>
+        <AnalyticsRoot>
+          <DataProvider>
+            <ReviewPromptProvider>
+              <NavigationContainer linking={linking}>
+                <StatusBar style="dark" />
+                <ShareToAppBridge />
+                <MissingPhotoRestoreNudge />
+                <RootNavigator />
+                <UndoToastHost />
+              </NavigationContainer>
+            </ReviewPromptProvider>
+          </DataProvider>
+        </AnalyticsRoot>
       </ShareIntentProvider>
     </AppErrorBoundary>
   );

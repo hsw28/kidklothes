@@ -1,4 +1,20 @@
-import { ActivityEvent, AppSettings, BackupPayload, Child, ChildItem, FilterPreset, ID, Item, Outfit, PrintAlias, PurchaseStateSnapshot, StorageLocation } from '@/models';
+import {
+  ActivityEvent,
+  AppSettings,
+  BackupPayload,
+  BstCollageGridSize,
+  Child,
+  ChildItem,
+  FilterPreset,
+  ID,
+  Item,
+  Outfit,
+  PrintAlias,
+  PurchaseStateSnapshot,
+  SaleDraft,
+  SaleDraftItem,
+  StorageLocation,
+} from '@/models';
 import { sizeToNumber } from '@/utils/fitInsights';
 import { normalizePrintName, resolvePrintName } from '@/utils/printName';
 import { normalizePrintKey, normalizeStringArray, normalizeToken as normalizeGenericToken, normalizeUrl, normalizeWhitespace, trimOrNull } from '@/utils/normalize';
@@ -72,6 +88,18 @@ export interface NewItemInput {
   fitRating?: Item['fitRating'];
   fitException?: Item['fitException'];
   condition?: Item['condition'];
+  bstSelectedPhotoUri?: string;
+  bstCondition?: Item['bstCondition'];
+  bstConditionNotes?: string;
+  bstFlawTags?: Item['bstFlawTags'];
+  bstFlawNotes?: string;
+  bstWashNotes?: string;
+  bstDryingMethod?: Item['bstDryingMethod'];
+  bstSmokeNote?: Item['bstSmokeNote'];
+  bstPetTypes?: Item['bstPetTypes'];
+  bstPetNote?: string;
+  bstOffersAccepted?: boolean;
+  bstBundleOffersAccepted?: boolean;
   seasonTags?: string[];
   lastWornAt?: number;
   wornCount?: number;
@@ -111,6 +139,55 @@ export interface NewOutfitInput {
   weatherHint?: string;
 }
 
+export interface CreateSaleDraftInput {
+  title?: string;
+  itemIds: ID[];
+}
+
+export interface UpdateSaleDraftInput {
+  title?: string;
+  status?: SaleDraft['status'];
+  defaultSmokeNote?: SaleDraft['defaultSmokeNote'];
+  defaultPetTypes?: SaleDraft['defaultPetTypes'];
+  defaultPetNote?: string;
+  defaultWashNote?: string;
+  defaultDryingMethod?: SaleDraft['defaultDryingMethod'];
+  defaultBundleOffersAccepted?: boolean;
+  defaultOffersAccepted?: boolean;
+  defaultShippingNote?: string;
+  defaultPaymentNote?: string;
+  collageGridSize?: BstCollageGridSize;
+  customHeaderImageUri?: string;
+  freeGeneratedCardItemIds?: ID[];
+}
+
+export interface UpdateSaleDraftItemInput {
+  listingOrder?: number;
+  included?: boolean;
+  itemNumber?: number;
+  selectedPhotoUri?: string;
+  price?: number;
+  condition?: SaleDraftItem['condition'];
+  conditionNotes?: string;
+  flawTags?: SaleDraftItem['flawTags'];
+  flawNotes?: string;
+  washNotesOverride?: string;
+  dryingMethodOverride?: SaleDraftItem['dryingMethodOverride'];
+  smokeNoteOverride?: SaleDraftItem['smokeNoteOverride'];
+  petTypesOverride?: SaleDraftItem['petTypesOverride'];
+  petNoteOverride?: string;
+  offersAcceptedOverride?: boolean;
+  bundleOffersAcceptedOverride?: boolean;
+  generatedStatus?: string;
+}
+
+export interface BulkUpdateSaleDraftItemsInput {
+  condition?: SaleDraftItem['condition'] | null;
+  dryingMethodOverride?: SaleDraftItem['dryingMethodOverride'] | null;
+  offersAcceptedOverride?: boolean | null;
+  bundleOffersAcceptedOverride?: boolean | null;
+}
+
 interface StoreState {
   children: Child[];
   items: Item[];
@@ -121,6 +198,8 @@ interface StoreState {
   outfits: Outfit[];
   filterPresets: FilterPreset[];
   brands: string[];
+  saleDrafts: SaleDraft[];
+  saleDraftItems: SaleDraftItem[];
   settings: AppSettings;
 }
 
@@ -219,6 +298,18 @@ type ItemRow = {
   fitRating: string | null;
   fitException: string | null;
   condition: string | null;
+  bstSelectedPhotoUri: string | null;
+  bstCondition: string | null;
+  bstConditionNotes: string | null;
+  bstFlawTagsJson: string | null;
+  bstFlawNotes: string | null;
+  bstWashNotes: string | null;
+  bstDryingMethod: string | null;
+  bstSmokeNote: string | null;
+  bstPetType: string | null;
+  bstPetNote: string | null;
+  bstOffersAccepted: number | null;
+  bstBundleOffersAccepted: number | null;
   seasonTags: string | null;
   lastWornAt: number | null;
   wornCount: number | null;
@@ -302,9 +393,55 @@ type SettingsRow = {
   inventoryRealityCheckOwnedThreshold: number | null;
   developerModeEnabled: number | null;
   devProUnlocked: number | null;
+  developerForceProAccessEnabled: number | null;
   betaKidLimitBannerDismissed: number | null;
   proTeaserBannerDismissed: number | null;
   missingPhotoRestoreNudgeShown: number | null;
+};
+
+type SaleDraftRow = {
+  id: string;
+  title: string | null;
+  status: string | null;
+  defaultSmokeNote: string | null;
+  defaultPetType: string | null;
+  defaultPetNote: string | null;
+  defaultWashNote: string | null;
+  defaultDryingMethod: string | null;
+  defaultBundleOffersAccepted: number | null;
+  defaultOffersAccepted: number | null;
+  defaultShippingNote: string | null;
+  defaultPaymentNote: string | null;
+  collageGridSize: string | null;
+  customHeaderImageUri: string | null;
+  freeGeneratedCardItemIdsJson: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type SaleDraftItemRow = {
+  id: string;
+  saleDraftId: string;
+  itemId: string;
+  listingOrder: number;
+  included: number | null;
+  itemNumber: number;
+  selectedPhotoUri: string | null;
+  price: number | null;
+  condition: string | null;
+  conditionNotes: string | null;
+  flawTagsJson: string | null;
+  flawNotes: string | null;
+  washNotesOverride: string | null;
+  dryingMethodOverride: string | null;
+  smokeNoteOverride: string | null;
+  petTypeOverride: string | null;
+  petNoteOverride: string | null;
+  offersAcceptedOverride: number | null;
+  bundleOffersAcceptedOverride: number | null;
+  generatedStatus: string | null;
+  createdAt: number;
+  updatedAt: number;
 };
 
 type EventRow = {
@@ -353,7 +490,7 @@ const defaultSettings: AppSettings = {
   kidsPreviewCategories: undefined,
   inventoryRealityCheckOwnedThreshold: 5,
   developerModeEnabled: false,
-  devProUnlocked: false,
+  developerForceProAccessEnabled: false,
   betaKidLimitBannerDismissed: false,
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,
@@ -518,6 +655,18 @@ const mapItem = (row: ItemRow, tags: string[], brandTags: string[], childIds: st
   fitRating: (row.fitRating as Item['fitRating']) ?? undefined,
   fitException: (row.fitException as Item['fitException']) ?? undefined,
   condition: (row.condition as Item['condition']) ?? undefined,
+  bstSelectedPhotoUri: row.bstSelectedPhotoUri ?? undefined,
+  bstCondition: (row.bstCondition as Item['bstCondition']) ?? undefined,
+  bstConditionNotes: row.bstConditionNotes ?? undefined,
+  bstFlawTags: parseStringList(row.bstFlawTagsJson) as Item['bstFlawTags'],
+  bstFlawNotes: row.bstFlawNotes ?? undefined,
+  bstWashNotes: row.bstWashNotes ?? undefined,
+  bstDryingMethod: (row.bstDryingMethod as Item['bstDryingMethod']) ?? undefined,
+  bstSmokeNote: (row.bstSmokeNote as Item['bstSmokeNote']) ?? undefined,
+  bstPetTypes: parsePetTypesField(row.bstPetType) as Item['bstPetTypes'],
+  bstPetNote: row.bstPetNote ?? undefined,
+  bstOffersAccepted: row.bstOffersAccepted === null ? undefined : row.bstOffersAccepted === 1,
+  bstBundleOffersAccepted: row.bstBundleOffersAccepted === null ? undefined : row.bstBundleOffersAccepted === 1,
   seasonTags: parseStringList(row.seasonTags),
   lastWornAt: row.lastWornAt ?? undefined,
   wornCount: row.wornCount ?? 0,
@@ -543,6 +692,7 @@ const mapOutfit = (row: OutfitRow, tags: string[]): Outfit => ({
 
 const mapSettings = (row?: SettingsRow | null): AppSettings => {
   if (!row) return defaultSettings;
+  const legacyDevProUnlocked = row.devProUnlocked === 1;
   return {
     closetAddDefaultView: row.closetAddDefaultView === 'simple' ? 'simple' : 'detailed',
     notificationsEnabled: row.notificationsEnabled === 1,
@@ -566,7 +716,7 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
     })(),
     inventoryRealityCheckOwnedThreshold: normalizeInventoryRealityThreshold(row.inventoryRealityCheckOwnedThreshold),
     developerModeEnabled: row.developerModeEnabled === 1,
-    devProUnlocked: row.devProUnlocked === 1,
+    developerForceProAccessEnabled: (row.developerForceProAccessEnabled ?? (legacyDevProUnlocked ? 1 : 0)) === 1,
     betaKidLimitBannerDismissed: row.betaKidLimitBannerDismissed === 1,
     proTeaserBannerDismissed: row.proTeaserBannerDismissed === 1,
     missingPhotoRestoreNudgeShown: row.missingPhotoRestoreNudgeShown === 1,
@@ -608,6 +758,51 @@ const mapPurchaseState = (row?: PurchaseStateRow | null): PurchaseStateSnapshot 
   }
 };
 
+const mapSaleDraft = (row: SaleDraftRow): SaleDraft => ({
+  id: row.id,
+  title: row.title ?? undefined,
+  status: (row.status ?? 'draft') as SaleDraft['status'],
+  defaultSmokeNote: (row.defaultSmokeNote as SaleDraft['defaultSmokeNote']) ?? undefined,
+  defaultPetTypes: parsePetTypesField(row.defaultPetType),
+  defaultPetNote: row.defaultPetNote ?? undefined,
+  defaultWashNote: row.defaultWashNote ?? undefined,
+  defaultDryingMethod: (row.defaultDryingMethod as SaleDraft['defaultDryingMethod']) ?? undefined,
+  defaultBundleOffersAccepted: row.defaultBundleOffersAccepted === null ? undefined : row.defaultBundleOffersAccepted === 1,
+  defaultOffersAccepted: row.defaultOffersAccepted === null ? undefined : row.defaultOffersAccepted === 1,
+  defaultShippingNote: row.defaultShippingNote ?? undefined,
+  defaultPaymentNote: row.defaultPaymentNote ?? undefined,
+  collageGridSize: (row.collageGridSize as SaleDraft['collageGridSize']) ?? 'Auto',
+  customHeaderImageUri: row.customHeaderImageUri ?? undefined,
+  freeGeneratedCardItemIds: parseStringList(row.freeGeneratedCardItemIdsJson),
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const mapSaleDraftItem = (row: SaleDraftItemRow): SaleDraftItem => ({
+  id: row.id,
+  saleDraftId: row.saleDraftId,
+  itemId: row.itemId,
+  listingOrder: row.listingOrder,
+  included: row.included !== 0,
+  itemNumber: row.itemNumber,
+  selectedPhotoUri: row.selectedPhotoUri ?? undefined,
+  price: row.price ?? undefined,
+  condition: (row.condition as SaleDraftItem['condition']) ?? undefined,
+  conditionNotes: row.conditionNotes ?? undefined,
+  flawTags: parseStringList(row.flawTagsJson) as SaleDraftItem['flawTags'],
+  flawNotes: row.flawNotes ?? undefined,
+  washNotesOverride: row.washNotesOverride ?? undefined,
+  dryingMethodOverride: (row.dryingMethodOverride as SaleDraftItem['dryingMethodOverride']) ?? undefined,
+  smokeNoteOverride: (row.smokeNoteOverride as SaleDraftItem['smokeNoteOverride']) ?? undefined,
+  petTypesOverride: parsePetTypesField(row.petTypeOverride),
+  petNoteOverride: row.petNoteOverride ?? undefined,
+  offersAcceptedOverride: row.offersAcceptedOverride === null ? undefined : row.offersAcceptedOverride === 1,
+  bundleOffersAcceptedOverride: row.bundleOffersAcceptedOverride === null ? undefined : row.bundleOffersAcceptedOverride === 1,
+  generatedStatus: row.generatedStatus ?? undefined,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
 const normalizeTagName = (name: string) => normalizeGenericToken(name).replace(/\s+/g, ' ').trim();
 const normalizeBrandName = (name: string) => normalizeGenericToken(name).replace(/\s+/g, ' ').trim();
 const normalizeChildName = (name: string) => normalizeWhitespace(name).trim().toLocaleLowerCase();
@@ -616,6 +811,69 @@ const duplicateChildNameError = () => {
   const error = new Error('There is already a child with that name.');
   (error as Error & { code?: string }).code = 'DUPLICATE_CHILD_NAME';
   return error;
+};
+
+const normalizeOptionalNumber = (value?: number | null): number | undefined => {
+  if (value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const normalizeSaleDraftTitle = (value?: string | null): string | undefined => trimOrNull(value ?? undefined) ?? undefined;
+const normalizeSaleDraftText = (value?: string | null): string | undefined => trimOrNull(value ?? undefined) ?? undefined;
+const normalizePetTypes = <T extends string>(value?: T[] | null): T[] | undefined => {
+  if (!value) return undefined;
+  const normalized = Array.from(new Set(value.map((entry) => trimOrNull(entry) as T | null).filter(Boolean))) as T[];
+  return normalized.length ? normalized : undefined;
+};
+
+const parsePetTypesField = (value?: string | null): SaleDraft['defaultPetTypes'] | undefined => {
+  const trimmed = trimOrNull(value ?? undefined);
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith('[')) {
+    return parseStringList(trimmed) as SaleDraft['defaultPetTypes'];
+  }
+  return [trimmed as NonNullable<SaleDraft['defaultPetTypes']>[number]];
+};
+
+const toNullableBooleanDbValue = (value?: boolean | null): number | null => {
+  if (value === undefined || value === null) return null;
+  return value ? 1 : 0;
+};
+
+const renumberSaleDraftItems = async (db: Awaited<ReturnType<typeof getDb>>, saleDraftId: ID) => {
+  const rows = await db.getAllAsync<{ id: string }>(
+    'SELECT id FROM sale_draft_items WHERE saleDraftId = ? ORDER BY listingOrder ASC, createdAt ASC;',
+    saleDraftId,
+  );
+  const now = Date.now();
+  for (let index = 0; index < rows.length; index += 1) {
+    await db.runAsync(
+      'UPDATE sale_draft_items SET listingOrder = ?, itemNumber = ?, updatedAt = ? WHERE id = ?;',
+      index,
+      index + 1,
+      now,
+      rows[index].id,
+    );
+  }
+  await db.runAsync('UPDATE sale_drafts SET updatedAt = ? WHERE id = ?;', now, saleDraftId);
+};
+
+const cleanupDraftFreeGeneratedCardIds = async (db: Awaited<ReturnType<typeof getDb>>, saleDraftId: ID) => {
+  const draftRow = await db.getFirstAsync<{ freeGeneratedCardItemIdsJson: string | null }>(
+    'SELECT freeGeneratedCardItemIdsJson FROM sale_drafts WHERE id = ?;',
+    saleDraftId,
+  );
+  if (!draftRow) return;
+  const includedRows = await db.getAllAsync<{ id: string }>('SELECT id FROM sale_draft_items WHERE saleDraftId = ?;', saleDraftId);
+  const includedIds = new Set(includedRows.map((row) => row.id));
+  const nextIds = parseStringList(draftRow.freeGeneratedCardItemIdsJson).filter((id) => includedIds.has(id));
+  await db.runAsync(
+    'UPDATE sale_drafts SET freeGeneratedCardItemIdsJson = ?, updatedAt = ? WHERE id = ?;',
+    JSON.stringify(nextIds),
+    Date.now(),
+    saleDraftId,
+  );
 };
 
 const assertUniqueChildName = async (db: Awaited<ReturnType<typeof getDb>>, name: string, excludeId?: ID) => {
@@ -772,7 +1030,23 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
 
-    const [childrenRows, itemRows, childItemRows, storageLocationRows, printAliasRows, purchaseStateRow, outfitRows, itemTagRows, itemBrandRows, outfitTagRows, settingsRow, filterPresetRows, brandRows] =
+    const [
+      childrenRows,
+      itemRows,
+      childItemRows,
+      storageLocationRows,
+      printAliasRows,
+      purchaseStateRow,
+      outfitRows,
+      itemTagRows,
+      itemBrandRows,
+      outfitTagRows,
+      settingsRow,
+      filterPresetRows,
+      brandRows,
+      saleDraftRows,
+      saleDraftItemRows,
+    ] =
       await Promise.all([
       db.getAllAsync<ChildRow>('SELECT * FROM children WHERE deletedAt IS NULL ORDER BY createdAt DESC;'),
       db.getAllAsync<ItemRow>('SELECT * FROM items WHERE deletedAt IS NULL ORDER BY updatedAt DESC;'),
@@ -799,6 +1073,8 @@ export const repository = {
       db.getFirstAsync<SettingsRow>('SELECT * FROM settings WHERE id = ?;', 'app'),
       db.getAllAsync<FilterPresetRow>('SELECT * FROM filter_presets WHERE deletedAt IS NULL ORDER BY updatedAt DESC;'),
       db.getAllAsync<BrandRow>('SELECT * FROM brands ORDER BY name ASC;'),
+      db.getAllAsync<SaleDraftRow>('SELECT * FROM sale_drafts ORDER BY updatedAt DESC;'),
+      db.getAllAsync<SaleDraftItemRow>('SELECT * FROM sale_draft_items ORDER BY saleDraftId ASC, listingOrder ASC, createdAt ASC;'),
     ]);
 
     const itemTagMap = new Map<string, string[]>();
@@ -839,6 +1115,8 @@ export const repository = {
       outfits: outfitRows.map((row) => mapOutfit(row, outfitTagMap.get(row.id) ?? [])),
       filterPresets: filterPresetRows.map(mapFilterPreset),
       brands: brandRows.map((row) => row.name),
+      saleDrafts: saleDraftRows.map(mapSaleDraft),
+      saleDraftItems: saleDraftItemRows.map(mapSaleDraftItem),
       settings: mapSettings(settingsRow),
     };
   },
@@ -863,7 +1141,7 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     await db.runAsync(
-      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, devProUnlocked = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ? WHERE id = ?;`,
+      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, devProUnlocked = ?, developerForceProAccessEnabled = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ? WHERE id = ?;`,
       'never',
       next.closetAddDefaultView,
       next.notificationsEnabled ? 1 : 0,
@@ -886,7 +1164,8 @@ export const repository = {
         : null,
       next.inventoryRealityCheckOwnedThreshold ?? null,
       next.developerModeEnabled ? 1 : 0,
-      next.devProUnlocked ? 1 : 0,
+      next.developerForceProAccessEnabled ? 1 : 0,
+      next.developerForceProAccessEnabled ? 1 : 0,
       next.betaKidLimitBannerDismissed ? 1 : 0,
       next.proTeaserBannerDismissed ? 1 : 0,
       next.missingPhotoRestoreNudgeShown ? 1 : 0,
@@ -1171,6 +1450,18 @@ export const repository = {
       fitRating: input.fitRating,
       fitException: input.fitException,
       condition: input.condition,
+      bstSelectedPhotoUri: trimOrNull(input.bstSelectedPhotoUri) ?? undefined,
+      bstCondition: input.bstCondition,
+      bstConditionNotes: trimOrNull(input.bstConditionNotes) ?? undefined,
+      bstFlawTags: normalizeStringArray(input.bstFlawTags) as Item['bstFlawTags'],
+      bstFlawNotes: trimOrNull(input.bstFlawNotes) ?? undefined,
+      bstWashNotes: trimOrNull(input.bstWashNotes) ?? undefined,
+      bstDryingMethod: input.bstDryingMethod,
+      bstSmokeNote: input.bstSmokeNote,
+      bstPetTypes: normalizePetTypes(input.bstPetTypes) as Item['bstPetTypes'],
+      bstPetNote: trimOrNull(input.bstPetNote) ?? undefined,
+      bstOffersAccepted: input.bstOffersAccepted,
+      bstBundleOffersAccepted: input.bstBundleOffersAccepted,
       seasonTags: normalizeStringArray(input.seasonTags),
       lastWornAt: input.lastWornAt,
       wornCount: input.wornCount ?? 0,
@@ -1182,7 +1473,7 @@ export const repository = {
 
     const itemInsertColumns = [
       'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'quantity', 'brand', 'styleName', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
-      'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
+      'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'bstSelectedPhotoUri', 'bstCondition', 'bstConditionNotes', 'bstFlawTagsJson', 'bstFlawNotes', 'bstWashNotes', 'bstDryingMethod', 'bstSmokeNote', 'bstPetType', 'bstPetNote', 'bstOffersAccepted', 'bstBundleOffersAccepted', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
     ] as const;
     const itemInsertValues: Array<string | number | null> = [
       item.id,
@@ -1228,6 +1519,18 @@ export const repository = {
       item.fitRating ?? null,
       item.fitException ?? null,
       item.condition ?? null,
+      item.bstSelectedPhotoUri ?? null,
+      item.bstCondition ?? null,
+      item.bstConditionNotes ?? null,
+      JSON.stringify(item.bstFlawTags),
+      item.bstFlawNotes ?? null,
+      item.bstWashNotes ?? null,
+      item.bstDryingMethod ?? null,
+      item.bstSmokeNote ?? null,
+      item.bstPetTypes ? JSON.stringify(item.bstPetTypes) : null,
+      item.bstPetNote ?? null,
+      toNullableBooleanDbValue(item.bstOffersAccepted),
+      toNullableBooleanDbValue(item.bstBundleOffersAccepted),
       JSON.stringify(item.seasonTags),
       item.lastWornAt ?? null,
       item.wornCount,
@@ -1395,6 +1698,18 @@ export const repository = {
       fitRating: patch.fitRating ?? existing.fitRating,
       fitException: patch.fitException ?? existing.fitException,
       condition: patch.condition ?? existing.condition,
+      bstSelectedPhotoUri: patch.bstSelectedPhotoUri !== undefined ? trimOrNull(patch.bstSelectedPhotoUri) ?? undefined : existing.bstSelectedPhotoUri,
+      bstCondition: patch.bstCondition ?? existing.bstCondition,
+      bstConditionNotes: patch.bstConditionNotes !== undefined ? trimOrNull(patch.bstConditionNotes) ?? undefined : existing.bstConditionNotes,
+      bstFlawTags: patch.bstFlawTags !== undefined ? normalizeStringArray(patch.bstFlawTags) as Item['bstFlawTags'] : existing.bstFlawTags,
+      bstFlawNotes: patch.bstFlawNotes !== undefined ? trimOrNull(patch.bstFlawNotes) ?? undefined : existing.bstFlawNotes,
+      bstWashNotes: patch.bstWashNotes !== undefined ? trimOrNull(patch.bstWashNotes) ?? undefined : existing.bstWashNotes,
+      bstDryingMethod: patch.bstDryingMethod ?? existing.bstDryingMethod,
+      bstSmokeNote: patch.bstSmokeNote ?? existing.bstSmokeNote,
+      bstPetTypes: patch.bstPetTypes !== undefined ? normalizePetTypes(patch.bstPetTypes) as Item['bstPetTypes'] : existing.bstPetTypes,
+      bstPetNote: patch.bstPetNote !== undefined ? trimOrNull(patch.bstPetNote) ?? undefined : existing.bstPetNote,
+      bstOffersAccepted: patch.bstOffersAccepted !== undefined ? patch.bstOffersAccepted : existing.bstOffersAccepted,
+      bstBundleOffersAccepted: patch.bstBundleOffersAccepted !== undefined ? patch.bstBundleOffersAccepted : existing.bstBundleOffersAccepted,
       seasonTags: patch.seasonTags !== undefined ? normalizeStringArray(patch.seasonTags) : existing.seasonTags,
       lastWornAt: patch.lastWornAt ?? existing.lastWornAt,
       wornCount: patch.wornCount ?? existing.wornCount,
@@ -1447,6 +1762,18 @@ export const repository = {
         fitRating = ?,
         fitException = ?,
         condition = ?,
+        bstSelectedPhotoUri = ?,
+        bstCondition = ?,
+        bstConditionNotes = ?,
+        bstFlawTagsJson = ?,
+        bstFlawNotes = ?,
+        bstWashNotes = ?,
+        bstDryingMethod = ?,
+        bstSmokeNote = ?,
+        bstPetType = ?,
+        bstPetNote = ?,
+        bstOffersAccepted = ?,
+        bstBundleOffersAccepted = ?,
         seasonTags = ?,
         lastWornAt = ?,
         wornCount = ?,
@@ -1493,6 +1820,18 @@ export const repository = {
       updated.fitRating ?? null,
       updated.fitException ?? null,
       updated.condition ?? null,
+      updated.bstSelectedPhotoUri ?? null,
+      updated.bstCondition ?? null,
+      updated.bstConditionNotes ?? null,
+      JSON.stringify(updated.bstFlawTags),
+      updated.bstFlawNotes ?? null,
+      updated.bstWashNotes ?? null,
+      updated.bstDryingMethod ?? null,
+      updated.bstSmokeNote ?? null,
+      updated.bstPetTypes ? JSON.stringify(updated.bstPetTypes) : null,
+      updated.bstPetNote ?? null,
+      toNullableBooleanDbValue(updated.bstOffersAccepted),
+      toNullableBooleanDbValue(updated.bstBundleOffersAccepted),
       JSON.stringify(updated.seasonTags),
       updated.lastWornAt ?? null,
       updated.wornCount,
@@ -1853,6 +2192,8 @@ export const repository = {
       purchaseState: data.purchaseState,
       outfits: data.outfits,
       filterPresets: data.filterPresets,
+      saleDrafts: data.saleDrafts,
+      saleDraftItems: data.saleDraftItems,
       settings: data.settings,
     };
   },
@@ -1871,6 +2212,8 @@ export const repository = {
       DELETE FROM child_items;
       DELETE FROM storage_locations;
       DELETE FROM purchase_state;
+      DELETE FROM sale_draft_items;
+      DELETE FROM sale_drafts;
       DELETE FROM outfits;
       DELETE FROM items;
       DELETE FROM children;
@@ -1917,7 +2260,7 @@ export const repository = {
       });
       const importItemColumns = [
         'id', 'childId', 'url', 'sourceDomain', 'canonicalUrl', 'outboundUrl', 'clickCount', 'quantity', 'brand', 'styleName', 'printName', 'printNameNorm', 'title', 'imageUrl', 'imageUrls', 'cachedImageUri', 'clothingType', 'size', 'status', 'tags', 'notes', 'createdAt', 'updatedAt', 'deletedAt',
-        'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
+        'purchasePrice', 'targetResalePrice', 'soldPrice', 'soldDate', 'listedAt', 'bundleId', 'sizeNormalized', 'sizeType', 'sizeSystem', 'sizeScheme', 'sizeRaw', 'category', 'brandFit', 'kidFit', 'brandSizeNote', 'fabric', 'fitRating', 'fitException', 'condition', 'bstSelectedPhotoUri', 'bstCondition', 'bstConditionNotes', 'bstFlawTagsJson', 'bstFlawNotes', 'bstWashNotes', 'bstDryingMethod', 'bstSmokeNote', 'bstPetType', 'bstPetNote', 'bstOffersAccepted', 'bstBundleOffersAccepted', 'seasonTags', 'lastWornAt', 'wornCount', 'fitBin', 'fitBinTouched',
       ] as const;
       const importItemValues: Array<string | number | null> = [
         item.id,
@@ -1963,6 +2306,18 @@ export const repository = {
         item.fitRating ?? null,
         item.fitException ?? null,
         item.condition ?? null,
+        item.bstSelectedPhotoUri ?? null,
+        item.bstCondition ?? null,
+        item.bstConditionNotes ?? null,
+        JSON.stringify(item.bstFlawTags ?? []),
+        item.bstFlawNotes ?? null,
+        item.bstWashNotes ?? null,
+        item.bstDryingMethod ?? null,
+        item.bstSmokeNote ?? null,
+        item.bstPetTypes ? JSON.stringify(item.bstPetTypes) : null,
+        item.bstPetNote ?? null,
+        toNullableBooleanDbValue(item.bstOffersAccepted),
+        toNullableBooleanDbValue(item.bstBundleOffersAccepted),
         JSON.stringify(item.seasonTags),
         item.lastWornAt ?? null,
         item.wornCount ?? 0,
@@ -2062,7 +2417,285 @@ export const repository = {
       );
     }
 
+    for (const draft of payload.saleDrafts ?? []) {
+      await db.runAsync(
+        `INSERT INTO sale_drafts (id, title, status, defaultSmokeNote, defaultPetType, defaultPetNote, defaultWashNote, defaultDryingMethod, defaultBundleOffersAccepted, defaultOffersAccepted, defaultShippingNote, defaultPaymentNote, collageGridSize, customHeaderImageUri, freeGeneratedCardItemIdsJson, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        draft.id,
+        draft.title ?? null,
+        draft.status,
+        draft.defaultSmokeNote ?? null,
+        draft.defaultPetTypes ? JSON.stringify(draft.defaultPetTypes) : null,
+        draft.defaultPetNote ?? null,
+        draft.defaultWashNote ?? null,
+        draft.defaultDryingMethod ?? null,
+        toNullableBooleanDbValue(draft.defaultBundleOffersAccepted),
+        toNullableBooleanDbValue(draft.defaultOffersAccepted),
+        draft.defaultShippingNote ?? null,
+        draft.defaultPaymentNote ?? null,
+        draft.collageGridSize ?? 'Auto',
+        draft.customHeaderImageUri ?? null,
+        JSON.stringify(draft.freeGeneratedCardItemIds ?? []),
+        draft.createdAt,
+        draft.updatedAt,
+      );
+    }
+
+    for (const draftItem of payload.saleDraftItems ?? []) {
+      await db.runAsync(
+        `INSERT INTO sale_draft_items (id, saleDraftId, itemId, listingOrder, included, itemNumber, selectedPhotoUri, price, condition, conditionNotes, flawTagsJson, flawNotes, washNotesOverride, dryingMethodOverride, smokeNoteOverride, petTypeOverride, petNoteOverride, offersAcceptedOverride, bundleOffersAcceptedOverride, generatedStatus, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        draftItem.id,
+        draftItem.saleDraftId,
+        draftItem.itemId,
+        draftItem.listingOrder,
+        draftItem.included ? 1 : 0,
+        draftItem.itemNumber,
+        draftItem.selectedPhotoUri ?? null,
+        draftItem.price ?? null,
+        draftItem.condition ?? null,
+        draftItem.conditionNotes ?? null,
+        JSON.stringify(draftItem.flawTags ?? []),
+        draftItem.flawNotes ?? null,
+        draftItem.washNotesOverride ?? null,
+        draftItem.dryingMethodOverride ?? null,
+        draftItem.smokeNoteOverride ?? null,
+        draftItem.petTypesOverride ? JSON.stringify(draftItem.petTypesOverride) : null,
+        draftItem.petNoteOverride ?? null,
+        toNullableBooleanDbValue(draftItem.offersAcceptedOverride),
+        toNullableBooleanDbValue(draftItem.bundleOffersAcceptedOverride),
+        draftItem.generatedStatus ?? null,
+        draftItem.createdAt,
+        draftItem.updatedAt,
+      );
+    }
+
     await repository.updateSettings(payload.settings);
+  },
+
+  async createSaleDraft(input: CreateSaleDraftInput): Promise<SaleDraft> {
+    await initDatabase();
+    const db = await getDb();
+    const now = Date.now();
+    const draft: SaleDraft = {
+      id: makeId(),
+      title: normalizeSaleDraftTitle(input.title),
+      status: 'draft',
+      collageGridSize: 'Auto',
+      customHeaderImageUri: undefined,
+      freeGeneratedCardItemIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const uniqueItemIds = Array.from(new Set(input.itemIds));
+    const sourceItems = uniqueItemIds.length
+      ? await db.getAllAsync<ItemRow>(`SELECT * FROM items WHERE id IN (${uniqueItemIds.map(() => '?').join(', ')});`, ...uniqueItemIds)
+      : [];
+    const sourceItemMap = new Map(sourceItems.map((row) => {
+      const mapped = mapItem(row, [], row.brand ? [row.brand] : [], row.childId ? [row.childId] : []);
+      return [mapped.id, mapped] as const;
+    }));
+    await runInTransaction(db, async () => {
+      await db.runAsync(
+        `INSERT INTO sale_drafts (id, title, status, collageGridSize, customHeaderImageUri, freeGeneratedCardItemIdsJson, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        draft.id,
+        draft.title ?? null,
+        draft.status,
+        draft.collageGridSize,
+        draft.customHeaderImageUri ?? null,
+        JSON.stringify(draft.freeGeneratedCardItemIds),
+        draft.createdAt,
+        draft.updatedAt,
+      );
+
+      for (let index = 0; index < uniqueItemIds.length; index += 1) {
+        await db.runAsync(
+          `INSERT INTO sale_draft_items (id, saleDraftId, itemId, listingOrder, included, itemNumber, selectedPhotoUri, price, condition, conditionNotes, flawTagsJson, flawNotes, washNotesOverride, dryingMethodOverride, smokeNoteOverride, petTypeOverride, petNoteOverride, offersAcceptedOverride, bundleOffersAcceptedOverride, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          makeId(),
+          draft.id,
+          uniqueItemIds[index],
+          index,
+          1,
+          index + 1,
+          sourceItemMap.get(uniqueItemIds[index])?.bstSelectedPhotoUri ?? null,
+          sourceItemMap.get(uniqueItemIds[index])?.targetResalePrice ?? null,
+          sourceItemMap.get(uniqueItemIds[index])?.bstCondition ?? null,
+          sourceItemMap.get(uniqueItemIds[index])?.bstConditionNotes ?? null,
+          JSON.stringify(sourceItemMap.get(uniqueItemIds[index])?.bstFlawTags ?? []),
+          sourceItemMap.get(uniqueItemIds[index])?.bstFlawNotes ?? null,
+          sourceItemMap.get(uniqueItemIds[index])?.bstWashNotes ?? null,
+          sourceItemMap.get(uniqueItemIds[index])?.bstDryingMethod ?? null,
+          sourceItemMap.get(uniqueItemIds[index])?.bstSmokeNote ?? null,
+          sourceItemMap.get(uniqueItemIds[index])?.bstPetTypes ? JSON.stringify(sourceItemMap.get(uniqueItemIds[index])?.bstPetTypes) : null,
+          sourceItemMap.get(uniqueItemIds[index])?.bstPetNote ?? null,
+          toNullableBooleanDbValue(sourceItemMap.get(uniqueItemIds[index])?.bstOffersAccepted),
+          toNullableBooleanDbValue(sourceItemMap.get(uniqueItemIds[index])?.bstBundleOffersAccepted),
+          now,
+          now,
+        );
+      }
+    });
+    return draft;
+  },
+
+  async updateSaleDraft(id: ID, patch: UpdateSaleDraftInput): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const existing = await db.getFirstAsync<SaleDraftRow>('SELECT * FROM sale_drafts WHERE id = ?;', id);
+    if (!existing) throw new Error('Sale draft not found.');
+    const next = {
+      ...mapSaleDraft(existing),
+      ...patch,
+      title: patch.title === undefined ? mapSaleDraft(existing).title : normalizeSaleDraftTitle(patch.title),
+      defaultPetTypes: patch.defaultPetTypes === undefined ? mapSaleDraft(existing).defaultPetTypes : normalizePetTypes(patch.defaultPetTypes),
+      defaultPetNote: patch.defaultPetNote === undefined ? mapSaleDraft(existing).defaultPetNote : normalizeSaleDraftText(patch.defaultPetNote),
+      defaultWashNote: patch.defaultWashNote === undefined ? mapSaleDraft(existing).defaultWashNote : normalizeSaleDraftText(patch.defaultWashNote),
+      defaultShippingNote: patch.defaultShippingNote === undefined ? mapSaleDraft(existing).defaultShippingNote : normalizeSaleDraftText(patch.defaultShippingNote),
+      defaultPaymentNote: patch.defaultPaymentNote === undefined ? mapSaleDraft(existing).defaultPaymentNote : normalizeSaleDraftText(patch.defaultPaymentNote),
+      customHeaderImageUri: patch.customHeaderImageUri === undefined ? mapSaleDraft(existing).customHeaderImageUri : normalizeSaleDraftText(patch.customHeaderImageUri),
+      freeGeneratedCardItemIds: patch.freeGeneratedCardItemIds === undefined ? mapSaleDraft(existing).freeGeneratedCardItemIds : patch.freeGeneratedCardItemIds,
+      updatedAt: Date.now(),
+    };
+    await db.runAsync(
+      `UPDATE sale_drafts
+       SET title = ?, status = ?, defaultSmokeNote = ?, defaultPetType = ?, defaultPetNote = ?, defaultWashNote = ?, defaultDryingMethod = ?, defaultBundleOffersAccepted = ?, defaultOffersAccepted = ?, defaultShippingNote = ?, defaultPaymentNote = ?, collageGridSize = ?, customHeaderImageUri = ?, freeGeneratedCardItemIdsJson = ?, updatedAt = ?
+       WHERE id = ?;`,
+      next.title ?? null,
+      next.status,
+      next.defaultSmokeNote ?? null,
+      next.defaultPetTypes ? JSON.stringify(next.defaultPetTypes) : null,
+      next.defaultPetNote ?? null,
+      next.defaultWashNote ?? null,
+      next.defaultDryingMethod ?? null,
+      toNullableBooleanDbValue(next.defaultBundleOffersAccepted),
+      toNullableBooleanDbValue(next.defaultOffersAccepted),
+      next.defaultShippingNote ?? null,
+      next.defaultPaymentNote ?? null,
+      next.collageGridSize ?? 'Auto',
+      next.customHeaderImageUri ?? null,
+      JSON.stringify(next.freeGeneratedCardItemIds ?? []),
+      next.updatedAt,
+      id,
+    );
+  },
+
+  async updateSaleDraftItem(id: ID, patch: UpdateSaleDraftItemInput): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const existing = await db.getFirstAsync<SaleDraftItemRow>('SELECT * FROM sale_draft_items WHERE id = ?;', id);
+    if (!existing) throw new Error('Sale draft item not found.');
+    const current = mapSaleDraftItem(existing);
+    const next: SaleDraftItem = {
+      ...current,
+      ...patch,
+      selectedPhotoUri: patch.selectedPhotoUri === undefined ? current.selectedPhotoUri : normalizeSaleDraftText(patch.selectedPhotoUri),
+      price: patch.price === undefined ? current.price : normalizeOptionalNumber(patch.price),
+      conditionNotes: patch.conditionNotes === undefined ? current.conditionNotes : normalizeSaleDraftText(patch.conditionNotes),
+      flawTags: patch.flawTags === undefined ? current.flawTags : patch.flawTags,
+      flawNotes: patch.flawNotes === undefined ? current.flawNotes : normalizeSaleDraftText(patch.flawNotes),
+      washNotesOverride: patch.washNotesOverride === undefined ? current.washNotesOverride : normalizeSaleDraftText(patch.washNotesOverride),
+      petTypesOverride: patch.petTypesOverride === undefined ? current.petTypesOverride : normalizePetTypes(patch.petTypesOverride),
+      petNoteOverride: patch.petNoteOverride === undefined ? current.petNoteOverride : normalizeSaleDraftText(patch.petNoteOverride),
+      generatedStatus: patch.generatedStatus === undefined ? current.generatedStatus : normalizeSaleDraftText(patch.generatedStatus),
+      updatedAt: Date.now(),
+    };
+    await db.runAsync(
+      `UPDATE sale_draft_items
+       SET listingOrder = ?, included = ?, itemNumber = ?, selectedPhotoUri = ?, price = ?, condition = ?, conditionNotes = ?, flawTagsJson = ?, flawNotes = ?, washNotesOverride = ?, dryingMethodOverride = ?, smokeNoteOverride = ?, petTypeOverride = ?, petNoteOverride = ?, offersAcceptedOverride = ?, bundleOffersAcceptedOverride = ?, generatedStatus = ?, updatedAt = ?
+       WHERE id = ?;`,
+      next.listingOrder,
+      next.included ? 1 : 0,
+      next.itemNumber,
+      next.selectedPhotoUri ?? null,
+      next.price ?? null,
+      next.condition ?? null,
+      next.conditionNotes ?? null,
+      JSON.stringify(next.flawTags ?? []),
+      next.flawNotes ?? null,
+      next.washNotesOverride ?? null,
+      next.dryingMethodOverride ?? null,
+      next.smokeNoteOverride ?? null,
+      next.petTypesOverride ? JSON.stringify(next.petTypesOverride) : null,
+      next.petNoteOverride ?? null,
+      toNullableBooleanDbValue(next.offersAcceptedOverride),
+      toNullableBooleanDbValue(next.bundleOffersAcceptedOverride),
+      next.generatedStatus ?? null,
+      next.updatedAt,
+      id,
+    );
+    await db.runAsync('UPDATE sale_drafts SET updatedAt = ? WHERE id = ?;', next.updatedAt, next.saleDraftId);
+  },
+
+  async bulkUpdateSaleDraftItems(saleDraftId: ID, patch: BulkUpdateSaleDraftItemsInput): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const entries = Object.entries(patch).filter(([, value]) => value !== undefined);
+    if (!entries.length) return;
+
+    const assignments: string[] = [];
+    const values: Array<string | number | null> = [];
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'condition')) {
+      assignments.push('condition = ?');
+      values.push(patch.condition ?? null);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'dryingMethodOverride')) {
+      assignments.push('dryingMethodOverride = ?');
+      values.push(patch.dryingMethodOverride ?? null);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'offersAcceptedOverride')) {
+      assignments.push('offersAcceptedOverride = ?');
+      values.push(toNullableBooleanDbValue(patch.offersAcceptedOverride));
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'bundleOffersAcceptedOverride')) {
+      assignments.push('bundleOffersAcceptedOverride = ?');
+      values.push(toNullableBooleanDbValue(patch.bundleOffersAcceptedOverride));
+    }
+
+    if (!assignments.length) return;
+    const now = Date.now();
+    await runInTransaction(db, async () => {
+      await db.runAsync(
+        `UPDATE sale_draft_items
+         SET ${assignments.join(', ')}, updatedAt = ?
+         WHERE saleDraftId = ? AND included = 1;`,
+        ...values,
+        now,
+        saleDraftId,
+      );
+      await db.runAsync('UPDATE sale_drafts SET updatedAt = ? WHERE id = ?;', now, saleDraftId);
+    });
+  },
+
+  async removeSaleDraftItem(id: ID): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ saleDraftId: string }>('SELECT saleDraftId FROM sale_draft_items WHERE id = ?;', id);
+    if (!row) return;
+    await db.runAsync('DELETE FROM sale_draft_items WHERE id = ?;', id);
+    await cleanupDraftFreeGeneratedCardIds(db, row.saleDraftId);
+    await renumberSaleDraftItems(db, row.saleDraftId);
+  },
+
+  async reorderSaleDraftItems(saleDraftId: ID, orderedDraftItemIds: ID[]): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const now = Date.now();
+    await runInTransaction(db, async () => {
+      for (let index = 0; index < orderedDraftItemIds.length; index += 1) {
+        await db.runAsync(
+          'UPDATE sale_draft_items SET listingOrder = ?, itemNumber = ?, updatedAt = ? WHERE id = ? AND saleDraftId = ?;',
+          index,
+          index + 1,
+          now,
+          orderedDraftItemIds[index],
+          saleDraftId,
+        );
+      }
+      await db.runAsync('UPDATE sale_drafts SET updatedAt = ? WHERE id = ?;', now, saleDraftId);
+    });
   },
 
   async createStorageLocation(input: { childId?: ID; name: string; type?: string; notes?: string }): Promise<StorageLocation> {

@@ -2311,8 +2311,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               <Pressable onPress={() => void shareClosetSnapshot()}>
                 <Text style={styles.headerAction}>{preparingClosetSnapshot ? 'Preparing...' : 'Share'}</Text>
               </Pressable>
-              <Pressable onPress={onPressCopyPost}>
-                <Text style={styles.headerAction}>Copy BST</Text>
+              <Pressable onPress={() => navigation.navigate('SellBin')}>
+                <Text style={styles.headerAction}>Sell Bin</Text>
               </Pressable>
             </>
           ) : null}
@@ -2325,7 +2325,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
       ),
     });
-  }, [navigation, selectedChild?.id, shareClosetSnapshot, preparingClosetSnapshot, onPressCopyPost, styles.headerAction]);
+  }, [navigation, selectedChild?.id, shareClosetSnapshot, preparingClosetSnapshot, styles.headerAction]);
 
   if (!selectedChild) {
     return (

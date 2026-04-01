@@ -7,9 +7,10 @@ interface PrimaryButtonProps {
   onPress: () => void | Promise<void>;
   variant?: 'primary' | 'secondary' | 'danger';
   style?: ViewStyle;
+  disabled?: boolean;
 }
 
-export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, variant = 'primary', style }) => {
+export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, variant = 'primary', style, disabled = false }) => {
   const theme = useAppTheme();
   const styles = StyleSheet.create({
     button: {
@@ -17,6 +18,9 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, va
       paddingHorizontal: 16,
       paddingVertical: 12,
       alignItems: 'center',
+    },
+    buttonDisabled: {
+      opacity: 0.55,
     },
     primary: {
       backgroundColor: theme.colors.accentPrimary,
@@ -46,8 +50,10 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, va
 
   return (
     <TouchableOpacity
-      activeOpacity={0.88}
+      activeOpacity={disabled ? 1 : 0.88}
+      disabled={disabled}
       onPress={() => {
+        if (disabled) return;
         try {
           const result = onPress();
           if (result && typeof (result as Promise<void>).catch === 'function') {
@@ -59,7 +65,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, va
           console.error('PrimaryButton onPress failed', error);
         }
       }}
-      style={[styles.button, styles[variant], style]}
+      style={[styles.button, styles[variant], disabled ? styles.buttonDisabled : undefined, style]}
     >
       <Text style={[styles.text, variant !== 'secondary' && styles.lightText]}>{label}</Text>
     </TouchableOpacity>

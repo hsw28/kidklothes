@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
 import { ChipSelector } from '@/components/ChipSelector';
@@ -9,6 +10,9 @@ import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
 import { Item } from '@/models';
 import { ClosetStackParamList } from '@/navigation/types';
+import { FREE_BST_DRAFT_LIMIT, FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/bstLimits';
+import { trackSellBinOpened } from '@/services/bst/bstAnalytics';
+import { hasProAccess } from '@/services/proAccess';
 import { useAppTheme } from '@/theme';
 import { makeId } from '@/utils/id';
 
@@ -38,9 +42,11 @@ const buildBstExportText = (rows: Item[], title: string) => {
   return lines.join('\n');
 };
 
-export const SellBinScreen: React.FC<Props> = () => {
-  const { children, items, childItems, brands, updateItem, logEvent } = useData();
+export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
+  const { children, items, childItems, brands, updateItem, logEvent, settings, purchaseState } = useData();
   const theme = useAppTheme();
+  const didLogOpenRef = useRef(false);
+  const lastFocusLoggedAtRef = useRef(0);
   const [childFilter, setChildFilter] = useState<string>('All');
   const [brandFilter, setBrandFilter] = useState<string>('All');
   const [listedFilter, setListedFilter] = useState<ListedFilter>('All');
@@ -83,6 +89,35 @@ export const SellBinScreen: React.FC<Props> = () => {
     });
     return Array.from(grouped.entries()).map(([bundleId, summary]) => ({ bundleId, ...summary }));
   }, [forSale]);
+  const isPro = hasProAccess(settings, purchaseState);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const now = Date.now();
+      if (didLogOpenRef.current && now - lastFocusLoggedAtRef.current < 15000) {
+        return undefined;
+      }
+      didLogOpenRef.current = true;
+      lastFocusLoggedAtRef.current = now;
+      void trackSellBinOpened(logEvent, {
+        itemCount: forSale.length,
+        isPro,
+        triggeredFrom: 'sell_bin_focus',
+      });
+      return undefined;
+    }, [forSale.length, isPro, logEvent]),
+  );
+
+  useEffect(() => {
+    if (didLogOpenRef.current) return;
+    void trackSellBinOpened(logEvent, {
+      itemCount: forSale.length,
+      isPro,
+      triggeredFrom: 'sell_bin',
+    });
+    didLogOpenRef.current = true;
+    lastFocusLoggedAtRef.current = Date.now();
+  }, [forSale.length, isPro, logEvent]);
 
   const toggleSelected = (itemId: string) => {
     setSelectedIds((prev) => (prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]));
@@ -230,6 +265,25 @@ export const SellBinScreen: React.FC<Props> = () => {
         <ChipSelector label="Listed" options={listedOptions} value={listedFilter} onChange={(value) => setListedFilter(value as ListedFilter)} />
       </Card>
 
+      <Card>
+        <Text style={styles.summary}>BST Listing Generator</Text>
+        <Text style={styles.meta}>Sell Bin is your holding area. BST Sale Drafts are separate sale posts built from selected Sell Bin items.</Text>
+        {!isPro ? (
+          <Text style={styles.meta}>
+            Free includes {FREE_BST_DRAFT_LIMIT} active BST draft, full collage generation, and cards for up to {FREE_BST_ITEM_CARD_LIMIT} items per draft.
+          </Text>
+        ) : null}
+        <PrimaryButton
+          label="Create BST Post"
+          onPress={() => navigation.navigate('BstSaleDraftCreate', selectedItems.length ? { prefillItemIds: selectedItems.map((item) => item.id) } : undefined)}
+        />
+        <PrimaryButton
+          label="Open BST Sale Drafts"
+          variant="secondary"
+          onPress={() => navigation.navigate('BstSaleDraftList')}
+        />
+      </Card>
+
       <Card style={styles.summaryCard}>
         <Text style={styles.summary}>For sale items: {forSale.length}</Text>
         <Text style={styles.meta}>Total purchase cost: {asCurrency(purchaseTotal)}</Text>
@@ -257,13 +311,18 @@ export const SellBinScreen: React.FC<Props> = () => {
           <Text style={styles.meta}>{selectedItems.length} selected</Text>
           <View style={styles.actionsRow}>
             <PrimaryButton label="Export Selected" variant="secondary" onPress={() => void shareSelected()} />
+            <PrimaryButton
+              label="BST Draft"
+              variant="secondary"
+              onPress={() => navigation.navigate('BstSaleDraftCreate', { prefillItemIds: selectedItems.map((item) => item.id) })}
+            />
             <PrimaryButton label="Create Bundle" variant="secondary" onPress={() => void createBundleFromSelected()} />
           </View>
         </Card>
       ) : null}
 
       {forSale.length === 0 ? (
-        <EmptyState title="Nothing in sell bin" subtitle="Mark owned items as for-sale from the items list bulk actions." />
+        <EmptyState title="No items in Sell Bin" subtitle="Mark owned items as for-sale first. Once they are here, you can turn them into a BST sale draft." />
       ) : (
         forSale.map((item) => (
           <Card key={item.id}>
@@ -303,4 +362,3 @@ export const SellBinScreen: React.FC<Props> = () => {
     </Screen>
   );
 };
-
