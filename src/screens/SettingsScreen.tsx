@@ -857,9 +857,10 @@ export const SettingsScreen: React.FC = () => {
           }
         }}
         onLongPress={async () => {
-          if (!settings.developerModeEnabled) {
-            return;
-          }
+          if (settings.developerModeEnabled) return;
+          versionTapTimesRef.current = [];
+          await updateSettings({ developerModeEnabled: true });
+          Alert.alert('Developer Mode Enabled', 'Hidden developer controls are now visible in Settings.');
         }}
         style={{ paddingVertical: 6, alignItems: 'center' }}
         accessibilityRole="button"

@@ -1,5 +1,3 @@
-import ShareIntentModule from 'expo-share-intent/build/ExpoShareIntentModule';
-
 type PendingSharePayload = {
   url: string;
   destination?: 'closet' | 'wishlist' | null;
@@ -7,9 +5,20 @@ type PendingSharePayload = {
   createdAt?: string;
 };
 
-const moduleAny = ShareIntentModule as any;
+const getModule = (): any => {
+  try {
+    // Keep the native share-intent bridge fully lazy so a bad/missing
+    // extension module cannot break normal app startup.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-share-intent/build/ExpoShareIntentModule') as any;
+  } catch (error) {
+    if (__DEV__) console.warn('[AppGroupStorage] share-intent bridge unavailable', error);
+    return null;
+  }
+};
 
 export const setAppGroupInt = async (key: string, value: number): Promise<void> => {
+  const moduleAny = getModule();
   if (!moduleAny?.setAppGroupInt) return;
   try {
     await moduleAny.setAppGroupInt(key, value);
@@ -19,6 +28,7 @@ export const setAppGroupInt = async (key: string, value: number): Promise<void> 
 };
 
 export const getAppGroupInt = async (key: string): Promise<number | null> => {
+  const moduleAny = getModule();
   if (!moduleAny?.getAppGroupInt) return null;
   try {
     const value = await moduleAny.getAppGroupInt(key);
@@ -30,6 +40,7 @@ export const getAppGroupInt = async (key: string): Promise<number | null> => {
 };
 
 export const getPendingSharePayload = async (): Promise<PendingSharePayload | null> => {
+  const moduleAny = getModule();
   if (!moduleAny?.getAppGroupString) return null;
   try {
     const raw = await moduleAny.getAppGroupString('pendingSharePayload');
@@ -44,6 +55,7 @@ export const getPendingSharePayload = async (): Promise<PendingSharePayload | nu
 };
 
 export const clearPendingSharePayload = async (): Promise<void> => {
+  const moduleAny = getModule();
   if (!moduleAny?.clearAppGroupValue) return;
   try {
     await moduleAny.clearAppGroupValue('pendingSharePayload');
@@ -51,4 +63,3 @@ export const clearPendingSharePayload = async (): Promise<void> => {
     if (__DEV__) console.warn('[AppGroupStorage] clearPendingSharePayload failed', error);
   }
 };
-

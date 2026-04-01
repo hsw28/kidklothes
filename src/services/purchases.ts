@@ -1,5 +1,4 @@
 import { Platform } from 'react-native';
-import Purchases from 'react-native-purchases';
 import { appConfig } from '@/config';
 import { PurchaseStateSnapshot } from '@/models';
 import { repository } from '@/db/repository';
@@ -48,7 +47,21 @@ export type ProPaywallOption = {
 
 let initialized = false;
 
+type PurchasesModule = typeof import('react-native-purchases').default;
+
 const shouldRun = () => appConfig.monetizationEnabled;
+
+const getPurchasesModule = (): PurchasesModule | null => {
+  try {
+    const module = require('react-native-purchases');
+    return (module?.default ?? module) as PurchasesModule;
+  } catch (error) {
+    if (__DEV__) {
+      console.warn('[purchases] native module unavailable', error);
+    }
+    return null;
+  }
+};
 
 const safeLogEvent = async (type: string, payload?: Record<string, unknown>) => {
   try {
@@ -168,6 +181,8 @@ export const getBstProPaywallOptions = async (): Promise<ProPaywallOption[]> => 
 
   try {
     await initPurchases();
+    const Purchases = getPurchasesModule();
+    if (!Purchases) return defaults;
     const offerings = await Purchases.getOfferings();
     return defaults.map((entry) => {
       const pkg = findPackageByKind(offerings, entry.kind);
@@ -189,6 +204,11 @@ export const initPurchases = async (): Promise<void> => {
   if (!shouldRun() || initialized) return;
 
   try {
+    const Purchases = getPurchasesModule();
+    if (!Purchases) {
+      await safeLogEvent('monetization_init_failed', { reason: 'native_module_unavailable', platform: Platform.OS });
+      return;
+    }
     const apiKey = Platform.OS === 'ios' ? appConfig.revenueCat.iosApiKey : appConfig.revenueCat.androidApiKey;
     if (!apiKey) {
       await safeLogEvent('monetization_init_failed', { reason: 'missing_api_key', platform: Platform.OS });
@@ -215,6 +235,8 @@ export const getOfferings = async (): Promise<OfferingsSummary> => {
   if (!shouldRun()) return { offerings: [] };
   try {
     await initPurchases();
+    const Purchases = getPurchasesModule();
+    if (!Purchases) return { offerings: [] };
     const offerings = await Purchases.getOfferings();
     const normalized = normalizeOfferings(offerings);
     await safeLogEvent('offerings_fetched', {
@@ -231,6 +253,8 @@ export const getCustomerInfo = async (): Promise<CustomerInfoSummary> => {
   if (!shouldRun()) return { activeEntitlements: [], activeSubscriptions: [], nonSubscriptions: [] };
   try {
     await initPurchases();
+    const Purchases = getPurchasesModule();
+    if (!Purchases) return { activeEntitlements: [], activeSubscriptions: [], nonSubscriptions: [] };
     const customerInfo = await Purchases.getCustomerInfo();
     return toSummary(customerInfo);
   } catch {
@@ -242,6 +266,8 @@ export const purchasePackage = async (packageIdentifier: string): Promise<Purcha
   if (!shouldRun()) return { status: 'error', entitlementActive: false, errorCode: 'disabled', errorMessage: 'Monetization disabled' };
   try {
     await initPurchases();
+    const Purchases = getPurchasesModule();
+    if (!Purchases) return { status: 'error', entitlementActive: false, errorCode: 'native_module_unavailable', errorMessage: 'Purchases unavailable' };
     const offerings = await Purchases.getOfferings();
     const pkg = findPackage(offerings, packageIdentifier);
     const productId = String(pkg?.product?.identifier ?? '');
@@ -264,7 +290,8 @@ export const purchasePackage = async (packageIdentifier: string): Promise<Purcha
       customerInfoSummary: summary,
     };
   } catch (error: any) {
-    const offerings = await Purchases.getOfferings().catch(() => null);
+    const Purchases = getPurchasesModule();
+    const offerings = Purchases ? await Purchases.getOfferings().catch(() => null) : null;
     const pkg = findPackage(offerings, packageIdentifier);
     const productId = String(pkg?.product?.identifier ?? '');
     if (error?.userCancelled) {
@@ -291,6 +318,8 @@ export const restorePurchases = async (): Promise<PurchaseResult> => {
   await safeLogEvent('restore_attempt');
   try {
     await initPurchases();
+    const Purchases = getPurchasesModule();
+    if (!Purchases) return { status: 'error', entitlementActive: false, errorCode: 'native_module_unavailable', errorMessage: 'Purchases unavailable' };
     const customerInfo = await Purchases.restorePurchases();
     const summary = toSummary(customerInfo);
     await safeLogEvent('restore_success', { activeEntitlements: summary.activeEntitlements });
@@ -325,6 +354,16 @@ export const getEntitlementSnapshot = async (): Promise<PurchaseStateSnapshot> =
   }
   try {
     await initPurchases();
+    const Purchases = getPurchasesModule();
+    if (!Purchases) {
+      return {
+        isEntitled: false,
+        activeEntitlements: [],
+        activeSubscriptions: [],
+        nonSubscriptions: [],
+        updatedAt: new Date().toISOString(),
+      };
+    }
     const customerInfo = await Purchases.getCustomerInfo();
     return toSnapshot(customerInfo);
   } catch {
