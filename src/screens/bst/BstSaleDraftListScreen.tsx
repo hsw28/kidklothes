@@ -93,7 +93,7 @@ export const BstSaleDraftListScreen: React.FC<Props> = ({ navigation }) => {
       </Card>
 
       {draftCards.length === 0 ? (
-        <EmptyState title="No BST sale drafts yet" subtitle="Choose items from your Sell Bin to create a dedicated BST draft for a specific purge or post." actionLabel="New BST Sale Draft" onActionPress={() => navigation.navigate('BstSaleDraftCreate')} />
+        <EmptyState title="No BST sale drafts yet" subtitle="Choose items from your Sell Bin to create a dedicated BST draft for a specific purge or post." />
       ) : (
         draftCards.map(({ draft, itemCount }) => (
           <Pressable

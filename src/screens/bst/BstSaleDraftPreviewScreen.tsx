@@ -226,6 +226,11 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       color: theme.colors.textSecondary,
       textAlign: 'center',
     },
+    previewNote: {
+      fontSize: 12,
+      lineHeight: 18,
+      color: theme.colors.textSecondary,
+    },
   });
 
   useEffect(() => {
@@ -440,11 +445,13 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
     );
   };
 
-  const showExportSuccess = (savedCount: number, itemCardCount: number) => {
-    setGenerationStatus(`Saved ${savedCount} images to Photos`);
+  const showExportSuccess = (savedCount: number, itemCardCount: number, collageIncluded: boolean) => {
+    setGenerationStatus(`Saved ${savedCount} image${savedCount === 1 ? '' : 's'} to Photos`);
     Alert.alert(
       'Saved to Photos',
-      `Saved ${savedCount} images ✔\n1 collage + ${itemCardCount} item card${itemCardCount === 1 ? '' : 's'}`,
+      collageIncluded
+        ? `Saved ${savedCount} images ✔\n1 collage + ${itemCardCount} item card${itemCardCount === 1 ? '' : 's'}`
+        : `Saved ${savedCount} item card${savedCount === 1 ? '' : 's'} ✔\nFree export includes up to ${FREE_BST_ITEM_CARD_LIMIT} clean cards`,
       [
         {
           text: 'Open Photos',
@@ -474,24 +481,20 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
     if (exporting || generating) return;
     setExporting(true);
     setGenerationStatus('Saving images…');
-    if (!unlimitedCards && resolvedItems.length > FREE_BST_ITEM_CARD_LIMIT) {
-      if (!freeGenerationConsumed) {
-        await generateAssets();
-      }
-      setExporting(false);
-      goToPaywall('bst_save_all_cards');
-      return;
-    }
     try {
       const generated = await generateAssets();
       const collageUri = usingCustomHeaderImage ? customHeaderImageUri : (generated?.collageUris[0] ?? capturedCollageUris[0]);
       const itemUrisByDraftItemId = generated?.itemUrisByDraftItemId ?? capturedItemUrisByDraftItemId;
+      const allowedDraftItemIds = unlimitedCards
+        ? resolvedItems.map((entry) => entry.draftItem.id)
+        : (generated?.unlockedDraftItemIds.length ? generated.unlockedDraftItemIds : unlockedDraftItemIds).slice(0, FREE_BST_ITEM_CARD_LIMIT);
       const orderedUris = resolvedItems
+        .filter((entry) => allowedDraftItemIds.includes(entry.draftItem.id))
         .map((entry) => itemUrisByDraftItemId[entry.draftItem.id])
         .filter((value): value is string => Boolean(value));
 
       let savedCount = 0;
-      if (collageUri) {
+      if (unlimitedCards && collageUri) {
         const saved = await saveImageToPhotoLibrary(collageUri);
         if (saved) savedCount += 1;
       }
@@ -500,7 +503,9 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
         if (saved) savedCount += 1;
       }
       if (savedCount > 0) {
-        showExportSuccess(savedCount, orderedUris.length);
+        showExportSuccess(savedCount, orderedUris.length, unlimitedCards);
+      } else {
+        Alert.alert('Unable to save images', 'Try again after the previews finish loading.');
       }
     } finally {
       setExporting(false);
@@ -541,12 +546,12 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       {!unlimitedCards ? (
         <Card style={styles.freeTierCard}>
           <Text style={styles.sectionTitle}>Free plan</Text>
-          <Text style={styles.body}>You can create 1 active draft, generate the full collage image, and preview every item card in this draft.</Text>
+          <Text style={styles.body}>You can preview the full collage and every item card in this draft. Free export includes up to 2 clean item cards.</Text>
           <Text style={styles.body}>
             {!freeGenerationConsumed
-              ? `Generate once to create cards for every item. You’ll be able to save the first ${FREE_BST_ITEM_CARD_LIMIT} cards free.`
+              ? `Generate once to preview every item. When you save, you’ll get the first ${FREE_BST_ITEM_CARD_LIMIT} clean cards free.`
               : unlockedDraftItemIds.length > 0
-                ? `You’ve created ${FREE_BST_ITEM_CARD_LIMIT} free item cards. Unlock Pro to generate the rest.`
+                ? `You’ve created ${FREE_BST_ITEM_CARD_LIMIT} free item cards. Unlock Pro to export the collage and the rest.`
                 : 'Changing items reset your generated cards. Unlock Pro to generate cards for this updated draft.'}
           </Text>
           {settings.developerModeEnabled ? (
@@ -558,6 +563,7 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       ) : null}
 
       <Card>
+        {!unlimitedCards ? <Text style={styles.previewNote}>Preview only. Export the clean collage with Pro.</Text> : null}
         <View style={styles.previewStack}>
           {usingCustomHeaderImage && customHeaderImageUri ? (
             <View style={{ gap: 10 }}>
@@ -574,6 +580,7 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
                   pageSize={page.pageSize}
                   width={previewWidth}
                   brandingMode={brandingMode}
+                  previewMode={!unlimitedCards ? 'free-preview' : 'export'}
                 />
               </View>
             ))
@@ -604,7 +611,11 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
 
       <Card>
         <Text style={styles.sectionTitle}>Item cards + comments</Text>
-        <Text style={styles.body}>Save the generated item cards directly to your Photos app so they are ready to upload.</Text>
+        <Text style={styles.body}>
+          {unlimitedCards
+            ? 'Save the generated item cards directly to your Photos app so they are ready to upload.'
+            : `Free preview is protected here. Save up to ${FREE_BST_ITEM_CARD_LIMIT} clean cards to your Photos app.`}
+        </Text>
         {!unlimitedCards && shouldShowLockedCards ? (
           <View style={styles.unlockBanner}>
             <Text style={styles.unlockBannerTitle}>
@@ -638,7 +649,13 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
                   accessibilityLabel={`Edit item ${entry.draftItem.itemNumber}`}
                   style={showLockedCard ? styles.lockedPreviewDimmed : undefined}
                 >
-                  <BstItemCardRenderer draftTitle={draftName} entry={entry} width={previewWidth} brandingMode={brandingMode} />
+                  <BstItemCardRenderer
+                    draftTitle={draftName}
+                    entry={entry}
+                    width={previewWidth}
+                    brandingMode={brandingMode}
+                    previewMode={!unlimitedCards ? 'free-preview' : 'export'}
+                  />
                 </Pressable>
                 {showLockedCard ? (
                   <LockedCardPressable onUnlock={() => goToPaywall('bst_locked_card')}>

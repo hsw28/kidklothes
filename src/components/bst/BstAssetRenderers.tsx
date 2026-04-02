@@ -12,6 +12,7 @@ export type CollageViewProps = {
   onAssetLoadEnd?: () => void;
   width?: number;
   brandingMode?: 'free' | 'pro';
+  previewMode?: 'export' | 'free-preview';
 };
 
 export type ItemCardViewProps = {
@@ -20,6 +21,7 @@ export type ItemCardViewProps = {
   onAssetLoadEnd?: () => void;
   width?: number;
   brandingMode?: 'free' | 'pro';
+  previewMode?: 'export' | 'free-preview';
 };
 
 const BrandWatermark: React.FC<{
@@ -51,12 +53,76 @@ const BrandWatermark: React.FC<{
   return <Text numberOfLines={1} style={styles.text}>Layette Out</Text>;
 };
 
+const PreviewProtectionOverlay: React.FC<{
+  scale: number;
+  variant?: 'collage' | 'card';
+}> = ({ scale, variant = 'card' }) => {
+  const labelSize = (variant === 'collage' ? 13 : 14.5) * scale;
+  const watermarkSize = (variant === 'collage' ? 31 : 34) * scale;
+  const styles = StyleSheet.create({
+    overlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(17,24,39,0.08)',
+    },
+    labelWrap: {
+      position: 'absolute',
+      top: 16 * scale,
+      left: 18 * scale,
+      right: 18 * scale,
+      alignItems: 'center',
+    },
+    label: {
+      fontSize: labelSize,
+      lineHeight: labelSize * 1.15,
+      fontWeight: '700',
+      color: 'rgba(255,255,255,0.96)',
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      paddingHorizontal: 10 * scale,
+      paddingVertical: 5 * scale,
+      borderRadius: 8 * scale,
+      overflow: 'hidden',
+      letterSpacing: 0.2 * scale,
+    },
+    watermarkWrap: {
+      position: 'absolute',
+      left: '12%',
+      right: '12%',
+      top: '42%',
+      alignItems: 'center',
+    },
+    watermark: {
+      fontSize: watermarkSize,
+      lineHeight: watermarkSize * 1.06,
+      fontWeight: '700',
+      color: 'rgba(255,255,255,0.98)',
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      paddingHorizontal: 18 * scale,
+      paddingVertical: 10 * scale,
+      borderRadius: 10 * scale,
+      overflow: 'hidden',
+      letterSpacing: 0.5 * scale,
+      opacity: 0.96,
+    },
+  });
+
+  return (
+    <View pointerEvents="none" style={styles.overlay}>
+      <View style={styles.labelWrap}>
+        <Text style={styles.label}>Preview — export clean version</Text>
+      </View>
+      <View style={styles.watermarkWrap}>
+        <Text style={styles.watermark}>Layette Out</Text>
+      </View>
+    </View>
+  );
+};
+
 const formatCollagePrice = (value?: number): string | undefined => {
   if (value === undefined || value === null || !Number.isFinite(value)) return undefined;
   return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 };
 
-export const CollageView: React.FC<CollageViewProps> = ({ items, onAssetLoadEnd, width = 1080 }) => {
+export const CollageView: React.FC<CollageViewProps> = ({ items, onAssetLoadEnd, width = 1080, previewMode = 'export' }) => {
   const columns = getCollageColumnCount(items.length);
   const rows = chunkForCollageRows(items, columns);
   const rowCount = Math.max(1, rows.length);
@@ -196,11 +262,12 @@ export const CollageView: React.FC<CollageViewProps> = ({ items, onAssetLoadEnd,
       <View style={styles.footer}>
         <BrandWatermark scale={width / 1080} />
       </View>
+      {previewMode === 'free-preview' ? <PreviewProtectionOverlay scale={width / 1080} variant="collage" /> : null}
     </View>
   );
 };
 
-export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, onAssetLoadEnd, width = 1080, brandingMode = 'free' }) => {
+export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, onAssetLoadEnd, width = 1080, brandingMode = 'free', previewMode = 'export' }) => {
   const scale = width / 1080;
   const priceLabel = formatMoney(entry.draftItem.price);
   const brandLabel = entry.inventoryItem.brand?.trim();
@@ -355,6 +422,7 @@ export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, o
           </View>
         </View>
       </View>
+      {previewMode === 'free-preview' ? <PreviewProtectionOverlay scale={scale} variant="card" /> : null}
     </View>
   );
 };
