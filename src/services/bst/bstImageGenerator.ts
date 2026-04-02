@@ -1,9 +1,8 @@
 import React from 'react';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { SaleDraft } from '@/models';
 import { ItemCardViewProps, CollageViewProps } from '@/components/bst/BstAssetRenderers';
 import { buildSaleDraftName, ResolvedSaleDraftItem } from '@/services/bst/draft';
-import { paginateForCollage, resolveCollagePageSize } from '@/services/bst/layout';
 
 export type BstCollagePageModel = Omit<CollageViewProps, 'onAssetLoadEnd'>;
 export type BstItemCardModel = Omit<ItemCardViewProps, 'onAssetLoadEnd'>;
@@ -35,17 +34,12 @@ export type BstImageGeneratorHandle = {
 export const buildCollageViewModels = (input: BstImageGeneratorInput): BstCollagePageModel[] => {
   const { draft, resolvedItems } = input;
   if (!resolvedItems.length) return [];
-  const pageSize = resolveCollagePageSize(draft.collageGridSize, resolvedItems.length);
-  const pages = paginateForCollage(resolvedItems, draft.collageGridSize);
-  const title = buildSaleDraftName(draft);
-  return pages.map((items, index) => ({
-    title,
-    pageIndex: index,
-    pageCount: pages.length,
-    items,
-    pageSize,
+  return [{
+    title: buildSaleDraftName(draft),
+    items: resolvedItems,
+    pageSize: resolvedItems.length,
     brandingMode: input.brandingMode ?? 'free',
-  }));
+  }];
 };
 
 export const buildItemCardViewModels = ({ draft, resolvedItems, brandingMode = 'free', itemCardDraftItemIds }: BstImageGeneratorInput): BstItemCardModel[] => {

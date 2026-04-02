@@ -147,7 +147,8 @@ export const summarizeDraftBrands = (resolvedItems: ResolvedSaleDraftItem[]): st
 
 export const formatMoney = (value?: number): string | undefined => {
   if (value === undefined || value === null || !Number.isFinite(value)) return undefined;
-  return `$${value.toFixed(2)}`;
+  const formatted = value.toFixed(2);
+  return `$${formatted.endsWith('.00') ? formatted.slice(0, -3) : formatted}`;
 };
 
 export const isNewBstCondition = (condition?: SaleDraftItem['condition']): boolean =>

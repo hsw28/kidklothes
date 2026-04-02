@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { ActionSheetIOS, Alert, AlertButton, Linking, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
@@ -14,7 +14,7 @@ import { useData } from './src/db/DataContext';
 import { clearPendingSharePayload, getPendingSharePayload } from './src/utils/appGroupStorage';
 import { isAppOwnedImageUri } from './src/utils/imageCache';
 import { getItemDisplayImageUri, getItemLocalImageUri, getItemRemoteImageUri } from './src/utils/itemMedia';
-import { toAddItemDeepLink } from './src/utils/shareIntent';
+import { extractUrlFromShareIntent, toAddItemDeepLink } from './src/utils/shareIntent';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
   state = { hasError: false };
@@ -222,8 +222,140 @@ const ShareToAppBridge = () => {
     openForChild(autoChildId);
   }, [children, settings.lastShoppingChildId]);
 
+  const handleNativeShareIntentUrl = React.useCallback(async (incomingUrl: string) => {
+    if (!incomingUrl.includes('://dataUrl=')) return false;
+    if (lastHandledUrlRef.current === incomingUrl) return true;
+
+    let moduleAny: any = null;
+    let parseShareIntent: ((value: unknown, options?: { debug?: boolean }) => any) | null = null;
+    try {
+      // Keep the native share-intent module fully lazy so normal app startup
+      // does not depend on it unless the app was actually opened from share.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      moduleAny = require('expo-share-intent/build/ExpoShareIntentModule').default;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      parseShareIntent = require('expo-share-intent/build/utils').parseShareIntent;
+    } catch (error) {
+      if (__DEV__) console.warn('[ShareToAppBridge] share-intent module unavailable', error);
+      return false;
+    }
+
+    if (!moduleAny?.getShareIntent || !moduleAny?.addListener || !parseShareIntent) {
+      return false;
+    }
+
+    lastHandledUrlRef.current = incomingUrl;
+    handlingShareRef.current = true;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        handlingShareRef.current = false;
+        changeSubscription?.remove?.();
+        errorSubscription?.remove?.();
+        void moduleAny?.clearShareIntent?.('layetteoutShareKey');
+        resolve();
+      };
+
+      const changeSubscription = moduleAny.addListener('onChange', (event: { value?: string }) => {
+        try {
+          const parsed = parseShareIntent?.(event?.value, { debug: __DEV__ });
+          const sharedUrl = extractUrlFromShareIntent(parsed);
+          if (!sharedUrl) {
+            Alert.alert('No Link Found', 'We could not find a web link in the shared content.');
+            finish();
+            return;
+          }
+
+          const sharedTitle = typeof parsed?.meta?.title === 'string' ? parsed.meta.title.trim() : '';
+          const sharedSiteName = typeof parsed?.meta?.['og:site_name'] === 'string'
+            ? parsed.meta['og:site_name'].trim()
+            : typeof parsed?.meta?.site_name === 'string'
+              ? parsed.meta.site_name.trim()
+              : '';
+          const sharedImageUrlRaw = typeof parsed?.meta?.['og:image'] === 'string'
+            ? parsed.meta['og:image'].trim()
+            : typeof parsed?.meta?.image === 'string'
+              ? parsed.meta.image.trim()
+              : '';
+          const sharedImageUrl = /^https?:\/\//i.test(sharedImageUrlRaw)
+            ? sharedImageUrlRaw
+            : sharedImageUrlRaw.startsWith('//')
+              ? `https:${sharedImageUrlRaw}`
+              : '';
+
+          const promptForDestination = () => {
+            const openTarget = (destination: 'closet' | 'wishlist') => {
+              const deepLink = toAddItemDeepLink(sharedUrl, { destination, source: 'shareext' });
+              const urlObj = new URL(deepLink);
+              if (sharedTitle) urlObj.searchParams.set('sharedTitle', sharedTitle);
+              if (sharedImageUrl) urlObj.searchParams.set('sharedImageUrl', sharedImageUrl);
+              if (sharedSiteName) urlObj.searchParams.set('sharedSiteName', sharedSiteName);
+              ExpoLinking.openURL(urlObj.toString()).finally(finish);
+            };
+
+            if (Platform.OS === 'ios') {
+              ActionSheetIOS.showActionSheetWithOptions(
+                {
+                  title: 'Add to Layette Out',
+                  message: sharedUrl,
+                  options: ['Cancel', 'Add to Closet', 'Add to Wishlist'],
+                  cancelButtonIndex: 0,
+                },
+                (index) => {
+                  if (index === 1) {
+                    openTarget('closet');
+                    return;
+                  }
+                  if (index === 2) {
+                    openTarget('wishlist');
+                    return;
+                  }
+                  finish();
+                },
+              );
+              return;
+            }
+
+            Alert.alert('Add to Layette Out', sharedUrl, [
+              { text: 'Cancel', style: 'cancel', onPress: finish },
+              { text: 'Add to Closet', onPress: () => openTarget('closet') },
+              { text: 'Add to Wishlist', onPress: () => openTarget('wishlist') },
+            ]);
+          };
+
+          promptForDestination();
+        } catch (error) {
+          if (__DEV__) console.warn('[ShareToAppBridge] share-intent parse failed', error);
+          finish();
+        }
+      });
+
+      const errorSubscription = moduleAny.addListener('onError', (event: { value?: string }) => {
+        if (__DEV__) console.warn('[ShareToAppBridge] native share-intent error', event?.value);
+        finish();
+      });
+
+      try {
+        moduleAny.getShareIntent(incomingUrl);
+      } catch (error) {
+        if (__DEV__) console.warn('[ShareToAppBridge] getShareIntent failed', error);
+        finish();
+      }
+
+      setTimeout(finish, 2500);
+    });
+
+    return true;
+  }, []);
+
   const handleShareRoute = React.useCallback(async (incomingUrl: string) => {
     try {
+      const handledNativeShareIntent = await handleNativeShareIntentUrl(incomingUrl);
+      if (handledNativeShareIntent) return true;
+
       const parsed = new URL(incomingUrl);
       const hostOrPath = `${parsed.host}${parsed.pathname}`;
       const looksLikeShareRoute =
@@ -252,7 +384,7 @@ const ShareToAppBridge = () => {
     } catch {
       return false;
     }
-  }, [openAddItemFromPayload]);
+  }, [handleNativeShareIntentUrl, openAddItemFromPayload]);
 
   useEffect(() => {
     void Linking.getInitialURL().then((url) => {
@@ -303,8 +435,15 @@ const appBootStyles = StyleSheet.create({
 
 const AppBootstrapGate: React.FC<React.PropsWithChildren> = ({ children }) => {
   const { loading, errorMessage, refresh } = useData();
+  const [didFinishInitialLoad, setDidFinishInitialLoad] = useState(false);
 
-  if (loading) {
+  useEffect(() => {
+    if (!loading && !errorMessage) {
+      setDidFinishInitialLoad(true);
+    }
+  }, [errorMessage, loading]);
+
+  if (!didFinishInitialLoad && loading) {
     return (
       <SafeAreaView style={appBootStyles.safe}>
         <View style={appBootStyles.center}>
@@ -317,7 +456,7 @@ const AppBootstrapGate: React.FC<React.PropsWithChildren> = ({ children }) => {
     );
   }
 
-  if (errorMessage) {
+  if (!didFinishInitialLoad && errorMessage) {
     return (
       <SafeAreaView style={appBootStyles.safe}>
         <View style={appBootStyles.center}>

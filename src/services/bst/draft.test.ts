@@ -17,6 +17,7 @@ const baseDraft: SaleDraft = {
   defaultOffersAccepted: true,
   defaultBundleOffersAccepted: false,
   collageGridSize: 'Auto',
+  collageOrderMode: 'highest-price',
   freeGeneratedCardItemIds: [],
   createdAt: 1,
   updatedAt: 1,

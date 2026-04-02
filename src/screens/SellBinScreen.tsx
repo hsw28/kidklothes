@@ -14,6 +14,7 @@ import { FREE_BST_DRAFT_LIMIT, FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/b
 import { trackSellBinOpened } from '@/services/bst/bstAnalytics';
 import { hasProAccess } from '@/services/proAccess';
 import { useAppTheme } from '@/theme';
+import { getSpecialLocationIds } from '@/utils/closetViewInsights';
 import { makeId } from '@/utils/id';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'SellBin'>;
@@ -43,7 +44,7 @@ const buildBstExportText = (rows: Item[], title: string) => {
 };
 
 export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
-  const { children, items, childItems, brands, updateItem, logEvent, settings, purchaseState } = useData();
+  const { children, items, childItems, storageLocations, brands, updateItem, logEvent, settings, purchaseState } = useData();
   const theme = useAppTheme();
   const didLogOpenRef = useRef(false);
   const lastFocusLoggedAtRef = useRef(0);
@@ -55,22 +56,37 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
   const childOptions = useMemo(() => ['All', ...children.map((child) => child.name)], [children]);
   const brandOptions = useMemo(() => ['All', ...brands], [brands]);
   const listedOptions: ListedFilter[] = ['All', 'Unlisted', 'Listed'];
+  const childNameById = useMemo(() => new Map(children.map((child) => [child.id, child.name])), [children]);
 
   const filtered = useMemo(() => {
+    const sellBinLocationIdsByChildId = new Map(children.map((child) => [child.id, getSpecialLocationIds(child.id, storageLocations).sellBinLocationId]));
     return items.filter((item) => {
-      const childPass =
-        childFilter === 'All' ||
-        childItems.some((link) => link.itemId === item.id && children.find((child) => child.id === link.childId)?.name === childFilter);
-      if (!childPass) return false;
+      const itemLinks = childItems.filter((link) => link.itemId === item.id);
+      if (itemLinks.length === 0) return false;
+
+      const relevantLinks = childFilter === 'All'
+        ? itemLinks
+        : itemLinks.filter((link) => childNameById.get(link.childId) === childFilter);
+      if (relevantLinks.length === 0) return false;
 
       const brandPass = brandFilter === 'All' || item.brandTags.includes(brandFilter) || normalize(item.brand ?? '') === normalize(brandFilter);
       if (!brandPass) return false;
-      if (item.status !== 'for-sale' && item.status !== 'sold') return false;
+
+      const inSellBin = relevantLinks.some((link) => {
+        const sellBinLocationId = sellBinLocationIdsByChildId.get(link.childId);
+        if (sellBinLocationId) {
+          return link.storageLocationId === sellBinLocationId;
+        }
+        const effectiveStatus = link.statusForChild ?? item.status;
+        return effectiveStatus === 'for-sale' || effectiveStatus === 'sold';
+      });
+      if (!inSellBin) return false;
+
       if (listedFilter === 'Listed' && !item.listedAt) return false;
       if (listedFilter === 'Unlisted' && item.listedAt) return false;
       return true;
     });
-  }, [brandFilter, childFilter, children, childItems, items, listedFilter]);
+  }, [brandFilter, childFilter, childItems, childNameById, children, items, listedFilter, storageLocations]);
 
   const forSale = filtered.filter((item) => item.status === 'for-sale');
   const sold = filtered.filter((item) => item.status === 'sold');
@@ -271,7 +287,7 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.meta}>Sell Bin is your holding area. BST Sale Drafts are separate sale posts built from selected Sell Bin items.</Text>
           {!isPro ? (
             <Text style={styles.meta}>
-              Free includes {FREE_BST_DRAFT_LIMIT} active BST draft, full collage generation, and cards for up to {FREE_BST_ITEM_CARD_LIMIT} items per draft.
+              Free includes {FREE_BST_DRAFT_LIMIT} active BST draft, full collage generation, and {FREE_BST_ITEM_CARD_LIMIT} free item cards per draft.
             </Text>
           ) : null}
           <PrimaryButton

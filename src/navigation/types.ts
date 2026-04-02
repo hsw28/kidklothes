@@ -11,7 +11,20 @@ export type RootTabParamList = {
 };
 
 export type ItemsStackParamList = {
-  ProPaywall: { source?: 'bst_card_limit' | 'bst_draft_limit' | 'bst_locked_export' | 'item_multi_photo' } | undefined;
+  ProPaywall:
+    | {
+        source?:
+          | 'bst_card_limit'
+          | 'bst_draft_limit'
+          | 'bst_locked_export'
+          | 'bst_locked_card'
+          | 'bst_save_all_cards'
+          | 'bst_save_collage_locked'
+          | 'item_multi_photo';
+        draftId?: ID;
+        totalItems?: number;
+      }
+    | undefined;
   ItemsList:
     | {
         initialStatus?: ItemStatus;
@@ -29,7 +42,7 @@ export type ItemsStackParamList = {
         initialItemIds?: ID[];
       }
     | undefined;
-  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; source?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
+  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; source?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean; sharedTitle?: string; sharedImageUrl?: string; sharedSiteName?: string } | undefined;
   ItemDetail: { itemId: ID };
 };
 
@@ -69,7 +82,20 @@ export type ClosetStackParamList = {
       }
     | undefined;
   SellBin: undefined;
-  ProPaywall: { source?: 'bst_card_limit' | 'bst_draft_limit' | 'bst_locked_export' | 'item_multi_photo' } | undefined;
+  ProPaywall:
+    | {
+        source?:
+          | 'bst_card_limit'
+          | 'bst_draft_limit'
+          | 'bst_locked_export'
+          | 'bst_locked_card'
+          | 'bst_save_all_cards'
+          | 'bst_save_collage_locked'
+          | 'item_multi_photo';
+        draftId?: ID;
+        totalItems?: number;
+      }
+    | undefined;
   BstSaleDraftList: undefined;
   BstSaleDraftCreate: { prefillItemIds?: ID[] } | undefined;
   BstSaleDraftEditor: { draftId: ID; editDraftItemId?: ID };
@@ -78,7 +104,7 @@ export type ClosetStackParamList = {
   OutfitsList: undefined;
   OutfitBuilder: { outfitId?: ID } | undefined;
   ItemDetail: { itemId: ID };
-  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; source?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean } | undefined;
+  AddItem: { itemId?: ID; duplicateFromItemId?: ID; url?: string; source?: string; quick?: boolean; prefillType?: ClothingType; prefillCategory?: string; prefillBrand?: string; prefillStatus?: ItemStatus; prefillChildId?: ID; shoppingMode?: boolean; sharedTitle?: string; sharedImageUrl?: string; sharedSiteName?: string } | undefined;
 };
 
 export type KidsStackParamList = {

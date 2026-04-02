@@ -29,7 +29,7 @@ import { normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
 import { APPAREL_AGE_SIZES, APPAREL_ALPHA_SIZES, US_SHOE_SIZES, computeDefaultFitBin, getSizeUIModel, inferSizeScheme, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
 
 const statusOptions: ItemStatus[] = ['wishlist', 'owned', 'sold'];
-const conditionOptions: Condition[] = ['new-with-tags', 'like-new', 'good', 'play', 'donate'];
+const conditionOptions: Condition[] = ['new-with-tags', 'like-new', 'good', 'play'];
 const categoryOptions: ClosetCategory[] = ADD_ITEM_CATEGORY_OPTIONS;
 const storagePresetOptions = ['None', 'Sell', 'Size Up', 'Current', 'Out Grew'] as const;
 type StoragePresetOption = (typeof storagePresetOptions)[number];
@@ -444,6 +444,58 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     const sharedUrl = route.params?.url?.trim();
     if (!existing && sharedUrl) setUrl(sharedUrl);
   }, [existing, route.params?.url]);
+
+  useEffect(() => {
+    if (existing) return;
+    if (route.params?.source !== 'shareext') return;
+
+    const sharedUrl = route.params?.url?.trim() || '';
+    const sharedTitle = (route.params?.sharedTitle || '').trim();
+    const sharedImageUrl = normalizeImageCandidate(route.params?.sharedImageUrl || '');
+    const sharedSiteName = (route.params?.sharedSiteName || '').trim();
+
+    if (sharedTitle && (!titleTouched || !title.trim())) {
+      setTitle(sharedTitle);
+      autofillMetaRef.current.titleAutoValue = sharedTitle;
+    }
+
+    if (sharedImageUrl && isValidHttpImageUrl(sharedImageUrl) && (!imageTouchedRef.current || !imageUrlRef.current.trim())) {
+      setImageUrl(sharedImageUrl);
+      imageUrlRef.current = sharedImageUrl;
+      autofillMetaRef.current.imageAutoValue = sharedImageUrl;
+    }
+
+    if (sharedSiteName && !brandTouched && !brand.trim() && !isMarketplaceSource(sharedUrl, undefined, sharedSiteName)) {
+      setBrand(sharedSiteName);
+      autofillMetaRef.current.brandAutoValue = sharedSiteName;
+      if (!brandTags.trim()) setBrandTags(sharedSiteName);
+    }
+
+    if (sharedUrl) {
+      setPreviewCard((prev) => (
+        prev.status === 'success'
+          ? prev
+          : {
+              status: 'success',
+              title: sharedTitle || getDomainLabel(sharedUrl) || 'Preview',
+              domain: sharedSiteName || getDomainLabel(sharedUrl),
+              imageUrl: sharedImageUrl || undefined,
+            }
+      ));
+    }
+  }, [
+    brand,
+    brandTags,
+    brandTouched,
+    existing,
+    route.params?.sharedImageUrl,
+    route.params?.sharedSiteName,
+    route.params?.sharedTitle,
+    route.params?.source,
+    route.params?.url,
+    title,
+    titleTouched,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -959,6 +1011,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
       if (status === 'owned' && created && (shoppingMode || route.params?.prefillStatus === 'owned')) {
+        if (navigation.canGoBack()) {
+          navigation.goBack();
+          return;
+        }
+
         const parent = navigation.getParent() as { navigate?: (screen: string, params?: Record<string, unknown>) => void } | undefined;
         if (parent) {
           parent.navigate?.('ClosetHome', { revealLatestAdd: true });
@@ -1349,7 +1406,6 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
             triggeredFrom: 'item_form',
           });
         }}
-        lockedMessage="Free includes 1 photo per item. Existing extra photos stay visible. Add back/tag/flaw photos with Pro."
       />
 
       {children.length === 1 ? (

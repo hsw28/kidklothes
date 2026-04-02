@@ -737,6 +737,17 @@ export const SettingsScreen: React.FC = () => {
             value={settings.developerForceProAccessEnabled ? 'On' : 'Off'}
             onChange={(value) => updateSettings({ developerForceProAccessEnabled: value === 'On' })}
           />
+          <PrimaryButton
+            label="Turn Off Developer Mode"
+            variant="secondary"
+            onPress={async () => {
+              await updateSettings({
+                developerModeEnabled: false,
+                developerForceProAccessEnabled: false,
+              });
+              Alert.alert('Developer Mode Disabled', 'Hidden developer controls are now turned off.');
+            }}
+          />
           <Text style={{ color: '#6b7280', fontSize: 12 }}>
             Pro access resolves as real entitlement OR this hidden local override. Current access: {proAccess.hasProAccess ? 'Unlocked' : 'Normal'}.
           </Text>

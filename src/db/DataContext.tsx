@@ -57,6 +57,7 @@ interface DataContextValue {
   updateSaleDraft: (id: ID, patch: UpdateSaleDraftInput) => Promise<void>;
   updateSaleDraftItem: (id: ID, patch: UpdateSaleDraftItemInput) => Promise<void>;
   bulkUpdateSaleDraftItems: (saleDraftId: ID, patch: BulkUpdateSaleDraftItemsInput) => Promise<void>;
+  deleteSaleDraft: (id: ID) => Promise<void>;
   removeSaleDraftItem: (id: ID) => Promise<void>;
   reorderSaleDraftItems: (saleDraftId: ID, orderedDraftItemIds: ID[]) => Promise<void>;
   saveFilterPreset: (input: SaveFilterPresetInput) => Promise<void>;
@@ -93,6 +94,7 @@ const defaultSettings: AppSettings = {
   betaKidLimitBannerDismissed: false,
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,
+  hasSeenBstPostingGuide: false,
 };
 
 const DataContext = createContext<DataContextValue | undefined>(undefined);
@@ -503,6 +505,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       },
       updateSaleDraftItem: async (id, patch) => runAndRefresh(() => repository.updateSaleDraftItem(id, patch)),
       bulkUpdateSaleDraftItems: async (saleDraftId, patch) => runAndRefresh(() => repository.bulkUpdateSaleDraftItems(saleDraftId, patch)),
+      deleteSaleDraft: async (id) => runAndRefresh(() => repository.deleteSaleDraft(id)),
       removeSaleDraftItem: async (id) => runAndRefresh(() => repository.removeSaleDraftItem(id)),
       reorderSaleDraftItems: async (saleDraftId, orderedDraftItemIds) => runAndRefresh(() => repository.reorderSaleDraftItems(saleDraftId, orderedDraftItemIds)),
       saveFilterPreset: async (input) => runAndRefresh(() => repository.saveFilterPreset(input)),

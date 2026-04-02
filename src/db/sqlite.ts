@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { inferSizeScheme, isShoeCategory, normalizeSize } from '@/lib/sizing';
 
 const DB_NAME = 'layetteout.db';
-const LATEST_DB_VERSION = 39;
+const LATEST_DB_VERSION = 43;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let initPromise: Promise<void> | null = null;
@@ -182,7 +182,8 @@ CREATE TABLE IF NOT EXISTS settings (
   developerForceProAccessEnabled INTEGER NOT NULL DEFAULT 0,
   betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0,
   proTeaserBannerDismissed INTEGER NOT NULL DEFAULT 0,
-  missingPhotoRestoreNudgeShown INTEGER NOT NULL DEFAULT 1
+  missingPhotoRestoreNudgeShown INTEGER NOT NULL DEFAULT 1,
+  hasSeenBstPostingGuide INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sale_drafts (
@@ -199,8 +200,10 @@ CREATE TABLE IF NOT EXISTS sale_drafts (
   defaultShippingNote TEXT,
   defaultPaymentNote TEXT,
   collageGridSize TEXT NOT NULL DEFAULT 'Auto',
+  collageOrderMode TEXT NOT NULL DEFAULT 'highest-price',
   customHeaderImageUri TEXT,
   freeGeneratedCardItemIdsJson TEXT,
+  freeGenerationConsumedAt INTEGER,
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL
 );
@@ -312,8 +315,8 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
   if ((row?.count ?? 0) > 0) return;
 
   await db.runAsync(
-    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, developerForceProAccessEnabled, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, developerForceProAccessEnabled, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown, hasSeenBstPostingGuide)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     'app',
     'sometimes',
     'detailed',
@@ -321,10 +324,10 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
     0,
     0,
     0,
-    0,
     1,
     0,
     0,
+    null,
     null,
     null,
     null,
@@ -334,12 +337,14 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
     null,
     '[]',
     null,
-    null,
+    5,
+    0,
     0,
     0,
     0,
     0,
     1,
+    0,
   );
 };
 
@@ -1018,7 +1023,9 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
         defaultShippingNote TEXT,
         defaultPaymentNote TEXT,
         collageGridSize TEXT NOT NULL DEFAULT 'Auto',
+        collageOrderMode TEXT NOT NULL DEFAULT 'highest-price',
         customHeaderImageUri TEXT,
+        freeGenerationConsumedAt INTEGER,
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
@@ -1095,6 +1102,48 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
     }
     await db.execAsync('PRAGMA user_version = 39;');
     currentVersion = 39;
+  }
+
+  if (currentVersion < 40) {
+    const saleDraftColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('sale_drafts');`);
+    if (!saleDraftColumns.some((column) => column.name === 'collageOrderMode')) {
+      await db.execAsync(`ALTER TABLE sale_drafts ADD COLUMN collageOrderMode TEXT NOT NULL DEFAULT 'highest-price';`);
+    }
+    await db.execAsync('PRAGMA user_version = 40;');
+    currentVersion = 40;
+  }
+
+  if (currentVersion < 41) {
+    await db.execAsync(`UPDATE settings SET developerModeEnabled = COALESCE(developerModeEnabled, 0);`);
+    await db.execAsync(`UPDATE settings SET devProUnlocked = COALESCE(devProUnlocked, 0);`);
+    await db.execAsync(`UPDATE settings SET developerForceProAccessEnabled = COALESCE(developerForceProAccessEnabled, 0);`);
+    await db.execAsync(`UPDATE settings SET betaKidLimitBannerDismissed = COALESCE(betaKidLimitBannerDismissed, 0);`);
+    await db.execAsync(`UPDATE settings SET proTeaserBannerDismissed = COALESCE(proTeaserBannerDismissed, 0);`);
+    await db.execAsync(`UPDATE settings SET missingPhotoRestoreNudgeShown = COALESCE(missingPhotoRestoreNudgeShown, 1);`);
+    await db.execAsync(`UPDATE settings SET guidedOnboarding = COALESCE(guidedOnboarding, 1);`);
+    await db.execAsync(`UPDATE settings SET guidedOnboardingCompleted = COALESCE(guidedOnboardingCompleted, 0);`);
+    await db.execAsync(`UPDATE settings SET inventoryRealityCheckOwnedThreshold = COALESCE(inventoryRealityCheckOwnedThreshold, 5);`);
+    await db.execAsync('PRAGMA user_version = 41;');
+    currentVersion = 41;
+  }
+
+  if (currentVersion < 42) {
+    const saleDraftColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('sale_drafts');`);
+    if (!saleDraftColumns.some((column) => column.name === 'freeGenerationConsumedAt')) {
+      await db.execAsync('ALTER TABLE sale_drafts ADD COLUMN freeGenerationConsumedAt INTEGER;');
+    }
+    await db.execAsync('PRAGMA user_version = 42;');
+    currentVersion = 42;
+  }
+
+  if (currentVersion < 43) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'hasSeenBstPostingGuide')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN hasSeenBstPostingGuide INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync(`UPDATE settings SET hasSeenBstPostingGuide = COALESCE(hasSeenBstPostingGuide, 0);`);
+    await db.execAsync('PRAGMA user_version = 43;');
+    currentVersion = 43;
   }
 
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');

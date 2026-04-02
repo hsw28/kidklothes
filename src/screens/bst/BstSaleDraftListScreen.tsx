@@ -69,6 +69,11 @@ export const BstSaleDraftListScreen: React.FC<Props> = ({ navigation }) => {
             Free includes {FREE_BST_DRAFT_LIMIT} active BST draft at a time. If you want to start another, unlock Pro for unlimited drafts.
           </Text>
         ) : null}
+        {!canCreateMoreDrafts ? (
+          <Text style={styles.body}>
+            Free drafts are meant to stay in progress while you prep your sale. Draft deletion is available on Pro.
+          </Text>
+        ) : null}
         <PrimaryButton
           label="New BST Sale Draft"
           onPress={() => {

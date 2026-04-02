@@ -59,6 +59,7 @@ export type BstDryingMethod = 'line dried' | 'machine dried';
 export type BstSmokeNote = 'smoke-free home' | 'smoking home';
 export type BstPetType = 'none' | 'dog' | 'cat' | 'other';
 export type BstCollageGridSize = 'Auto' | '2' | '4' | '6' | '8';
+export type BstCollageOrderMode = 'highest-price' | 'newest-first' | 'custom';
 export type AddItemDefaultViewMode = 'simple' | 'detailed';
 export type FitBin = 'current' | 'next' | 'later' | 'unsure';
 export type ItemSizeType = 'apparel' | 'shoe';
@@ -72,6 +73,7 @@ export const BST_DRYING_METHODS = ['line dried', 'machine dried'] as const;
 export const BST_SMOKE_NOTES = ['smoke-free home', 'smoking home'] as const;
 export const BST_PET_TYPES = ['none', 'dog', 'cat', 'other'] as const;
 export const BST_COLLAGE_GRID_SIZES = ['Auto', '2', '4', '6', '8'] as const;
+export const BST_COLLAGE_ORDER_MODES = ['highest-price', 'newest-first', 'custom'] as const;
 
 export interface BaseItem {
   id: ID;
@@ -225,8 +227,10 @@ export interface SaleDraft {
   defaultShippingNote?: string;
   defaultPaymentNote?: string;
   collageGridSize: BstCollageGridSize;
+  collageOrderMode: BstCollageOrderMode;
   customHeaderImageUri?: string;
   freeGeneratedCardItemIds: ID[];
+  freeGenerationConsumedAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -297,6 +301,7 @@ export interface AppSettings {
   betaKidLimitBannerDismissed?: boolean;
   proTeaserBannerDismissed?: boolean;
   missingPhotoRestoreNudgeShown?: boolean;
+  hasSeenBstPostingGuide?: boolean;
 }
 
 export interface ActivityEvent {

@@ -8,10 +8,11 @@ import { FormInput } from '@/components/FormInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
-import { BST_COLLAGE_GRID_SIZES, BST_CONDITIONS, BST_DRYING_METHODS, BST_FLAW_TAGS, BST_PET_TYPES, BST_SMOKE_NOTES, SaleDraftItem } from '@/models';
+import { BST_COLLAGE_ORDER_MODES, BST_CONDITIONS, BST_DRYING_METHODS, BST_FLAW_TAGS, BST_PET_TYPES, BST_SMOKE_NOTES, SaleDraftItem } from '@/models';
 import { ClosetStackParamList } from '@/navigation/types';
 import { buildSaleDraftName, formatMoney, getDraftIncludedItems } from '@/services/bst/draft';
-import { canUseCustomBstHeaderImage, canUseMultipleItemPhotos } from '@/services/proAccess';
+import { trackBstDraftDeleted } from '@/services/bst/bstAnalytics';
+import { canCreateMultipleDrafts, canUseCustomBstHeaderImage, canUseMultipleItemPhotos } from '@/services/proAccess';
 import { useAppTheme } from '@/theme';
 import { persistLocalImage } from '@/utils/imageCache';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
@@ -59,8 +60,10 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
     updateSaleDraft,
     updateSaleDraftItem,
     updateItem,
+    deleteSaleDraft,
     removeSaleDraftItem,
     reorderSaleDraftItems,
+    logEvent,
   } = useData();
   const theme = useAppTheme();
   const editorScrollRef = useRef<ScrollView | null>(null);
@@ -85,6 +88,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
   const [itemOffersValue, setItemOffersValue] = useState<BoolChoice>('inherit');
   const [itemBundleOffersValue, setItemBundleOffersValue] = useState<BoolChoice>('inherit');
   const [itemSelectedPhotoUri, setItemSelectedPhotoUri] = useState<string | undefined>(undefined);
+  const [isDeletingDraft, setIsDeletingDraft] = useState(false);
   const draft = saleDrafts.find((entry) => entry.id === route.params.draftId);
   const draftItems = useMemo(
     () => getDraftIncludedItems(saleDraftItems.filter((entry) => entry.saleDraftId === route.params.draftId)),
@@ -95,6 +99,8 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
   const editingInventoryItem = editingDraftItem ? itemMap.get(editingDraftItem.itemId) : undefined;
   const hasMultiPhotoAccess = canUseMultipleItemPhotos(settings, purchaseState);
   const canUseCustomHeaderImage = canUseCustomBstHeaderImage(settings, purchaseState);
+  const canDeleteDraft = canCreateMultipleDrafts(settings, purchaseState);
+  const shouldConfirmSelectionReset = !canDeleteDraft && Boolean(draft?.freeGenerationConsumedAt);
   const editingPhotoChoices = useMemo(
     () => {
       if (!editingInventoryItem) return [];
@@ -121,6 +127,12 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       setEditingItemId(route.params.editDraftItemId);
     }
   }, [route.params.editDraftItemId]);
+
+  useEffect(() => {
+    if (!isDeletingDraft) return;
+    if (draft) return;
+    navigation.replace('BstSaleDraftList');
+  }, [draft, isDeletingDraft, navigation]);
 
   const styles = StyleSheet.create({
     title: {
@@ -264,6 +276,11 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
     restoreEditorScroll();
   }, [draft.id, restoreEditorScroll, updateSaleDraft]);
 
+  const applyOrderedDraftIds = useCallback(async (orderedDraftItemIds: string[], mode: typeof BST_COLLAGE_ORDER_MODES[number]) => {
+    await reorderSaleDraftItems(draft.id, orderedDraftItemIds);
+    await updateDraftPreservingScroll({ collageOrderMode: mode });
+  }, [draft.id, reorderSaleDraftItems, updateDraftPreservingScroll]);
+
   const saveDraftTextField = useCallback(
     async <K extends 'title' | 'defaultPetNote' | 'defaultWashNote' | 'defaultShippingNote' | 'defaultPaymentNote'>(
       key: K,
@@ -299,7 +316,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       navigation.navigate('ProPaywall', { source: 'bst_locked_export' });
       return;
     }
-    Alert.alert('Custom header image', 'Choose how you want to add your BST post header image.', [
+    Alert.alert('Main post photo', 'Choose how you want to add your main post photo.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Photo Library',
@@ -370,6 +387,69 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
     setEditingItemId(null);
   };
 
+  const applyAutoSort = useCallback(async (mode: 'highest-price' | 'newest-first') => {
+    const ordered = [...draftItems].sort((left, right) => {
+      const leftItem = itemMap.get(left.itemId);
+      const rightItem = itemMap.get(right.itemId);
+      if (mode === 'highest-price') {
+        const leftPrice = left.price ?? leftItem?.targetResalePrice;
+        const rightPrice = right.price ?? rightItem?.targetResalePrice;
+        const leftHasPrice = Number.isFinite(leftPrice);
+        const rightHasPrice = Number.isFinite(rightPrice);
+        if (leftHasPrice && rightHasPrice && leftPrice !== rightPrice) {
+          return (rightPrice ?? 0) - (leftPrice ?? 0);
+        }
+        if (leftHasPrice !== rightHasPrice) {
+          return leftHasPrice ? -1 : 1;
+        }
+      }
+      if (mode === 'newest-first') {
+        const leftCreatedAt = leftItem?.createdAt ?? left.createdAt;
+        const rightCreatedAt = rightItem?.createdAt ?? right.createdAt;
+        if (leftCreatedAt !== rightCreatedAt) {
+          return rightCreatedAt - leftCreatedAt;
+        }
+      }
+      return left.listingOrder - right.listingOrder || left.createdAt - right.createdAt;
+    });
+    await applyOrderedDraftIds(ordered.map((entry) => entry.id), mode);
+  }, [applyOrderedDraftIds, draftItems, itemMap]);
+
+  const confirmDeleteDraft = useCallback(() => {
+    const deletingDraftId = draft.id;
+    const deletingItemCount = draftItems.length;
+    Alert.alert(
+      'Delete BST draft',
+      'Delete this sell post draft and all of its item-specific BST details for this draft?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Draft',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                setEditingItemId(null);
+                setIsDeletingDraft(true);
+                await deleteSaleDraft(deletingDraftId);
+                navigation.replace('BstSaleDraftList');
+                void trackBstDraftDeleted(logEvent, {
+                  draftId: deletingDraftId,
+                  itemCount: deletingItemCount,
+                  triggeredFrom: 'draft_editor',
+                });
+              } catch (error) {
+                setIsDeletingDraft(false);
+                const message = error instanceof Error && error.message ? error.message : 'Try deleting the draft again.';
+                Alert.alert('Unable to delete draft', message);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [deleteSaleDraft, draft.id, draftItems.length, logEvent, navigation]);
+
   return (
     <Screen
       disableDataStateGate
@@ -385,6 +465,9 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       <Card>
         <Text style={styles.title}>{buildSaleDraftName(draft)}</Text>
         <Text style={styles.body}>{draftItems.length} item{draftItems.length === 1 ? '' : 's'} included</Text>
+        {!canDeleteDraft ? (
+          <Text style={styles.body}>Free includes 1 active BST draft at a time. Keep updating this draft as your sale post until you upgrade to Pro for multiple drafts and draft deletion.</Text>
+        ) : null}
         <FormInput
           label="Draft title"
           value={draftTitleInput}
@@ -392,15 +475,9 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
           onBlur={() => void saveDraftTextField('title', draftTitleInput, draft.title)}
           placeholder="Spring Purge"
         />
-        <Text style={styles.body}>Items per collage page. Auto uses the Facebook BST layout and fits up to 8 items with a 2-column grid.</Text>
-        <ChipSelector
-          label="Items per collage page"
-          options={[...BST_COLLAGE_GRID_SIZES]}
-          value={draft.collageGridSize}
-          onChange={(value) => void updateDraftPreservingScroll({ collageGridSize: value })}
-          accent="periwinkle"
-        />
-        <Text style={styles.body}>Post header image. Use the generated collage, or on Pro you can upload your own branded header image for the main sale post.</Text>
+        <Text style={styles.body}>Collage export uses one single-image BST grid and automatically adjusts columns based on how many items are in the draft.</Text>
+        <Text style={styles.body}>Main post photo</Text>
+        <Text style={styles.body}>Use the collage, or upload your own with Pro.</Text>
         {draft.customHeaderImageUri ? (
           <Image source={{ uri: draft.customHeaderImageUri }} style={{ width: '100%', aspectRatio: 1.2, borderRadius: 20, backgroundColor: theme.colors.surfaceMuted }} resizeMode="cover" />
         ) : null}
@@ -465,6 +542,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
           value={(draft.defaultDryingMethod ?? 'unset') as 'unset' | (typeof BST_DRYING_METHODS)[number]}
           onChange={(value) => void updateDraftPreservingScroll({ defaultDryingMethod: value === 'unset' ? undefined : value })}
         />
+        <Text style={styles.body}>Wash and dry notes will not apply to items marked new or new with tag.</Text>
         <Pressable onPress={() => void beginIndividualFieldEditing('drying')}>
           <Text style={styles.inlineLink}>Set drying individually for items</Text>
         </Pressable>
@@ -506,6 +584,21 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
         <Text style={styles.body}>
           Tap Edit to add item-specific BST details like condition, flaws, wash notes, photo choice, and offers settings. Reusable BST details you save here will prefill future drafts for this item.
         </Text>
+        <Text style={styles.subhead}>Order for collage</Text>
+        <Text style={styles.body}>Top-left items get the most attention.</Text>
+        <ChipSelector
+          label="Collage order"
+          options={[...BST_COLLAGE_ORDER_MODES]}
+          value={draft.collageOrderMode}
+          onChange={(value) => {
+            if (value === 'custom') {
+              void updateDraftPreservingScroll({ collageOrderMode: 'custom' });
+              return;
+            }
+            void applyAutoSort(value);
+          }}
+          accent="periwinkle"
+        />
         {draftItems.map((draftItem, index) => {
           const inventoryItem = itemMap.get(draftItem.itemId);
           if (!inventoryItem) return null;
@@ -531,7 +624,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                     const swap = ordered[index - 1];
                     ordered[index - 1] = ordered[index];
                     ordered[index] = swap;
-                    void reorderSaleDraftItems(draft.id, ordered.map((entry) => entry.id));
+                    void applyOrderedDraftIds(ordered.map((entry) => entry.id), 'custom');
                   }}
                 />
                 <PrimaryButton label="Edit" variant="secondary" style={styles.itemActionButton} onPress={() => setEditingItemId(draftItem.id)} />
@@ -540,6 +633,26 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                   variant="danger"
                   style={styles.itemActionButton}
                   onPress={() => {
+                    if (shouldConfirmSelectionReset) {
+                      Alert.alert(
+                        'Changing items will reset your generated cards',
+                        'Changing items will reset your generated cards.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Remove',
+                            style: 'destructive',
+                            onPress: () => {
+                              void (async () => {
+                                await updateDraftPreservingScroll({ freeGeneratedCardItemIds: [] });
+                                await removeSaleDraftItem(draftItem.id);
+                              })();
+                            },
+                          },
+                        ],
+                      );
+                      return;
+                    }
                     Alert.alert('Remove item', 'Remove this item from the draft?', [
                       { text: 'Cancel', style: 'cancel' },
                       { text: 'Remove', style: 'destructive', onPress: () => void removeSaleDraftItem(draftItem.id) },
@@ -556,7 +669,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                     const swap = ordered[index + 1];
                     ordered[index + 1] = ordered[index];
                     ordered[index] = swap;
-                    void reorderSaleDraftItems(draft.id, ordered.map((entry) => entry.id));
+                    void applyOrderedDraftIds(ordered.map((entry) => entry.id), 'custom');
                   }}
                 />
               </View>
@@ -566,10 +679,18 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       </Card>
 
       <Card>
-        <Text style={styles.subhead}>Generate assets</Text>
-        <Text style={styles.body}>Preview your collage pages, item cards, and export text, then copy or share from the next screen.</Text>
-        <PrimaryButton label="Open Preview + Export" onPress={() => navigation.navigate('BstSaleDraftPreview', { draftId: draft.id })} />
+        <Text style={styles.subhead}>Create your post</Text>
+        <Text style={styles.body}>Preview your collage, item cards, and post text.</Text>
+        <PrimaryButton label="Preview post" onPress={() => navigation.navigate('BstSaleDraftPreview', { draftId: draft.id })} />
       </Card>
+
+      {canDeleteDraft ? (
+        <Card>
+          <Text style={styles.subhead}>Delete draft</Text>
+          <Text style={styles.body}>Remove this BST draft and its draft-specific item settings for this sale post.</Text>
+          <PrimaryButton label="Delete Draft" variant="danger" onPress={confirmDeleteDraft} />
+        </Card>
+      ) : null}
 
       <Modal visible={Boolean(editingDraftItem && editingInventoryItem)} transparent animationType="slide" onRequestClose={() => setEditingItemId(null)}>
         <View style={styles.modalBackdrop}>

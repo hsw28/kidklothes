@@ -57,3 +57,15 @@ export const buildSaleDraftItemCommentText = (entry: ResolvedSaleDraftItem): str
 
 export const buildSaleDraftAllItemCommentsText = (resolvedItems: ResolvedSaleDraftItem[]): string =>
   resolvedItems.map((entry) => buildSaleDraftItemCommentText(entry)).join('\n\n');
+
+export const buildSaleDraftBstCaptionText = (draft: SaleDraft, resolvedItems: ResolvedSaleDraftItem[]): string => {
+  const lines = ['BST 🌿'];
+  const contextLine = [summarizeDraftBrands(resolvedItems), summarizeDraftSizes(resolvedItems)].filter(Boolean).join(' • ');
+  const homeNotes = describeHomeNotes(draft, resolvedItems);
+
+  if (contextLine) lines.push(contextLine);
+  if (homeNotes) lines.push(homeNotes);
+
+  lines.push('', 'Details in comments');
+  return lines.join('\n').trim();
+};

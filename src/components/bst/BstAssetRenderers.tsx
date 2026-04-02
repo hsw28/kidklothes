@@ -1,8 +1,7 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { formatBstNoteLabel, isNewBstCondition, ResolvedSaleDraftItem, formatMoney, splitBstTitle } from '@/services/bst/draft';
+import { ResolvedSaleDraftItem, formatMoney } from '@/services/bst/draft';
 import { chunkForCollageRows, getCollageColumnCount } from '@/services/bst/layout';
-import { useAppTheme } from '@/theme';
 
 export type CollageViewProps = {
   title?: string;
@@ -23,77 +22,92 @@ export type ItemCardViewProps = {
   brandingMode?: 'free' | 'pro';
 };
 
-const badgeSize = 28;
+const BrandWatermark: React.FC<{
+  scale: number;
+  variant?: 'collage' | 'card';
+}> = ({ scale }) => {
+  const textSize = 16.4 * scale;
+  const verticalPadding = 7.2 * scale;
+  const horizontalPadding = 14.2 * scale;
+  const radius = 7.2 * scale;
 
-export const CollageView: React.FC<CollageViewProps> = ({ title, pageIndex = 0, pageCount = 1, items, pageSize, onAssetLoadEnd, width = 1080, brandingMode = 'free' }) => {
-  const theme = useAppTheme();
-  const columns = getCollageColumnCount(pageSize);
+  const styles = StyleSheet.create({
+    text: {
+      fontSize: textSize,
+      lineHeight: textSize * 1.1,
+      fontWeight: '600',
+      color: 'rgba(255,255,255,0.96)',
+      backgroundColor: 'rgba(0,0,0,0.48)',
+      paddingHorizontal: horizontalPadding,
+      paddingVertical: verticalPadding,
+      borderRadius: radius,
+      overflow: 'hidden',
+      textAlign: 'right',
+      opacity: 0.9,
+      letterSpacing: 0.42 * scale,
+    },
+  });
+
+  return <Text numberOfLines={1} style={styles.text}>Layette Out</Text>;
+};
+
+const formatCollagePrice = (value?: number): string | undefined => {
+  if (value === undefined || value === null || !Number.isFinite(value)) return undefined;
+  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+};
+
+export const CollageView: React.FC<CollageViewProps> = ({ items, onAssetLoadEnd, width = 1080 }) => {
+  const columns = getCollageColumnCount(items.length);
   const rows = chunkForCollageRows(items, columns);
-  const scale = width / 1080;
-  const shellPaddingX = 24 * scale;
-  const shellPaddingTop = 20 * scale;
-  const shellPaddingBottom = 18 * scale;
-  const gap = 14 * scale;
-  const contentWidth = width - shellPaddingX * 2;
-  const tileWidth = (contentWidth - gap * (columns - 1)) / columns;
-  const accentColor = '#E2B8A2';
+  const rowCount = Math.max(1, rows.length);
+  const canvasWidth = width;
+  const canvasHeight = Math.round(width * 1.25);
+  const outerPadding = Math.round((8 / 1080) * width);
+  const gap = Math.round((5 / 1080) * width);
+  const contentWidth = canvasWidth - outerPadding * 2;
+  const contentHeight = canvasHeight - outerPadding * 2;
+  const cellSize = Math.floor(
+    Math.min(
+      (contentWidth - gap * (columns - 1)) / columns,
+      (contentHeight - gap * (rowCount - 1)) / rowCount,
+    ),
+  );
+  const gridWidth = cellSize * columns + gap * (columns - 1);
+  const gridHeight = cellSize * rowCount + gap * (rowCount - 1);
+  const numberFontSize = Math.round((19 / 1080) * width);
+  const priceFontSize = Math.round((21 / 1080) * width);
+  const overlayInset = Math.round((6 / 1080) * width);
   const styles = StyleSheet.create({
     shell: {
-      width,
-      backgroundColor: '#FFFFFF',
-      paddingHorizontal: shellPaddingX,
-      paddingTop: shellPaddingTop,
-      paddingBottom: shellPaddingBottom,
-      gap: 16 * scale,
-      borderRadius: 28 * scale,
-    },
-    header: {
-      gap: 2 * scale,
-      minHeight: title ? 48 * scale : 20 * scale,
-    },
-    eyebrow: {
-      fontSize: 14 * scale,
-      fontWeight: '700',
-      color: '#7A736B',
-      letterSpacing: 0.4,
-      textTransform: 'uppercase',
-    },
-    title: {
-      fontSize: 24 * scale,
-      fontWeight: '700',
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.serif,
-      lineHeight: 30 * scale,
-    },
-    subhead: {
-      fontSize: 14 * scale,
-      color: theme.colors.textSecondary,
+      width: canvasWidth,
+      height: canvasHeight,
+      backgroundColor: '#F7F4F1',
+      paddingHorizontal: outerPadding,
+      paddingTop: Math.max(2, outerPadding - Math.round((4 / 1080) * width)),
+      paddingBottom: outerPadding,
     },
     grid: {
-      gap,
+      width: gridWidth,
+      height: gridHeight,
+      gap: gap,
+      alignSelf: 'center',
     },
     row: {
       flexDirection: 'row',
-      justifyContent: 'center',
-      gap,
+      gap: gap,
     },
     tile: {
-      width: tileWidth,
-      borderRadius: 18 * scale,
+      width: cellSize,
+      height: cellSize,
+      borderRadius: Math.round((7 / 1080) * width),
       overflow: 'hidden',
-      backgroundColor: '#FBF9F6',
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      padding: 10 * scale,
-      gap: 8 * scale,
+      backgroundColor: '#FAF8F6',
     },
     imageWrap: {
       width: '100%',
-      aspectRatio: 1,
-      borderRadius: 16 * scale,
-      overflow: 'hidden',
-      backgroundColor: '#F6F0EA',
+      height: '100%',
       position: 'relative',
+      transform: [{ scale: 1.03 }],
     },
     image: {
       width: '100%',
@@ -103,81 +117,58 @@ export const CollageView: React.FC<CollageViewProps> = ({ title, pageIndex = 0, 
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      padding: 16 * scale,
-      backgroundColor: '#F6F0EA',
+      padding: Math.max(10, cellSize * 0.08),
+      backgroundColor: '#FAF8F6',
     },
     placeholderText: {
-      fontSize: 18 * scale,
-      color: theme.colors.textSecondary,
+      fontSize: Math.max(12, cellSize * 0.09),
+      color: '#746C65',
       textAlign: 'center',
-    },
-    badge: {
-      position: 'absolute',
-      top: 8 * scale,
-      left: 8 * scale,
-      minWidth: 34 * scale,
-      height: 34 * scale,
-      paddingHorizontal: 10 * scale,
-      borderRadius: 17 * scale,
-      backgroundColor: 'rgba(35, 28, 24, 0.92)',
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     badgeText: {
       color: '#fff',
-      fontWeight: '900',
-      fontSize: 16 * scale,
+      fontWeight: '600',
+      fontSize: numberFontSize,
+      position: 'absolute',
+      top: overlayInset,
+      left: overlayInset,
+      opacity: 1,
+      textShadowColor: 'rgba(0,0,0,0.74)',
+      textShadowRadius: 3,
+      textShadowOffset: { width: 0, height: 1 },
     },
-    tileMeta: {
-      gap: 4 * scale,
-    },
-    priceRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8 * scale,
-      flexWrap: 'wrap',
+    pricePill: {
+      position: 'absolute',
+      left: overlayInset,
+      bottom: overlayInset,
+      borderRadius: Math.round((6 / 1080) * width),
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      paddingHorizontal: Math.round((6 / 1080) * width),
+      paddingVertical: Math.max(2, Math.round((3 / 1080) * width)),
+      shadowColor: '#000000',
+      shadowOpacity: 0.14,
+      shadowRadius: 3,
+      shadowOffset: { width: 0, height: 2 },
     },
     price: {
-      fontSize: 22 * scale,
-      fontWeight: '900',
-      color: '#1F1814',
-      backgroundColor: accentColor,
-      borderRadius: 12 * scale,
-      paddingHorizontal: 10 * scale,
-      paddingVertical: 5 * scale,
-      overflow: 'hidden',
-    },
-    condition: {
-      fontSize: 17 * scale,
-      fontWeight: '800',
-      color: '#413832',
-    },
-    brandSize: {
-      fontSize: 18 * scale,
-      lineHeight: 24 * scale,
+      fontSize: priceFontSize,
       fontWeight: '700',
-      color: '#4B433D',
+      color: '#FFFFFF',
+      textShadowColor: 'rgba(0,0,0,0.78)',
+      textShadowRadius: 3,
+      textShadowOffset: { width: 0, height: 1 },
     },
     footer: {
-      paddingTop: 6 * scale,
-    },
-    footerText: {
-      fontSize: 16 * scale,
-      lineHeight: 22 * scale,
-      fontWeight: '700',
-      color: '#5A5149',
-      textAlign: 'center',
+      position: 'absolute',
+      right: Math.round((14 / 1080) * width),
+      bottom: Math.round((14 / 1080) * width),
+      alignItems: 'flex-end',
     },
   });
 
   return (
     <View style={styles.shell} collapsable={false}>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>BST collage</Text>
-        {title ? <Text numberOfLines={1} style={styles.title}>{title}</Text> : null}
-        {pageCount > 1 ? <Text style={styles.subhead}>Page {pageIndex + 1} of {pageCount}</Text> : null}
-      </View>
-      <View style={styles.grid}>
+      <View style={[styles.grid, { marginTop: Math.max(0, Math.floor((contentHeight - gridHeight) / 2)) + Math.round((10 / 1080) * width) }]}>
         {rows.map((row, rowIndex) => (
           <View key={`row-${rowIndex}`} style={styles.row}>
             {row.map((entry) => (
@@ -190,18 +181,12 @@ export const CollageView: React.FC<CollageViewProps> = ({ title, pageIndex = 0, 
                       <Text numberOfLines={3} style={styles.placeholderText}>{entry.inventoryItem.title}</Text>
                     </View>
                   )}
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>#{entry.draftItem.itemNumber}</Text>
-                  </View>
-                </View>
-                <View style={styles.tileMeta}>
-                  <View style={styles.priceRow}>
-                    {entry.draftItem.price ? <Text style={styles.price}>{formatMoney(entry.draftItem.price)}</Text> : null}
-                    {entry.draftItem.condition ? <Text style={styles.condition}>{entry.draftItem.condition}</Text> : null}
-                  </View>
-                  <Text numberOfLines={1} style={styles.brandSize}>
-                    {[entry.inventoryItem.brand, entry.inventoryItem.size].filter(Boolean).join(' • ') || 'BST listing'}
-                  </Text>
+                  <Text style={styles.badgeText}>#{entry.draftItem.itemNumber}</Text>
+                  {formatCollagePrice(entry.draftItem.price) ? (
+                    <View style={styles.pricePill}>
+                      <Text style={styles.price}>{formatCollagePrice(entry.draftItem.price)}</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             ))}
@@ -209,237 +194,144 @@ export const CollageView: React.FC<CollageViewProps> = ({ title, pageIndex = 0, 
         ))}
       </View>
       <View style={styles.footer}>
-        <Text style={styles.footerText}>Tracked & formatted with Layette Out</Text>
+        <BrandWatermark scale={width / 1080} />
       </View>
     </View>
   );
 };
 
 export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, onAssetLoadEnd, width = 1080, brandingMode = 'free' }) => {
-  const theme = useAppTheme();
-  const suppressCareNotes = isNewBstCondition(entry.draftItem.condition);
   const scale = width / 1080;
-  const accentColor = '#E7C8B8';
-  const accentColorStrong = '#C9967D';
-  const titleParts = splitBstTitle(entry.inventoryItem.title);
   const priceLabel = formatMoney(entry.draftItem.price);
-  const titleLine = titleParts.primary || entry.inventoryItem.title;
   const brandLabel = entry.inventoryItem.brand?.trim();
+  const titleLine = entry.inventoryItem.title?.trim() || 'Untitled item';
   const sizeLabel = entry.inventoryItem.size?.trim();
-  const detailCandidates = [
-    entry.inventoryItem.printName,
-    entry.inventoryItem.styleName,
-    entry.inventoryItem.fabric,
-  ]
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value));
-  const detailLine = Array.from(
-    new Map(detailCandidates.map((value) => [value.toLowerCase(), value])).values(),
-  ).join(' • ') || undefined;
+  const conditionLabel = entry.draftItem.condition?.trim();
   const styles = StyleSheet.create({
     shell: {
       width,
-      backgroundColor: '#FFFFFF',
-      borderRadius: 28 * scale,
+      aspectRatio: 4 / 5,
+      backgroundColor: '#F7F4F1',
+      borderRadius: 12 * scale,
       overflow: 'hidden',
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      shadowColor: '#2A211C',
-      shadowOpacity: 0.08,
-      shadowRadius: 18 * scale,
-      shadowOffset: { width: 0, height: 10 * scale },
-      elevation: 3,
+      borderColor: 'rgba(0,0,0,0.04)',
+      shadowColor: '#000000',
+      shadowOpacity: 0.06,
+      shadowRadius: 10 * scale,
+      shadowOffset: { width: 0, height: 3 * scale },
+      elevation: 1,
     },
     photoWrap: {
       width: '100%',
-      aspectRatio: 1.16,
-      backgroundColor: '#F8F4EF',
-      padding: 9 * scale,
+      height: '68%',
+      backgroundColor: '#FAF8F6',
+      paddingHorizontal: 6 * scale,
+      paddingTop: 2 * scale,
+      paddingBottom: 2 * scale,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     photo: {
       width: '100%',
       height: '100%',
-      borderRadius: 24 * scale,
-      shadowColor: '#201A16',
-      shadowOpacity: 0.08,
-      shadowRadius: 16 * scale,
-      shadowOffset: { width: 0, height: 8 * scale },
-      elevation: 2,
+      opacity: 0.99,
+      transform: [{ scale: 1.05 }],
     },
     photoPlaceholder: {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
       padding: 20 * scale,
-      borderRadius: 24 * scale,
-      backgroundColor: '#FBF8F4',
+      backgroundColor: '#FAF8F6',
     },
     photoPlaceholderText: {
-      fontSize: 28 * scale,
+      fontSize: 22 * scale,
       textAlign: 'center',
-      color: theme.colors.textSecondary,
+      color: '#746C65',
     },
     body: {
-      paddingHorizontal: 28 * scale,
-      paddingTop: 18 * scale,
-      paddingBottom: 18 * scale,
-      gap: 12 * scale,
-      minHeight: 500 * scale,
+      flex: 1,
+      paddingHorizontal: 16 * scale,
+      paddingTop: -2 * scale,
+      paddingBottom: 1 * scale,
+      backgroundColor: '#F7F4F1',
+      justifyContent: 'flex-start',
+    },
+    divider: {
+      height: 1,
+      backgroundColor: 'rgba(0,0,0,0.06)',
+      marginBottom: 2 * scale,
+    },
+    topRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8 * scale,
+      marginBottom: 1 * scale,
     },
     badge: {
-      alignSelf: 'flex-start',
-      backgroundColor: accentColorStrong,
-      borderRadius: 999,
-      paddingHorizontal: 14 * scale,
-      paddingVertical: 6 * scale,
-      marginTop: -1 * scale,
-      shadowColor: '#6E4F41',
-      shadowOpacity: 0.12,
-      shadowRadius: 6 * scale,
-      shadowOffset: { width: 0, height: 2 * scale },
-      elevation: 1,
-    },
-    badgeRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6 * scale,
-    },
-    badgeText: {
-      color: '#241C17',
-      fontWeight: '900',
-      fontSize: 25 * scale,
-    },
-    badgeMeta: {
-      fontSize: 17 * scale,
-      lineHeight: 21 * scale,
-      color: '#453A34',
-      fontWeight: '900',
-      opacity: 0.88,
-      letterSpacing: 0.15,
-      backgroundColor: '#F3E7DC',
-      paddingHorizontal: 10 * scale,
-      paddingVertical: 5 * scale,
-      borderRadius: 999,
-      overflow: 'hidden',
-    },
-    titleBlock: {
-      gap: 4 * scale,
-    },
-    title: {
-      fontSize: 50 * scale,
-      lineHeight: 51 * scale,
-      fontWeight: '900',
-      color: '#15100D',
-      fontFamily: theme.fonts.serif,
-    },
-    secondaryTitle: {
-      fontSize: 24 * scale,
-      color: '#6F655B',
-      lineHeight: 28 * scale,
-    },
-    metadataLine: {
-      fontSize: 35 * scale,
-      lineHeight: 39 * scale,
-      color: '#342D28',
-      fontWeight: '700',
-      minHeight: 39 * scale,
-    },
-    metadataBrand: {
-      color: '#302822',
-      fontWeight: '800',
-    },
-    metadataSize: {
-      color: '#554B44',
+      fontSize: 28 * scale,
+      lineHeight: 30 * scale,
+      color: 'rgba(31,26,22,0.88)',
       fontWeight: '600',
     },
-    pricingBlock: {
-      gap: 2 * scale,
-      paddingTop: 0,
-    },
-    priceConditionRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'baseline',
-      gap: 5 * scale,
-      rowGap: 4 * scale,
-    },
-    condition: {
-      fontSize: 31 * scale,
-      lineHeight: 34 * scale,
-      color: '#372F2A',
-      fontWeight: '800',
-      minHeight: 34 * scale,
-      backgroundColor: '#F0DFD2',
-      paddingHorizontal: 11 * scale,
-      paddingVertical: 4 * scale,
-      borderRadius: 14 * scale,
-      overflow: 'hidden',
-    },
     price: {
-      alignSelf: 'flex-start',
-      fontSize: 62 * scale,
-      lineHeight: 66 * scale,
-      fontWeight: '900',
-      color: '#211A16',
-      minHeight: 66 * scale,
-      backgroundColor: '#E2B8A2',
-      paddingHorizontal: 19 * scale,
-      paddingVertical: 8 * scale,
-      borderRadius: 18 * scale,
-      borderWidth: 1,
-      borderColor: 'rgba(121, 84, 63, 0.14)',
-      shadowColor: '#7A5A49',
-      shadowOpacity: 0.14,
-      shadowRadius: 10 * scale,
-      shadowOffset: { width: 0, height: 4 * scale },
-      elevation: 1,
-      overflow: 'hidden',
+      fontSize: 46.5 * scale,
+      lineHeight: 47.5 * scale,
+      fontWeight: '800',
+      color: '#130F0C',
+      letterSpacing: -0.7 * scale,
+      transform: [{ translateY: 10 * scale }],
     },
     priceMissing: {
-      fontSize: 21 * scale,
-      lineHeight: 28 * scale,
-      color: theme.colors.textSecondary,
-      minHeight: 28 * scale,
+      fontSize: 34 * scale,
+      lineHeight: 36 * scale,
+      fontWeight: '700',
+      color: '#7B746D',
+      letterSpacing: -0.42 * scale,
     },
-    notesBlock: {
-      gap: 10 * scale,
-      paddingTop: 1 * scale,
+    brand: {
+      fontSize: 37 * scale,
+      lineHeight: 39 * scale,
+      fontWeight: '700',
+      color: '#181411',
+      letterSpacing: 0.26 * scale,
+      marginBottom: 0 * scale,
     },
-    note: {
-      fontSize: 24 * scale,
-      color: '#575149',
-      lineHeight: 34 * scale,
-      minHeight: 34 * scale,
+    metadataLine: {
+      fontSize: 28.5 * scale,
+      lineHeight: 30.5 * scale,
+      fontWeight: '600',
+      color: '#564E47',
+      marginBottom: 0 * scale,
+    },
+    title: {
+      fontSize: 23.5 * scale,
+      lineHeight: 25.5 * scale,
+      fontWeight: '600',
+      color: '#6F675F',
+      flex: 1,
+      paddingRight: 12 * scale,
+    },
+    bottomRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+      marginTop: 1 * scale,
     },
     footer: {
-      marginTop: 'auto',
-      paddingTop: 7 * scale,
-    },
-    footerText: {
-      fontSize: 25 * scale,
-      lineHeight: 32 * scale,
-      color: '#3E352F',
-      flex: 1,
-      fontWeight: brandingMode === 'pro' ? '700' : '800',
-      opacity: 1,
-      letterSpacing: 0.1,
+      alignItems: 'flex-end',
+      marginLeft: 8 * scale,
+      transform: [{ translateY: 2 * scale }],
     },
   });
-
-  const notes = [
-    suppressCareNotes ? undefined : formatBstNoteLabel(entry.resolvedDryingMethod),
-    suppressCareNotes ? undefined : formatBstNoteLabel(entry.resolvedWashNote),
-    entry.resolvedHomeNotes,
-    formatBstNoteLabel(entry.draftItem.conditionNotes),
-    entry.draftItem.flawTags.length ? `Flaws: ${entry.draftItem.flawTags.join(', ')}` : undefined,
-    formatBstNoteLabel(entry.draftItem.flawNotes),
-  ].filter(Boolean) as string[];
 
   return (
     <View style={styles.shell} collapsable={false}>
       <View style={styles.photoWrap}>
         {entry.resolvedPhotoUri ? (
-          <Image source={{ uri: entry.resolvedPhotoUri }} style={styles.photo} resizeMode="cover" onLoadEnd={onAssetLoadEnd} onError={onAssetLoadEnd} />
+          <Image source={{ uri: entry.resolvedPhotoUri }} style={styles.photo} resizeMode="contain" onLoadEnd={onAssetLoadEnd} onError={onAssetLoadEnd} />
         ) : (
           <View style={styles.photoPlaceholder}>
             <Text style={styles.photoPlaceholderText}>{entry.inventoryItem.title}</Text>
@@ -447,36 +339,20 @@ export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, o
         )}
       </View>
       <View style={styles.body}>
-        <View style={styles.badgeRow}>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>#{entry.draftItem.itemNumber}</Text>
+        <View style={styles.divider} />
+        <View style={styles.topRow}>
+          <Text style={styles.badge}>#{entry.draftItem.itemNumber}</Text>
+          {priceLabel ? <Text style={styles.price}>{priceLabel}</Text> : <Text style={styles.priceMissing}>Price not set</Text>}
+        </View>
+        {brandLabel ? <Text numberOfLines={1} style={styles.brand}>{brandLabel}</Text> : null}
+        {[sizeLabel, conditionLabel].filter(Boolean).length ? (
+          <Text numberOfLines={1} style={styles.metadataLine}>{[sizeLabel, conditionLabel].filter(Boolean).join(' • ')}</Text>
+        ) : null}
+        <View style={styles.bottomRow}>
+          <Text numberOfLines={1} style={styles.title}>{titleLine}</Text>
+          <View style={styles.footer}>
+            <BrandWatermark scale={scale} />
           </View>
-          <Text style={styles.badgeMeta}>ready to post</Text>
-        </View>
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>{titleLine}</Text>
-          {brandLabel || sizeLabel ? (
-            <Text numberOfLines={1} style={styles.metadataLine}>
-              {brandLabel ? <Text style={styles.metadataBrand}>{brandLabel}</Text> : null}
-              {brandLabel && sizeLabel ? ' • ' : null}
-              {sizeLabel ? <Text style={styles.metadataSize}>{sizeLabel}</Text> : null}
-            </Text>
-          ) : null}
-          {detailLine ? <Text numberOfLines={2} style={styles.secondaryTitle}>{detailLine}</Text> : null}
-        </View>
-        <View style={styles.pricingBlock}>
-          <View style={styles.priceConditionRow}>
-            {priceLabel ? <Text style={styles.price}>{priceLabel}</Text> : <Text style={styles.priceMissing}>Price not set</Text>}
-            {entry.draftItem.condition ? <Text style={styles.condition}>{entry.draftItem.condition}</Text> : null}
-          </View>
-        </View>
-        <View style={styles.notesBlock}>
-          {notes.slice(0, 5).map((note, index) => (
-            <Text key={`${entry.draftItem.id}-note-${index}`} numberOfLines={2} style={styles.note}>{note}</Text>
-          ))}
-        </View>
-        <View style={styles.footer}>
-          <Text numberOfLines={2} style={styles.footerText}>Tracked & listed with Layette Out app</Text>
         </View>
       </View>
     </View>

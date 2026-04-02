@@ -1,6 +1,7 @@
 import {
   ActivityEvent,
   AppSettings,
+  BstCollageOrderMode,
   BackupPayload,
   BstCollageGridSize,
   Child,
@@ -157,8 +158,10 @@ export interface UpdateSaleDraftInput {
   defaultShippingNote?: string;
   defaultPaymentNote?: string;
   collageGridSize?: BstCollageGridSize;
+  collageOrderMode?: BstCollageOrderMode;
   customHeaderImageUri?: string;
   freeGeneratedCardItemIds?: ID[];
+  freeGenerationConsumedAt?: number | null;
 }
 
 export interface UpdateSaleDraftItemInput {
@@ -397,6 +400,7 @@ type SettingsRow = {
   betaKidLimitBannerDismissed: number | null;
   proTeaserBannerDismissed: number | null;
   missingPhotoRestoreNudgeShown: number | null;
+  hasSeenBstPostingGuide: number | null;
 };
 
 type SaleDraftRow = {
@@ -413,8 +417,10 @@ type SaleDraftRow = {
   defaultShippingNote: string | null;
   defaultPaymentNote: string | null;
   collageGridSize: string | null;
+  collageOrderMode: string | null;
   customHeaderImageUri: string | null;
   freeGeneratedCardItemIdsJson: string | null;
+  freeGenerationConsumedAt: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -494,6 +500,7 @@ const defaultSettings: AppSettings = {
   betaKidLimitBannerDismissed: false,
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,
+  hasSeenBstPostingGuide: false,
 };
 
 const parseStringList = (value: string | null): string[] => {
@@ -720,6 +727,7 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
     betaKidLimitBannerDismissed: row.betaKidLimitBannerDismissed === 1,
     proTeaserBannerDismissed: row.proTeaserBannerDismissed === 1,
     missingPhotoRestoreNudgeShown: row.missingPhotoRestoreNudgeShown === 1,
+    hasSeenBstPostingGuide: row.hasSeenBstPostingGuide === 1,
   };
 };
 
@@ -772,8 +780,10 @@ const mapSaleDraft = (row: SaleDraftRow): SaleDraft => ({
   defaultShippingNote: row.defaultShippingNote ?? undefined,
   defaultPaymentNote: row.defaultPaymentNote ?? undefined,
   collageGridSize: (row.collageGridSize as SaleDraft['collageGridSize']) ?? 'Auto',
+  collageOrderMode: (row.collageOrderMode as SaleDraft['collageOrderMode']) ?? 'highest-price',
   customHeaderImageUri: row.customHeaderImageUri ?? undefined,
   freeGeneratedCardItemIds: parseStringList(row.freeGeneratedCardItemIdsJson),
+  freeGenerationConsumedAt: row.freeGenerationConsumedAt ?? undefined,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -1141,7 +1151,7 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     await db.runAsync(
-      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, devProUnlocked = ?, developerForceProAccessEnabled = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ? WHERE id = ?;`,
+      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, devProUnlocked = ?, developerForceProAccessEnabled = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ?, hasSeenBstPostingGuide = ? WHERE id = ?;`,
       'never',
       next.closetAddDefaultView,
       next.notificationsEnabled ? 1 : 0,
@@ -1169,6 +1179,7 @@ export const repository = {
       next.betaKidLimitBannerDismissed ? 1 : 0,
       next.proTeaserBannerDismissed ? 1 : 0,
       next.missingPhotoRestoreNudgeShown ? 1 : 0,
+      next.hasSeenBstPostingGuide ? 1 : 0,
       'app',
     );
 
@@ -2419,8 +2430,8 @@ export const repository = {
 
     for (const draft of payload.saleDrafts ?? []) {
       await db.runAsync(
-        `INSERT INTO sale_drafts (id, title, status, defaultSmokeNote, defaultPetType, defaultPetNote, defaultWashNote, defaultDryingMethod, defaultBundleOffersAccepted, defaultOffersAccepted, defaultShippingNote, defaultPaymentNote, collageGridSize, customHeaderImageUri, freeGeneratedCardItemIdsJson, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        `INSERT INTO sale_drafts (id, title, status, defaultSmokeNote, defaultPetType, defaultPetNote, defaultWashNote, defaultDryingMethod, defaultBundleOffersAccepted, defaultOffersAccepted, defaultShippingNote, defaultPaymentNote, collageGridSize, collageOrderMode, customHeaderImageUri, freeGeneratedCardItemIdsJson, freeGenerationConsumedAt, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         draft.id,
         draft.title ?? null,
         draft.status,
@@ -2434,8 +2445,10 @@ export const repository = {
         draft.defaultShippingNote ?? null,
         draft.defaultPaymentNote ?? null,
         draft.collageGridSize ?? 'Auto',
+        draft.collageOrderMode ?? 'highest-price',
         draft.customHeaderImageUri ?? null,
         JSON.stringify(draft.freeGeneratedCardItemIds ?? []),
+        draft.freeGenerationConsumedAt ?? null,
         draft.createdAt,
         draft.updatedAt,
       );
@@ -2482,8 +2495,10 @@ export const repository = {
       title: normalizeSaleDraftTitle(input.title),
       status: 'draft',
       collageGridSize: 'Auto',
+      collageOrderMode: 'highest-price',
       customHeaderImageUri: undefined,
       freeGeneratedCardItemIds: [],
+      freeGenerationConsumedAt: undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -2495,43 +2510,63 @@ export const repository = {
       const mapped = mapItem(row, [], row.brand ? [row.brand] : [], row.childId ? [row.childId] : []);
       return [mapped.id, mapped] as const;
     }));
+    const originalIndexById = new Map(uniqueItemIds.map((itemId, index) => [itemId, index]));
+    const orderedItemIds = [...uniqueItemIds].sort((leftId, rightId) => {
+      const leftItem = sourceItemMap.get(leftId);
+      const rightItem = sourceItemMap.get(rightId);
+      const leftPrice = leftItem?.targetResalePrice;
+      const rightPrice = rightItem?.targetResalePrice;
+      const leftHasPrice = Number.isFinite(leftPrice);
+      const rightHasPrice = Number.isFinite(rightPrice);
+      if (leftHasPrice && rightHasPrice && leftPrice !== rightPrice) {
+        return (rightPrice ?? 0) - (leftPrice ?? 0);
+      }
+      if (leftHasPrice !== rightHasPrice) {
+        return leftHasPrice ? -1 : 1;
+      }
+      return (originalIndexById.get(leftId) ?? 0) - (originalIndexById.get(rightId) ?? 0);
+    });
+
     await runInTransaction(db, async () => {
       await db.runAsync(
-        `INSERT INTO sale_drafts (id, title, status, collageGridSize, customHeaderImageUri, freeGeneratedCardItemIdsJson, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        `INSERT INTO sale_drafts (id, title, status, collageGridSize, collageOrderMode, customHeaderImageUri, freeGeneratedCardItemIdsJson, freeGenerationConsumedAt, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         draft.id,
         draft.title ?? null,
         draft.status,
         draft.collageGridSize,
+        draft.collageOrderMode,
         draft.customHeaderImageUri ?? null,
         JSON.stringify(draft.freeGeneratedCardItemIds),
+        draft.freeGenerationConsumedAt ?? null,
         draft.createdAt,
         draft.updatedAt,
       );
 
-      for (let index = 0; index < uniqueItemIds.length; index += 1) {
+      for (let index = 0; index < orderedItemIds.length; index += 1) {
+        const itemId = orderedItemIds[index];
         await db.runAsync(
           `INSERT INTO sale_draft_items (id, saleDraftId, itemId, listingOrder, included, itemNumber, selectedPhotoUri, price, condition, conditionNotes, flawTagsJson, flawNotes, washNotesOverride, dryingMethodOverride, smokeNoteOverride, petTypeOverride, petNoteOverride, offersAcceptedOverride, bundleOffersAcceptedOverride, createdAt, updatedAt)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           makeId(),
           draft.id,
-          uniqueItemIds[index],
+          itemId,
           index,
           1,
           index + 1,
-          sourceItemMap.get(uniqueItemIds[index])?.bstSelectedPhotoUri ?? null,
-          sourceItemMap.get(uniqueItemIds[index])?.targetResalePrice ?? null,
-          sourceItemMap.get(uniqueItemIds[index])?.bstCondition ?? null,
-          sourceItemMap.get(uniqueItemIds[index])?.bstConditionNotes ?? null,
-          JSON.stringify(sourceItemMap.get(uniqueItemIds[index])?.bstFlawTags ?? []),
-          sourceItemMap.get(uniqueItemIds[index])?.bstFlawNotes ?? null,
-          sourceItemMap.get(uniqueItemIds[index])?.bstWashNotes ?? null,
-          sourceItemMap.get(uniqueItemIds[index])?.bstDryingMethod ?? null,
-          sourceItemMap.get(uniqueItemIds[index])?.bstSmokeNote ?? null,
-          sourceItemMap.get(uniqueItemIds[index])?.bstPetTypes ? JSON.stringify(sourceItemMap.get(uniqueItemIds[index])?.bstPetTypes) : null,
-          sourceItemMap.get(uniqueItemIds[index])?.bstPetNote ?? null,
-          toNullableBooleanDbValue(sourceItemMap.get(uniqueItemIds[index])?.bstOffersAccepted),
-          toNullableBooleanDbValue(sourceItemMap.get(uniqueItemIds[index])?.bstBundleOffersAccepted),
+          sourceItemMap.get(itemId)?.bstSelectedPhotoUri ?? null,
+          sourceItemMap.get(itemId)?.targetResalePrice ?? null,
+          sourceItemMap.get(itemId)?.bstCondition ?? null,
+          sourceItemMap.get(itemId)?.bstConditionNotes ?? null,
+          JSON.stringify(sourceItemMap.get(itemId)?.bstFlawTags ?? []),
+          sourceItemMap.get(itemId)?.bstFlawNotes ?? null,
+          sourceItemMap.get(itemId)?.bstWashNotes ?? null,
+          sourceItemMap.get(itemId)?.bstDryingMethod ?? null,
+          sourceItemMap.get(itemId)?.bstSmokeNote ?? null,
+          sourceItemMap.get(itemId)?.bstPetTypes ? JSON.stringify(sourceItemMap.get(itemId)?.bstPetTypes) : null,
+          sourceItemMap.get(itemId)?.bstPetNote ?? null,
+          toNullableBooleanDbValue(sourceItemMap.get(itemId)?.bstOffersAccepted),
+          toNullableBooleanDbValue(sourceItemMap.get(itemId)?.bstBundleOffersAccepted),
           now,
           now,
         );
@@ -2556,11 +2591,13 @@ export const repository = {
       defaultPaymentNote: patch.defaultPaymentNote === undefined ? mapSaleDraft(existing).defaultPaymentNote : normalizeSaleDraftText(patch.defaultPaymentNote),
       customHeaderImageUri: patch.customHeaderImageUri === undefined ? mapSaleDraft(existing).customHeaderImageUri : normalizeSaleDraftText(patch.customHeaderImageUri),
       freeGeneratedCardItemIds: patch.freeGeneratedCardItemIds === undefined ? mapSaleDraft(existing).freeGeneratedCardItemIds : patch.freeGeneratedCardItemIds,
+      freeGenerationConsumedAt:
+        patch.freeGenerationConsumedAt === undefined ? mapSaleDraft(existing).freeGenerationConsumedAt : patch.freeGenerationConsumedAt ?? undefined,
       updatedAt: Date.now(),
     };
     await db.runAsync(
       `UPDATE sale_drafts
-       SET title = ?, status = ?, defaultSmokeNote = ?, defaultPetType = ?, defaultPetNote = ?, defaultWashNote = ?, defaultDryingMethod = ?, defaultBundleOffersAccepted = ?, defaultOffersAccepted = ?, defaultShippingNote = ?, defaultPaymentNote = ?, collageGridSize = ?, customHeaderImageUri = ?, freeGeneratedCardItemIdsJson = ?, updatedAt = ?
+       SET title = ?, status = ?, defaultSmokeNote = ?, defaultPetType = ?, defaultPetNote = ?, defaultWashNote = ?, defaultDryingMethod = ?, defaultBundleOffersAccepted = ?, defaultOffersAccepted = ?, defaultShippingNote = ?, defaultPaymentNote = ?, collageGridSize = ?, collageOrderMode = ?, customHeaderImageUri = ?, freeGeneratedCardItemIdsJson = ?, freeGenerationConsumedAt = ?, updatedAt = ?
        WHERE id = ?;`,
       next.title ?? null,
       next.status,
@@ -2574,8 +2611,10 @@ export const repository = {
       next.defaultShippingNote ?? null,
       next.defaultPaymentNote ?? null,
       next.collageGridSize ?? 'Auto',
+      next.collageOrderMode ?? 'highest-price',
       next.customHeaderImageUri ?? null,
       JSON.stringify(next.freeGeneratedCardItemIds ?? []),
+      next.freeGenerationConsumedAt ?? null,
       next.updatedAt,
       id,
     );
@@ -2666,6 +2705,15 @@ export const repository = {
         saleDraftId,
       );
       await db.runAsync('UPDATE sale_drafts SET updatedAt = ? WHERE id = ?;', now, saleDraftId);
+    });
+  },
+
+  async deleteSaleDraft(id: ID): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    await runInTransaction(db, async () => {
+      await db.runAsync('DELETE FROM sale_draft_items WHERE saleDraftId = ?;', id);
+      await db.runAsync('DELETE FROM sale_drafts WHERE id = ?;', id);
     });
   },
 

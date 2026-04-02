@@ -26,6 +26,10 @@ export const resolvePaywallTrigger = (
 ): 'card_limit' | 'second_draft' | 'photo_limit' | 'manual_upgrade' => {
   switch (source) {
     case 'bst_card_limit':
+    case 'bst_locked_card':
+    case 'bst_save_all_cards':
+    case 'bst_save_collage_locked':
+    case 'bst_locked_export':
       return 'card_limit';
     case 'bst_draft_limit':
       return 'second_draft';

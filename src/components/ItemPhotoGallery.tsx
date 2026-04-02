@@ -10,7 +10,6 @@ type Props = {
   onLockedPress?: () => void;
   onMakePrimary: (index: number) => void;
   onRemove: (index: number) => void;
-  lockedMessage?: string;
 };
 
 export const ItemPhotoGallery: React.FC<Props> = ({
@@ -20,7 +19,6 @@ export const ItemPhotoGallery: React.FC<Props> = ({
   onLockedPress,
   onMakePrimary,
   onRemove,
-  lockedMessage,
 }) => {
   const theme = useAppTheme();
   const mainScrollRef = useRef<ScrollView | null>(null);
@@ -153,7 +151,7 @@ export const ItemPhotoGallery: React.FC<Props> = ({
       textAlign: 'center',
     },
     lockedThumb: {
-      width: 96,
+      width: 120,
       height: 68,
       borderRadius: 14,
       backgroundColor: theme.colors.surfaceMuted,
@@ -162,16 +160,11 @@ export const ItemPhotoGallery: React.FC<Props> = ({
       padding: 8,
     },
     lockedThumbText: {
-      fontSize: 11,
+      fontSize: 12,
       lineHeight: 14,
       fontWeight: '700',
       color: theme.colors.textPrimary,
       textAlign: 'center',
-    },
-    helper: {
-      fontSize: 12,
-      lineHeight: 17,
-      color: theme.colors.textSecondary,
     },
   });
 
@@ -214,11 +207,11 @@ export const ItemPhotoGallery: React.FC<Props> = ({
           <View style={styles.actionsRow}>
             {selectedIndex > 0 ? (
               <Pressable onPress={() => onMakePrimary(selectedIndex)}>
-                <Text style={styles.actionText}>Use as First Photo</Text>
+                <Text style={styles.actionText}>Use as Main Photo</Text>
               </Pressable>
             ) : null}
             <Pressable onPress={() => onRemove(selectedIndex)}>
-              <Text style={[styles.actionText, styles.removeText]}>Delete This Photo</Text>
+              <Text style={[styles.actionText, styles.removeText]}>Delete Photo</Text>
             </Pressable>
           </View>
 
@@ -239,7 +232,7 @@ export const ItemPhotoGallery: React.FC<Props> = ({
                   style={[styles.thumbImage, index === selectedIndex ? styles.thumbSelected : undefined]}
                   fallbackLabel={`${index + 1}`}
                 />
-                <Text style={styles.thumbLabel}>{index === 0 ? 'First' : `Photo ${index + 1}`}</Text>
+                <Text style={styles.thumbLabel}>{`Photo ${index + 1}`}</Text>
               </Pressable>
             ))}
 
@@ -249,19 +242,17 @@ export const ItemPhotoGallery: React.FC<Props> = ({
               </Pressable>
             ) : (
               <Pressable style={styles.lockedThumb} onPress={onLockedPress}>
-                <Text style={styles.lockedThumbText}>Add back/tag/flaw photos with Pro</Text>
+                <Text style={styles.lockedThumbText}>Add more photos with Pro</Text>
               </Pressable>
             )}
           </ScrollView>
-
-          {!canAddMore && lockedMessage ? <Text style={styles.helper}>{lockedMessage}</Text> : null}
         </>
       ) : (
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>Add a photo</Text>
-          <Text style={styles.emptyBody}>Use a clean front photo first, then add back, tag, and flaw shots with Pro.</Text>
+          <Text style={styles.emptyBody}>Add your main photo first.</Text>
           <Pressable style={styles.addThumb} onPress={onAddPhoto}>
-            <Text style={styles.addThumbText}>+ Add Photo</Text>
+            <Text style={styles.addThumbText}>Add Photo</Text>
           </Pressable>
         </View>
       )}

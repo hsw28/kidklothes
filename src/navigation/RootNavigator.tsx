@@ -81,11 +81,11 @@ const ClosetStackNavigator = () => {
     <ClosetStack.Screen name="BatchAdd" component={BatchAddScreen} options={{ title: 'Batch Add' }} />
     <ClosetStack.Screen name="ItemsList" component={ItemsListScreen} options={{ title: 'Items' }} />
     <ClosetStack.Screen name="SellBin" component={SellBinScreen} options={{ title: 'Sell Bin' }} />
-    <ClosetStack.Screen name="ProPaywall" component={ProPaywallScreen} options={{ title: 'Unlock Pro' }} />
+    <ClosetStack.Screen name="ProPaywall" component={ProPaywallScreen} options={{ title: 'Unlock Pro', presentation: 'modal' }} />
     {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftList" component={BstSaleDraftListScreen} options={{ title: 'BST Drafts' }} /> : null}
     {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftCreate" component={BstSaleDraftCreateScreen} options={{ title: 'New BST Draft' }} /> : null}
     {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftEditor" component={BstSaleDraftEditorScreen} options={{ title: 'Edit BST Draft' }} /> : null}
-    {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftPreview" component={BstSaleDraftPreviewScreen} options={{ title: 'BST Preview + Export' }} /> : null}
+    {settings.developerModeEnabled ? <ClosetStack.Screen name="BstSaleDraftPreview" component={BstSaleDraftPreviewScreen} options={{ title: 'BST Preview + Save to Photos' }} /> : null}
     <ClosetStack.Screen name="CategorySnapshot" component={CategorySnapshotScreen} options={{ headerTitle: brandedTitle('Category Snapshot') }} />
     <ClosetStack.Screen name="OutfitsList" component={OutfitsListScreen} options={{ title: 'Outfits (Optional)' }} />
     <ClosetStack.Screen name="OutfitBuilder" component={OutfitBuilderScreen} options={{ title: 'Outfit Builder (Optional)' }} />
@@ -114,7 +114,7 @@ const WishlistStackNavigator = () => {
         initialParams={{ initialStatus: 'wishlist', hideInbox: true }}
         options={{ headerTitle: brandedTitle('Wishlist') }}
       />
-      <WishlistStack.Screen name="ProPaywall" component={ProPaywallScreen} options={{ title: 'Unlock Pro' }} />
+      <WishlistStack.Screen name="ProPaywall" component={ProPaywallScreen} options={{ title: 'Unlock Pro', presentation: 'modal' }} />
       <WishlistStack.Screen name="AddItem" component={ItemFormScreen} options={{ headerTitle: brandedTitle('Add / Edit Item') }} />
       <WishlistStack.Screen name="ItemDetail" component={ItemDetailScreen} options={{ title: 'Item Details' }} />
     </WishlistStack.Navigator>

@@ -38,6 +38,13 @@
         }
       ],
       [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Layette Out to access your photo library.",
+          "savePhotosPermission": "Allow Layette Out to save BST cards and other exports to your photo library."
+        }
+      ],
+      [
         "expo-share-intent",
         {
           "androidIntentFilters": [
