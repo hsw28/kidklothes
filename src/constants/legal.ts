@@ -1,6 +1,5 @@
-export const PRIVACY_POLICY_URL = 'https://layetteout.app/privacy';
-export const TERMS_OF_SERVICE_URL = 'https://layetteout.app/terms';
+export const PRIVACY_POLICY_URL = 'https://layetteout.com/privacy.html';
+export const TERMS_OF_SERVICE_URL = 'https://layetteout.com/terms.html';
 
-export const TERMS_EFFECTIVE_DATE = '[Insert Date]';
-export const SUPPORT_EMAIL = '[Insert support email]';
-
+export const TERMS_EFFECTIVE_DATE = 'April 3, 2026';
+export const SUPPORT_EMAIL = 'hello@layetteout.com';

@@ -59,14 +59,40 @@ const PreviewProtectionOverlay: React.FC<{
 }> = ({ scale, variant = 'card' }) => {
   const labelSize = (variant === 'collage' ? 13 : 14.5) * scale;
   const watermarkSize = (variant === 'collage' ? 31 : 34) * scale;
+  const diagonalSize = (variant === 'collage' ? 22 : 24) * scale;
   const styles = StyleSheet.create({
     overlay: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(17,24,39,0.08)',
+      backgroundColor: variant === 'collage' ? 'rgba(17,24,39,0.04)' : 'rgba(17,24,39,0.08)',
+    },
+    diagonalLayer: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    diagonalWrap: {
+      position: 'absolute',
+      width: '165%',
+      alignItems: 'center',
+      gap: 44 * scale,
+      transform: [{ rotate: '-30deg' }],
+    },
+    diagonalRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 34 * scale,
+    },
+    diagonalText: {
+      fontSize: diagonalSize,
+      lineHeight: diagonalSize * 1.08,
+      fontWeight: '700',
+      color: 'rgba(255,255,255,0.18)',
+      letterSpacing: 0.34 * scale,
     },
     labelWrap: {
       position: 'absolute',
-      top: 16 * scale,
+      top: 18 * scale,
       left: 18 * scale,
       right: 18 * scale,
       alignItems: 'center',
@@ -85,31 +111,55 @@ const PreviewProtectionOverlay: React.FC<{
     },
     watermarkWrap: {
       position: 'absolute',
-      left: '12%',
-      right: '12%',
-      top: '42%',
+      left: variant === 'collage' ? '14%' : '12%',
+      right: variant === 'collage' ? '8%' : '12%',
+      top: variant === 'collage' ? '46%' : '42%',
       alignItems: 'center',
     },
     watermark: {
       fontSize: watermarkSize,
       lineHeight: watermarkSize * 1.06,
       fontWeight: '700',
-      color: 'rgba(255,255,255,0.98)',
-      backgroundColor: 'rgba(0,0,0,0.6)',
-      paddingHorizontal: 18 * scale,
-      paddingVertical: 10 * scale,
-      borderRadius: 10 * scale,
+      color: 'rgba(255,255,255,0.95)',
+      backgroundColor: variant === 'collage' ? 'transparent' : 'rgba(0,0,0,0.6)',
+      paddingHorizontal: variant === 'collage' ? 0 : 18 * scale,
+      paddingVertical: variant === 'collage' ? 0 : 10 * scale,
+      borderRadius: variant === 'collage' ? 0 : 10 * scale,
       overflow: 'hidden',
       letterSpacing: 0.5 * scale,
-      opacity: 0.96,
+      opacity: variant === 'collage' ? 0.34 : 0.96,
+      textShadowColor: variant === 'collage' ? 'rgba(0,0,0,0.22)' : undefined,
+      textShadowRadius: variant === 'collage' ? 2 * scale : undefined,
+      textShadowOffset: variant === 'collage' ? { width: 0, height: 1 } : undefined,
     },
   });
 
   return (
     <View pointerEvents="none" style={styles.overlay}>
-      <View style={styles.labelWrap}>
-        <Text style={styles.label}>Preview — export clean version</Text>
-      </View>
+      {variant === 'collage' ? (
+        <>
+          <View style={styles.labelWrap}>
+            <Text style={styles.label}>Preview — unlock clean version</Text>
+          </View>
+          <View style={styles.diagonalLayer}>
+            <View style={styles.diagonalWrap}>
+              {[0, 1, 2, 3, 4].map((row) => (
+                <View key={`preview-row-${row}`} style={styles.diagonalRow}>
+                  {[0, 1, 2].map((index) => (
+                    <Text key={`preview-row-${row}-item-${index}`} style={styles.diagonalText}>
+                      Layette Out
+                    </Text>
+                  ))}
+                </View>
+              ))}
+            </View>
+          </View>
+        </>
+      ) : (
+        <View style={styles.labelWrap}>
+          <Text style={styles.label}>Preview — export clean version</Text>
+        </View>
+      )}
       <View style={styles.watermarkWrap}>
         <Text style={styles.watermark}>Layette Out</Text>
       </View>

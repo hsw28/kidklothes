@@ -231,6 +231,7 @@ export interface SaleDraft {
   customHeaderImageUri?: string;
   freeGeneratedCardItemIds: ID[];
   freeGenerationConsumedAt?: number;
+  previewVisitedAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -302,6 +303,7 @@ export interface AppSettings {
   proTeaserBannerDismissed?: boolean;
   missingPhotoRestoreNudgeShown?: boolean;
   hasSeenBstPostingGuide?: boolean;
+  proEarlyAccessJoined?: boolean;
 }
 
 export interface ActivityEvent {

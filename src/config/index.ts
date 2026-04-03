@@ -6,6 +6,8 @@ const localEndpoint = 'http://localhost:4000';
 type ExtraConfig = {
   REVENUECAT_IOS_API_KEY?: string;
   REVENUECAT_ANDROID_API_KEY?: string;
+  REVENUECAT_OFFERING_ID?: string;
+  REVENUECAT_PRO_ENTITLEMENT_ID?: string;
   MONETIZATION_ENABLED?: boolean | string;
   DEFAULT_PACKAGE_IDENTIFIER?: string;
   UPSELL_TRIGGER_COUNT?: number | string;
@@ -75,6 +77,8 @@ export const appConfig = {
   revenueCat: {
     iosApiKey: (extra.REVENUECAT_IOS_API_KEY ?? '').trim(),
     androidApiKey: (extra.REVENUECAT_ANDROID_API_KEY ?? '').trim(),
+    offeringId: (extra.REVENUECAT_OFFERING_ID ?? 'default').trim() || 'default',
+    entitlementId: (extra.REVENUECAT_PRO_ENTITLEMENT_ID ?? 'layette_out_pro').trim() || 'layette_out_pro',
   },
   posthog: {
     apiKey: (extra.POSTHOG_API_KEY ?? '').trim(),

@@ -3,13 +3,14 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AccentName, getAccentColors, useAppTheme } from '@/theme';
 
 interface ChipSelectorProps<T extends string> {
-  label: string;
+  label?: string;
   options: T[];
   value?: T;
   selectedValues?: T[];
   onChange: (value: T) => void;
   onOptionLongPress?: (value: T) => void;
   accent?: AccentName;
+  optionLabels?: Partial<Record<T, string>>;
 }
 
 export const ChipSelector = <T extends string>({
@@ -20,6 +21,7 @@ export const ChipSelector = <T extends string>({
   onChange,
   onOptionLongPress,
   accent = 'coral',
+  optionLabels,
 }: ChipSelectorProps<T>) => {
   const theme = useAppTheme();
   const styles = StyleSheet.create({
@@ -58,7 +60,7 @@ export const ChipSelector = <T extends string>({
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>{label}</Text>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
       <View style={styles.row}>
         {options.map((option) => {
           const active = value === option || Boolean(selectedValues?.includes(option));
@@ -76,7 +78,7 @@ export const ChipSelector = <T extends string>({
                 },
               ]}
             >
-              <Text style={[styles.text, { color: colors.text }]}>{option}</Text>
+              <Text style={[styles.text, { color: colors.text }]}>{optionLabels?.[option] ?? option}</Text>
             </Pressable>
           );
         })}

@@ -10,6 +10,7 @@ type NormalizedPackage = {
   priceString: string;
   period?: string;
   type?: string;
+  packageType?: string;
 };
 
 export type OfferingsSummary = {
@@ -34,8 +35,23 @@ export type PurchaseResult = {
   errorMessage?: string;
 };
 
+export type PurchasesDebugSnapshot = {
+  monetizationEnabled: boolean;
+  nativeModuleAvailable: boolean;
+  apiKeyPresent: boolean;
+  apiKeyMode: 'missing' | 'test' | 'public';
+  offeringId: string;
+  entitlementId: string;
+  currentOfferingId?: string;
+  offeringsCount: number;
+  packageKindsAvailable: ProPaywallOption['kind'][];
+  activeEntitlements: string[];
+  isEntitled: boolean;
+  issues: string[];
+};
+
 export type ProPaywallOption = {
-  kind: 'monthly' | 'lifetime';
+  kind: 'monthly' | 'yearly' | 'lifetime';
   packageIdentifier?: string;
   productId?: string;
   title: string;
@@ -50,6 +66,9 @@ let initialized = false;
 type PurchasesModule = typeof import('react-native-purchases').default;
 
 const shouldRun = () => appConfig.monetizationEnabled;
+const getConfiguredApiKey = () => Platform.OS === 'ios' ? appConfig.revenueCat.iosApiKey : appConfig.revenueCat.androidApiKey;
+const getApiKeyMode = (apiKey: string): PurchasesDebugSnapshot['apiKeyMode'] =>
+  !apiKey ? 'missing' : apiKey.startsWith('test_') ? 'test' : 'public';
 
 const getPurchasesModule = (): PurchasesModule | null => {
   try {
@@ -96,8 +115,9 @@ const toSummary = (customerInfo: any): CustomerInfoSummary => {
 
 const toSnapshot = (customerInfo: any): PurchaseStateSnapshot => {
   const summary = toSummary(customerInfo);
+  const entitlementId = appConfig.revenueCat.entitlementId;
   return {
-    isEntitled: summary.activeEntitlements.length > 0,
+    isEntitled: summary.activeEntitlements.includes(entitlementId),
     activeEntitlements: summary.activeEntitlements,
     activeSubscriptions: summary.activeSubscriptions,
     nonSubscriptions: summary.nonSubscriptions,
@@ -122,16 +142,25 @@ const normalizeOfferings = (offerings: any): OfferingsSummary => {
           priceString: String(pkg?.product?.priceString ?? ''),
           period: pkg?.product?.subscriptionPeriod ? String(pkg.product.subscriptionPeriod) : undefined,
           type: pkg?.packageType ? String(pkg.packageType) : undefined,
+          packageType: pkg?.packageType ? String(pkg.packageType) : undefined,
         })),
       };
     }),
   };
 };
 
+const getPreferredOffering = (offerings: any): any | undefined => {
+  const configured = appConfig.revenueCat.offeringId;
+  if (configured && offerings?.all?.[configured]) return offerings.all[configured];
+  return offerings?.current ?? undefined;
+};
+
 const findPackage = (offerings: any, packageIdentifier: string): any | undefined => {
-  const all = offerings?.all ?? {};
-  for (const offeringId of Object.keys(all)) {
-    const offering = all[offeringId];
+  const preferredOffering = getPreferredOffering(offerings);
+  const prioritizedOfferings = preferredOffering
+    ? [preferredOffering, ...Object.values(offerings?.all ?? {}).filter((entry) => entry !== preferredOffering)]
+    : Object.values(offerings?.all ?? {});
+  for (const offering of prioritizedOfferings) {
     const packages = Array.isArray(offering?.availablePackages) ? offering.availablePackages : [];
     const found = packages.find((pkg: any) => String(pkg?.identifier) === packageIdentifier);
     if (found) return found;
@@ -142,19 +171,30 @@ const findPackage = (offerings: any, packageIdentifier: string): any | undefined
 const normalizeToken = (value: string): string => value.toLowerCase().trim();
 
 const findPackageByKind = (offerings: any, kind: ProPaywallOption['kind']): any | undefined => {
-  const allPackages = normalizeOfferings(offerings).offerings.flatMap((entry) => entry.packages);
-  const scored = allPackages
-    .map((pkg) => {
-      const haystack = [pkg.identifier, pkg.productId, pkg.title, pkg.period, pkg.type].map((value) => normalizeToken(value ?? '')).join(' ');
-      const isSubscription = Boolean(pkg.period) || haystack.includes('monthly') || haystack.includes('month') || haystack.includes('subscription');
-      const isLifetime = haystack.includes('lifetime') || haystack.includes('forever') || haystack.includes('early') || haystack.includes('one_time') || (!pkg.period && !isSubscription);
+  const preferredOffering = getPreferredOffering(offerings);
+  const preferredPackages = Array.isArray(preferredOffering?.availablePackages) ? preferredOffering.availablePackages : [];
+  const scored = preferredPackages
+    .map((pkg: any) => {
+      const identifier = String(pkg?.identifier ?? '');
+      const productId = String(pkg?.product?.identifier ?? '');
+      const title = String(pkg?.product?.title ?? '');
+      const packageType = String(pkg?.packageType ?? '');
+      const period = pkg?.product?.subscriptionPeriod ? String(pkg.product.subscriptionPeriod) : '';
+      const haystack = [identifier, productId, title, period, packageType].map((value) => normalizeToken(value ?? '')).join(' ');
+      const normalizedPackageType = normalizeToken(packageType);
+      const isMonthly = normalizedPackageType.includes('monthly') || normalizedPackageType === '$rc_monthly' || haystack.includes('month');
+      const isYearly = normalizedPackageType.includes('annual') || normalizedPackageType.includes('yearly') || normalizedPackageType === '$rc_annual' || haystack.includes('year') || haystack.includes('annual');
+      const isSubscription = Boolean(period) || isMonthly || isYearly || haystack.includes('subscription');
+      const isLifetime = normalizedPackageType.includes('lifetime') || normalizedPackageType === '$rc_lifetime' || haystack.includes('lifetime') || haystack.includes('forever') || haystack.includes('one_time') || (!period && !isSubscription);
       const score = kind === 'monthly'
-        ? (isSubscription ? 3 : 0) + (haystack.includes('month') ? 2 : 0) + (haystack.includes('2.99') ? 1 : 0)
-        : (isLifetime ? 3 : 0) + (haystack.includes('lifetime') ? 2 : 0) + (haystack.includes('9.99') ? 1 : 0);
+        ? (isMonthly ? 6 : 0) + (haystack.includes('month') ? 2 : 0)
+        : kind === 'yearly'
+          ? (isYearly ? 6 : 0) + (haystack.includes('year') || haystack.includes('annual') ? 2 : 0)
+          : (isLifetime ? 6 : 0) + (haystack.includes('lifetime') ? 2 : 0);
       return { pkg, score };
     })
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .filter((entry: { pkg: any; score: number }) => entry.score > 0)
+    .sort((a: { pkg: any; score: number }, b: { pkg: any; score: number }) => b.score - a.score);
   return scored[0]?.pkg;
 };
 
@@ -162,9 +202,17 @@ export const getBstProPaywallOptions = async (): Promise<ProPaywallOption[]> => 
   const defaults: ProPaywallOption[] = [
     {
       kind: 'monthly',
-      title: '$2.99/month',
+      title: 'Monthly subscription',
       subtitle: 'Monthly subscription',
       priceString: '$2.99 / month',
+      available: false,
+    },
+    {
+      kind: 'yearly',
+      title: 'Yearly subscription',
+      subtitle: 'Best value for families using BST all year',
+      priceString: '$19.99 / year',
+      badge: 'Best value',
       available: false,
     },
     {
@@ -209,7 +257,7 @@ export const initPurchases = async (): Promise<void> => {
       await safeLogEvent('monetization_init_failed', { reason: 'native_module_unavailable', platform: Platform.OS });
       return;
     }
-    const apiKey = Platform.OS === 'ios' ? appConfig.revenueCat.iosApiKey : appConfig.revenueCat.androidApiKey;
+    const apiKey = getConfiguredApiKey();
     if (!apiKey) {
       await safeLogEvent('monetization_init_failed', { reason: 'missing_api_key', platform: Platform.OS });
       return;
@@ -286,7 +334,7 @@ export const purchasePackage = async (packageIdentifier: string): Promise<Purcha
     });
     return {
       status: 'success',
-      entitlementActive: summary.activeEntitlements.length > 0,
+      entitlementActive: summary.activeEntitlements.includes(appConfig.revenueCat.entitlementId),
       customerInfoSummary: summary,
     };
   } catch (error: any) {
@@ -325,7 +373,7 @@ export const restorePurchases = async (): Promise<PurchaseResult> => {
     await safeLogEvent('restore_success', { activeEntitlements: summary.activeEntitlements });
     return {
       status: 'success',
-      entitlementActive: summary.activeEntitlements.length > 0,
+      entitlementActive: summary.activeEntitlements.includes(appConfig.revenueCat.entitlementId),
       customerInfoSummary: summary,
     };
   } catch (error: any) {
@@ -386,4 +434,71 @@ export const debugPrintPurchasesDiagnostics = async (): Promise<void> => {
   console.log('[monetization] offerings', offerings);
   // eslint-disable-next-line no-console
   console.log('[monetization] customerInfo', customerInfo);
+  // eslint-disable-next-line no-console
+  console.log('[monetization] diagnostics', await getPurchasesDebugSnapshot());
+};
+
+export const getPurchasesDebugSnapshot = async (): Promise<PurchasesDebugSnapshot> => {
+  const apiKey = getConfiguredApiKey();
+  const apiKeyMode = getApiKeyMode(apiKey);
+  const monetizationEnabled = appConfig.monetizationEnabled;
+  const nativeModuleAvailable = Boolean(getPurchasesModule());
+  const issues: string[] = [];
+
+  if (!monetizationEnabled) issues.push('Monetization is disabled.');
+  if (!apiKey) issues.push(`Missing ${Platform.OS === 'ios' ? 'iOS' : 'Android'} RevenueCat API key.`);
+  if (apiKeyMode === 'test') issues.push('Using a RevenueCat test key. Replace it before launch.');
+  if (!nativeModuleAvailable) issues.push('RevenueCat native module is unavailable in this build.');
+
+  let currentOfferingId: string | undefined;
+  let offeringsCount = 0;
+  let packageKindsAvailable: ProPaywallOption['kind'][] = [];
+  let activeEntitlements: string[] = [];
+  let isEntitled = false;
+
+  try {
+    if (monetizationEnabled && nativeModuleAvailable && apiKey) {
+      await initPurchases();
+      const Purchases = getPurchasesModule();
+      const offerings = Purchases ? await Purchases.getOfferings() : null;
+      const normalizedOfferings = normalizeOfferings(offerings);
+      offeringsCount = normalizedOfferings.offerings.length;
+      currentOfferingId = String(offerings?.current?.identifier ?? '');
+
+      const paywallOptions = await getBstProPaywallOptions();
+      packageKindsAvailable = paywallOptions.filter((option) => option.available).map((option) => option.kind);
+      const customerInfo = await getCustomerInfo();
+      activeEntitlements = customerInfo.activeEntitlements;
+      isEntitled = activeEntitlements.includes(appConfig.revenueCat.entitlementId);
+
+      if (!offerings?.all?.[appConfig.revenueCat.offeringId] && !offerings?.current) {
+        issues.push(`Offering "${appConfig.revenueCat.offeringId}" is not available.`);
+      }
+      for (const kind of ['monthly', 'yearly', 'lifetime'] as const) {
+        if (!packageKindsAvailable.includes(kind)) {
+          issues.push(`Missing RevenueCat package for ${kind}.`);
+        }
+      }
+      if (!activeEntitlements.includes(appConfig.revenueCat.entitlementId) && customerInfo.activeEntitlements.length > 0) {
+        issues.push(`Configured entitlement "${appConfig.revenueCat.entitlementId}" is not active for this customer.`);
+      }
+    }
+  } catch (error: any) {
+    issues.push(String(error?.message ?? 'Unable to load RevenueCat diagnostics.'));
+  }
+
+  return {
+    monetizationEnabled,
+    nativeModuleAvailable,
+    apiKeyPresent: Boolean(apiKey),
+    apiKeyMode,
+    offeringId: appConfig.revenueCat.offeringId,
+    entitlementId: appConfig.revenueCat.entitlementId,
+    currentOfferingId: currentOfferingId || undefined,
+    offeringsCount,
+    packageKindsAvailable,
+    activeEntitlements,
+    isEntitled,
+    issues,
+  };
 };

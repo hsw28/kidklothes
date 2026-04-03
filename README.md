@@ -18,6 +18,27 @@ npm run start
 
 Then press `i` for iOS simulator or `a` for Android emulator.
 
+## Monetization / RevenueCat
+
+RevenueCat is wired through the React Native app layer in `src/services/purchases.ts`.
+
+Create a local `.env` file from `.env.example` and set:
+
+```bash
+MONETIZATION_ENABLED=true
+REVENUECAT_IOS_API_KEY=your_revenuecat_ios_sdk_key
+REVENUECAT_ANDROID_API_KEY=
+REVENUECAT_OFFERING_ID=default
+REVENUECAT_PRO_ENTITLEMENT_ID=layette_out_pro
+```
+
+Notes:
+
+- Use a `test_...` RevenueCat key only for sandbox/testing.
+- Replace the test key with your public Apple SDK key before launch.
+- The expected RevenueCat setup is one entitlement (`layette_out_pro`) and one offering (`default`) with package types `monthly`, `annual`, and `lifetime`.
+- Rebuild the app after changing Expo config env values so native builds pick them up.
+
 ## Unfurl Service
 
 The app calls a local unfurl API configured in:

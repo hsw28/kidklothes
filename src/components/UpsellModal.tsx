@@ -4,7 +4,7 @@ import { Card } from '@/components/Card';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { appConfig } from '@/config';
 import { useData } from '@/db/DataContext';
-import { getOfferings, purchasePackage, restorePurchases } from '@/services/purchases';
+import { getBstProPaywallOptions, getOfferings, purchasePackage, restorePurchases } from '@/services/purchases';
 
 type Props = {
   visible: boolean;
@@ -50,6 +50,14 @@ export const UpsellModal: React.FC<Props> = ({ visible, context, usageCount, onC
   const handleStartTrial = async () => {
     if (defaultPackageId) {
       await handlePurchase(defaultPackageId);
+      return;
+    }
+    const preferredOptions = await getBstProPaywallOptions();
+    const recommended = preferredOptions.find((option) => option.kind === 'yearly' && option.available)
+      ?? preferredOptions.find((option) => option.kind === 'monthly' && option.available)
+      ?? preferredOptions.find((option) => option.available);
+    if (recommended?.packageIdentifier) {
+      await handlePurchase(recommended.packageIdentifier);
       return;
     }
     const nextPackages = await loadPackages();

@@ -52,44 +52,63 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
   const [brandFilter, setBrandFilter] = useState<string>('All');
   const [listedFilter, setListedFilter] = useState<ListedFilter>('All');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectionMode, setSelectionMode] = useState(false);
 
   const childOptions = useMemo(() => ['All', ...children.map((child) => child.name)], [children]);
   const brandOptions = useMemo(() => ['All', ...brands], [brands]);
   const listedOptions: ListedFilter[] = ['All', 'Unlisted', 'Listed'];
   const childNameById = useMemo(() => new Map(children.map((child) => [child.id, child.name])), [children]);
-
-  const filtered = useMemo(() => {
+  const sellStatusByItemId = useMemo(() => {
     const sellBinLocationIdsByChildId = new Map(children.map((child) => [child.id, getSpecialLocationIds(child.id, storageLocations).sellBinLocationId]));
-    return items.filter((item) => {
+    const next = new Map<string, 'for-sale' | 'sold'>();
+    items.forEach((item) => {
       const itemLinks = childItems.filter((link) => link.itemId === item.id);
-      if (itemLinks.length === 0) return false;
+      if (itemLinks.length === 0) return;
 
       const relevantLinks = childFilter === 'All'
         ? itemLinks
         : itemLinks.filter((link) => childNameById.get(link.childId) === childFilter);
-      if (relevantLinks.length === 0) return false;
+      if (relevantLinks.length === 0) return;
+
+      let resolved: 'for-sale' | 'sold' | null = null;
+      relevantLinks.forEach((link) => {
+        const effectiveStatus = link.statusForChild ?? item.status;
+        const sellBinLocationId = sellBinLocationIdsByChildId.get(link.childId);
+        if (sellBinLocationId && link.storageLocationId === sellBinLocationId) {
+          resolved = effectiveStatus === 'sold' ? 'sold' : 'for-sale';
+          return;
+        }
+        if (effectiveStatus === 'for-sale') {
+          resolved = 'for-sale';
+          return;
+        }
+        if (!resolved && effectiveStatus === 'sold') {
+          resolved = 'sold';
+        }
+      });
+
+      if (resolved) {
+        next.set(item.id, resolved);
+      }
+    });
+    return next;
+  }, [childFilter, childItems, childNameById, children, items, storageLocations]);
+
+  const filtered = useMemo(() => {
+    return items.filter((item) => {
+      if (!sellStatusByItemId.has(item.id)) return false;
 
       const brandPass = brandFilter === 'All' || item.brandTags.includes(brandFilter) || normalize(item.brand ?? '') === normalize(brandFilter);
       if (!brandPass) return false;
-
-      const inSellBin = relevantLinks.some((link) => {
-        const sellBinLocationId = sellBinLocationIdsByChildId.get(link.childId);
-        if (sellBinLocationId) {
-          return link.storageLocationId === sellBinLocationId;
-        }
-        const effectiveStatus = link.statusForChild ?? item.status;
-        return effectiveStatus === 'for-sale' || effectiveStatus === 'sold';
-      });
-      if (!inSellBin) return false;
 
       if (listedFilter === 'Listed' && !item.listedAt) return false;
       if (listedFilter === 'Unlisted' && item.listedAt) return false;
       return true;
     });
-  }, [brandFilter, childFilter, childItems, childNameById, children, items, listedFilter, storageLocations]);
+  }, [brandFilter, items, listedFilter, sellStatusByItemId]);
 
-  const forSale = filtered.filter((item) => item.status === 'for-sale');
-  const sold = filtered.filter((item) => item.status === 'sold');
+  const forSale = filtered.filter((item) => sellStatusByItemId.get(item.id) === 'for-sale');
+  const sold = filtered.filter((item) => sellStatusByItemId.get(item.id) === 'sold');
   const purchaseTotal = forSale.reduce((sum, item) => sum + (item.purchasePrice ?? 0), 0);
   const estimatedResaleTotal = forSale.reduce((sum, item) => sum + (item.targetResalePrice ?? 0), 0);
   const soldTotal = sold.reduce((sum, item) => sum + (item.soldPrice ?? 0), 0);
@@ -137,6 +156,18 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
 
   const toggleSelected = (itemId: string) => {
     setSelectedIds((prev) => (prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]));
+  };
+
+  const openBstDraftCreate = () => {
+    navigation.navigate('BstSaleDraftCreate', selectedItems.length ? { prefillItemIds: selectedItems.map((item) => item.id) } : undefined);
+  };
+
+  const toggleSelectionMode = () => {
+    setSelectionMode((prev) => {
+      const next = !prev;
+      if (!next) setSelectedIds([]);
+      return next;
+    });
   };
 
   const markListed = async (item: Item) => {
@@ -244,6 +275,18 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
       letterSpacing: 0.5,
       textTransform: 'uppercase',
     },
+    soldBadge: {
+      marginLeft: 'auto',
+      fontSize: 11,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
+      backgroundColor: theme.colors.surfaceMuted,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 999,
+      letterSpacing: 0.5,
+      textTransform: 'uppercase',
+    },
     listedAction: {
       marginTop: 8,
       alignSelf: 'flex-start',
@@ -269,10 +312,39 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
     summaryCard: {
       backgroundColor: theme.colors.accentPeriwinkleSoft,
     },
+    bstActions: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+      alignItems: 'center',
+    },
   });
 
   return (
     <Screen>
+      {settings.developerModeEnabled ? (
+        <Card>
+          <Text style={styles.summary}>Create BST post</Text>
+          <Text style={styles.meta}>Select items to create a BST post</Text>
+          <PrimaryButton
+            label="Create BST post"
+            onPress={openBstDraftCreate}
+          />
+          <View style={styles.bstActions}>
+            <PrimaryButton
+              label={selectionMode ? (selectedItems.length ? `${selectedItems.length} selected` : 'Selecting items') : 'Select items'}
+              variant="secondary"
+              onPress={toggleSelectionMode}
+            />
+            <PrimaryButton
+              label="View drafts"
+              variant="secondary"
+              onPress={() => navigation.navigate('BstSaleDraftList')}
+            />
+          </View>
+        </Card>
+      ) : null}
+
       <Card>
         <Text style={styles.title}>Sell Bin</Text>
         <Text style={styles.meta}>Track what is listed and what already sold.</Text>
@@ -280,27 +352,6 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
         {brandOptions.length > 1 ? <ChipSelector label="Brand" options={brandOptions} value={brandFilter} onChange={setBrandFilter} accent="sage" /> : null}
         <ChipSelector label="Listed" options={listedOptions} value={listedFilter} onChange={(value) => setListedFilter(value as ListedFilter)} />
       </Card>
-
-      {settings.developerModeEnabled ? (
-        <Card>
-          <Text style={styles.summary}>BST Listing Generator</Text>
-          <Text style={styles.meta}>Sell Bin is your holding area. BST Sale Drafts are separate sale posts built from selected Sell Bin items.</Text>
-          {!isPro ? (
-            <Text style={styles.meta}>
-              Free includes {FREE_BST_DRAFT_LIMIT} active BST draft, full collage generation, and {FREE_BST_ITEM_CARD_LIMIT} free item cards per draft.
-            </Text>
-          ) : null}
-          <PrimaryButton
-            label="Create BST Post"
-            onPress={() => navigation.navigate('BstSaleDraftCreate', selectedItems.length ? { prefillItemIds: selectedItems.map((item) => item.id) } : undefined)}
-          />
-          <PrimaryButton
-            label="Open BST Sale Drafts"
-            variant="secondary"
-            onPress={() => navigation.navigate('BstSaleDraftList')}
-          />
-        </Card>
-      ) : null}
 
       <Card style={styles.summaryCard}>
         <Text style={styles.summary}>For sale items: {forSale.length}</Text>
@@ -323,24 +374,6 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
         </Card>
       ) : null}
 
-      {filtered.length > 0 ? (
-        <Card>
-          <Text style={styles.summary}>Selection</Text>
-          <Text style={styles.meta}>{selectedItems.length} selected</Text>
-          <View style={styles.actionsRow}>
-            <PrimaryButton label="Export Selected" variant="secondary" onPress={() => void shareSelected()} />
-            {settings.developerModeEnabled ? (
-              <PrimaryButton
-                label="BST Draft"
-                variant="secondary"
-                onPress={() => navigation.navigate('BstSaleDraftCreate', { prefillItemIds: selectedItems.map((item) => item.id) })}
-              />
-            ) : null}
-            <PrimaryButton label="Create Bundle" variant="secondary" onPress={() => void createBundleFromSelected()} />
-          </View>
-        </Card>
-      ) : null}
-
       {forSale.length === 0 ? (
         <EmptyState title="No items in Sell Bin" subtitle="Mark owned items as for-sale first so you can track what is ready to list and what already sold." />
       ) : (
@@ -356,18 +389,19 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
               )}
               <View style={{ flex: 1, gap: 2 }}>
                 <View style={styles.itemHeader}>
-                  <Pressable onPress={() => toggleSelected(item.id)} style={[styles.selectBox, selectedIds.includes(item.id) ? styles.selectBoxActive : undefined]}>
-                    <Text style={styles.selectText}>{selectedIds.includes(item.id) ? '✓' : ''}</Text>
-                  </Pressable>
+                  {selectionMode ? (
+                    <Pressable onPress={() => toggleSelected(item.id)} style={[styles.selectBox, selectedIds.includes(item.id) ? styles.selectBoxActive : undefined]}>
+                      <Text style={styles.selectText}>{selectedIds.includes(item.id) ? '✓' : ''}</Text>
+                    </Pressable>
+                  ) : null}
                   <Text style={styles.itemTitle}>{item.title}</Text>
-                  {item.listedAt ? <Text style={styles.listedBadge}>Listed</Text> : null}
+                  {sellStatusByItemId.get(item.id) === 'sold' ? (
+                    <Text style={styles.soldBadge}>Sold</Text>
+                  ) : item.listedAt ? (
+                    <Text style={styles.listedBadge}>Previously listed</Text>
+                  ) : null}
                 </View>
-                {item.bundleId ? <Text style={styles.meta}>Bundle: {item.bundleId}</Text> : null}
-                {item.printName ? <Text style={styles.meta}>Print: {item.printName}</Text> : null}
-                <Text style={styles.meta}>Brand: {item.brand ?? 'N/A'}</Text>
-                <Text style={styles.meta}>Size: {item.size || 'N/A'}</Text>
-                <Text style={styles.meta}>Condition: {item.condition ?? 'N/A'}</Text>
-                <Text style={styles.meta}>Purchase: {item.purchasePrice !== undefined ? asCurrency(item.purchasePrice) : 'N/A'}</Text>
+                <Text style={styles.meta}>{[item.brand, item.size].filter(Boolean).join(' • ') || 'Brand and size not set'}</Text>
                 <Text style={styles.meta}>Target resale: {item.targetResalePrice !== undefined ? asCurrency(item.targetResalePrice) : 'N/A'}</Text>
                 {!item.listedAt ? (
                   <Pressable style={styles.listedAction} onPress={() => void markListed(item)}>

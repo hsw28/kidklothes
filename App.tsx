@@ -165,7 +165,15 @@ const AnalyticsRoot: React.FC<React.PropsWithChildren> = ({ children }) => {
 const ShareToAppBridge = () => {
   const { children, settings } = useData();
   const handlingShareRef = useRef(false);
-  const lastHandledUrlRef = useRef<string | null>(null);
+  const lastHandledUrlRef = useRef<{ url: string; at: number } | null>(null);
+  const wasRecentlyHandled = React.useCallback((incomingUrl: string) => {
+    const last = lastHandledUrlRef.current;
+    if (!last) return false;
+    return last.url === incomingUrl && Date.now() - last.at < 4000;
+  }, []);
+  const markHandled = React.useCallback((incomingUrl: string) => {
+    lastHandledUrlRef.current = { url: incomingUrl, at: Date.now() };
+  }, []);
 
   const openAddItemFromPayload = React.useCallback((input: {
     url: string;
@@ -224,7 +232,7 @@ const ShareToAppBridge = () => {
 
   const handleNativeShareIntentUrl = React.useCallback(async (incomingUrl: string) => {
     if (!incomingUrl.includes('://dataUrl=')) return false;
-    if (lastHandledUrlRef.current === incomingUrl) return true;
+    if (wasRecentlyHandled(incomingUrl)) return true;
 
     let moduleAny: any = null;
     let parseShareIntent: ((value: unknown, options?: { debug?: boolean }) => any) | null = null;
@@ -244,7 +252,7 @@ const ShareToAppBridge = () => {
       return false;
     }
 
-    lastHandledUrlRef.current = incomingUrl;
+    markHandled(incomingUrl);
     handlingShareRef.current = true;
 
     await new Promise<void>((resolve) => {
@@ -349,7 +357,7 @@ const ShareToAppBridge = () => {
     });
 
     return true;
-  }, []);
+  }, [markHandled, wasRecentlyHandled]);
 
   const handleShareRoute = React.useCallback(async (incomingUrl: string) => {
     try {
@@ -363,8 +371,8 @@ const ShareToAppBridge = () => {
         (parsed.host === 'share' || parsed.pathname === '/share' || hostOrPath.endsWith('/share'));
       if (!looksLikeShareRoute) return false;
 
-      if (lastHandledUrlRef.current === incomingUrl) return true;
-      lastHandledUrlRef.current = incomingUrl;
+      if (wasRecentlyHandled(incomingUrl)) return true;
+      markHandled(incomingUrl);
       handlingShareRef.current = true;
 
       const payload = await getPendingSharePayload();
@@ -384,7 +392,7 @@ const ShareToAppBridge = () => {
     } catch {
       return false;
     }
-  }, [handleNativeShareIntentUrl, openAddItemFromPayload]);
+  }, [handleNativeShareIntentUrl, markHandled, openAddItemFromPayload, wasRecentlyHandled]);
 
   useEffect(() => {
     void Linking.getInitialURL().then((url) => {

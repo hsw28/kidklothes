@@ -1,4 +1,5 @@
 import { Child, ChildItem, Item } from '@/models';
+import { ClosetCategory, normalizeItemCategoryToClosetCategory } from './categories';
 import { getChildCurrentSizeText, getChildNextSizeText } from './sizes';
 
 type ChildItemData = {
@@ -105,9 +106,37 @@ export const getDuplicateAdjacentGroups = (items: Item[]) => {
   return duplicateGroups;
 };
 
-export const getWishlistAwareness = (items: Item[], input: { childId: string; clothingType: Item['clothingType']; size: string }) => {
+const CATEGORY_FALLBACK_SAFE_BY_TYPE: Partial<Record<Item['clothingType'], ClosetCategory[]>> = {
+  bottom: ['pants'],
+  sleeper: ['pjs'],
+  romper: ['one-pieces'],
+  outerwear: ['outerwear'],
+  shoes: ['shoes'],
+  dress: ['dresses-skirts'],
+};
+
+const matchesWishlistAwarenessCategory = (
+  item: Item,
+  input: { clothingType: Item['clothingType']; category?: ClosetCategory },
+) => {
+  if (!input.category) return item.clothingType === input.clothingType;
+
+  const normalizedCategory = normalizeItemCategoryToClosetCategory(item.category);
+  if (normalizedCategory) return normalizedCategory === input.category;
+
+  const safeFallbackCategories = CATEGORY_FALLBACK_SAFE_BY_TYPE[input.clothingType] ?? [];
+  return item.clothingType === input.clothingType && safeFallbackCategories.includes(input.category);
+};
+
+export const getWishlistAwareness = (
+  items: Item[],
+  input: { childId: string; clothingType: Item['clothingType']; size: string; category?: ClosetCategory },
+) => {
   const matching = items.filter(
-    (item) => item.childIds.includes(input.childId) && item.clothingType === input.clothingType && normalizeText(item.size) === normalizeText(input.size),
+    (item) =>
+      item.childIds.includes(input.childId) &&
+      matchesWishlistAwarenessCategory(item, input) &&
+      normalizeText(item.size) === normalizeText(input.size),
   );
   const ownedCount = matching.filter((item) => item.status === 'owned').length;
   const similarCount = matching.length;

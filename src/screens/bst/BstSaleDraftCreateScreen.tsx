@@ -9,9 +9,9 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
 import { ClosetStackParamList } from '@/navigation/types';
-import { trackBstCreateStarted, trackBstSecondDraftBlocked } from '@/services/bst/bstAnalytics';
-import { countActiveSaleDrafts, FREE_BST_DRAFT_LIMIT, FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/bstLimits';
-import { canCreateMultipleDrafts, hasProAccess } from '@/services/proAccess';
+import { trackBstCreateStarted } from '@/services/bst/bstAnalytics';
+import { FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/bstLimits';
+import { hasProAccess } from '@/services/proAccess';
 import { getSpecialLocationIds } from '@/utils/closetViewInsights';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
 import { useAppTheme } from '@/theme';
@@ -19,12 +19,10 @@ import { useAppTheme } from '@/theme';
 type Props = NativeStackScreenProps<ClosetStackParamList, 'BstSaleDraftCreate'>;
 
 export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { children, items, childItems, storageLocations, brands, createSaleDraft, settings, purchaseState, saleDrafts, logEvent } = useData();
+  const { children, items, childItems, storageLocations, brands, createSaleDraft, settings, purchaseState, logEvent } = useData();
   const theme = useAppTheme();
   const didLogOpenRef = useRef(false);
-  const canCreateMoreDrafts = canCreateMultipleDrafts(settings, purchaseState);
   const isPro = hasProAccess(settings, purchaseState);
-  const activeDraftCount = countActiveSaleDrafts(saleDrafts);
   const [title, setTitle] = useState('');
   const [query, setQuery] = useState('');
   const [childFilter, setChildFilter] = useState<'All' | string>('All');
@@ -165,10 +163,7 @@ export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route })
     <Screen>
       <Card>
         <Text style={styles.title}>New BST Sale Draft</Text>
-        <Text style={styles.body}>Pick items to create your sale post.</Text>
-        {!canCreateMoreDrafts && activeDraftCount >= FREE_BST_DRAFT_LIMIT ? (
-          <Text style={styles.body}>Your free draft slot is currently in use. You can keep editing that draft, or unlock Pro to create another.</Text>
-        ) : null}
+        <Text style={styles.body}>{`Pick items to create your sale post\nWe’ll format everything for you — 2 cards free`}</Text>
         <FormInput label="Draft title (optional)" value={title} onChangeText={setTitle} placeholder="Spring Purge" />
         <FormInput label="Search sell items" value={query} onChangeText={setQuery} placeholder="Brand, title, size…" clearable />
         <ChipSelector label="Child" options={childOptions} value={childFilter} onChange={setChildFilter} accent="coral" />
@@ -181,7 +176,7 @@ export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route })
         <>
           <Card>
             <Text style={styles.itemTitle}>Pick items to create your sale post</Text>
-            <Text style={styles.body}>You can pick multiple items.</Text>
+            <Text style={styles.body}>{`Pick items to create your sale post\nWe’ll format everything for you — 2 cards free`}</Text>
             <View style={styles.bulkRow}>
               <Pressable
                 style={styles.bulkAction}
@@ -232,15 +227,6 @@ export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route })
               label={selectedIds.length ? `Create Draft (${selectedIds.length})` : 'Select Items to Continue'}
               onPress={async () => {
                 if (!selectedIds.length) return;
-                if (!canCreateMoreDrafts && activeDraftCount >= FREE_BST_DRAFT_LIMIT) {
-                  void trackBstSecondDraftBlocked(logEvent, {
-                    itemCount: activeDraftCount,
-                    isPro,
-                    triggeredFrom: 'draft_create',
-                  });
-                  navigation.navigate('ProPaywall', { source: 'bst_draft_limit' });
-                  return;
-                }
                 const draft = await createSaleDraft({ title, itemIds: selectedIds });
                 if (!draft) return;
                 navigation.replace('BstSaleDraftEditor', { draftId: draft.id });

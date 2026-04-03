@@ -127,10 +127,11 @@ export const TermsOfServiceScreen: React.FC = () => {
         </Paragraph>
 
         <Heading>7. Purchases & Subscriptions (If Enabled)</Heading>
-        <Paragraph>If subscriptions are offered:</Paragraph>
+        <Paragraph>If subscriptions or one-time purchases are offered:</Paragraph>
         <Bullet>Payments are processed through Apple’s App Store</Bullet>
+        <Bullet>Google Play billing terms apply on Android, if Android purchases are enabled later</Bullet>
         <Bullet>Subscriptions renew automatically unless canceled</Bullet>
-        <Bullet>Refunds are governed by Apple’s policies</Bullet>
+        <Bullet>Refunds are governed by the policies of the store where you purchased</Bullet>
         <Paragraph>We do not process payments directly.</Paragraph>
 
         <Heading>8. No Professional or Financial Advice</Heading>
@@ -202,4 +203,3 @@ export const TermsOfServiceScreen: React.FC = () => {
     </Screen>
   );
 };
-

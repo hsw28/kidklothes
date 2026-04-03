@@ -16,7 +16,7 @@ import { SettingsStackParamList } from '@/navigation/types';
 import { getPostHogDebugState } from '@/services/analytics/posthog';
 import { FREE_BST_DRAFT_LIMIT, countActiveSaleDrafts } from '@/services/bst/bstLimits';
 import { getProAccessState } from '@/services/proAccess';
-import { debugPrintPurchasesDiagnostics, getBstProPaywallOptions } from '@/services/purchases';
+import { debugPrintPurchasesDiagnostics, getBstProPaywallOptions, getPurchasesDebugSnapshot, PurchasesDebugSnapshot } from '@/services/purchases';
 import {
   ClosetCategory,
   closetCategories,
@@ -88,6 +88,7 @@ export const SettingsScreen: React.FC = () => {
   const [bstDebugEvents, setBstDebugEvents] = useState<ActivityEvent[]>([]);
   const [paywallProductsReady, setPaywallProductsReady] = useState<boolean | null>(null);
   const [paywallProductDebug, setPaywallProductDebug] = useState<Array<{ kind: string; title: string; packageIdentifier?: string; available: boolean }>>([]);
+  const [purchaseDiagnostics, setPurchaseDiagnostics] = useState<PurchasesDebugSnapshot | null>(null);
   const [posthogDebug, setPosthogDebug] = useState(getPostHogDebugState());
   const versionTapTimesRef = useRef<number[]>([]);
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
@@ -117,9 +118,10 @@ export const SettingsScreen: React.FC = () => {
   const loadDevBstDebug = React.useCallback(async () => {
     if (!showDeveloperSection) return;
     try {
-      const [events, paywallOptions] = await Promise.all([
+      const [events, paywallOptions, diagnostics] = await Promise.all([
         getEvents(120),
         getBstProPaywallOptions(),
+        getPurchasesDebugSnapshot(),
       ]);
       setBstDebugEvents(events.filter((event) => bstEventTypes.has(event.type)).slice(0, 12));
       setPaywallProductsReady(paywallOptions.some((option) => option.available));
@@ -129,10 +131,12 @@ export const SettingsScreen: React.FC = () => {
         packageIdentifier: option.packageIdentifier,
         available: option.available,
       })));
+      setPurchaseDiagnostics(diagnostics);
       setPosthogDebug(getPostHogDebugState());
     } catch {
       setPaywallProductsReady(false);
       setPaywallProductDebug([]);
+      setPurchaseDiagnostics(null);
       setPosthogDebug(getPostHogDebugState());
     }
   }, [bstEventTypes, getEvents, showDeveloperSection]);
@@ -763,6 +767,21 @@ export const SettingsScreen: React.FC = () => {
           <Text style={{ color: '#6b7280', fontSize: 12 }}>
             RevenueCat BST products: {paywallProductsReady === null ? 'Checking…' : paywallProductsReady ? 'Loaded successfully' : 'Not loaded / fallback only'}.
           </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            RevenueCat config: monetization {purchaseDiagnostics?.monetizationEnabled ? 'on' : 'off'} • key {purchaseDiagnostics?.apiKeyMode ?? 'unknown'} • offering {purchaseDiagnostics?.offeringId ?? 'unknown'} • entitlement {purchaseDiagnostics?.entitlementId ?? 'unknown'}.
+          </Text>
+          <Text style={{ color: '#6b7280', fontSize: 12 }}>
+            RevenueCat runtime: module {purchaseDiagnostics?.nativeModuleAvailable ? 'ready' : 'missing'} • current offering {purchaseDiagnostics?.currentOfferingId ?? 'none'} • active entitlement {purchaseDiagnostics?.isEntitled ? 'yes' : 'no'}.
+          </Text>
+          {purchaseDiagnostics?.issues.length ? purchaseDiagnostics.issues.map((issue) => (
+            <Text key={issue} style={{ color: '#b45309', fontSize: 12 }}>
+              RevenueCat warning: {issue}
+            </Text>
+          )) : (
+            <Text style={{ color: '#6b7280', fontSize: 12 }}>
+              RevenueCat launch warnings: none detected in this build.
+            </Text>
+          )}
           <Text style={{ color: '#6b7280', fontSize: 12 }}>
             PostHog: {posthogDebug.configured ? 'configured' : 'not configured'} • client {posthogDebug.clientReady ? 'ready' : 'not ready'}.
           </Text>

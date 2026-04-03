@@ -1,5 +1,5 @@
 import { SaleDraft } from '@/models';
-import { buildSaleDraftName, describeResolvedHomeNotes, formatBstNoteLabel, formatMoney, isNewBstCondition, ResolvedSaleDraftItem, splitBstTitle, summarizeDraftBrands, summarizeDraftSizes } from '@/services/bst/draft';
+import { buildSaleDraftName, describeResolvedHomeNotes, formatBstNoteLabel, formatMoney, isNewBstItem, ResolvedSaleDraftItem, splitBstTitle, summarizeDraftBrands, summarizeDraftSizes } from '@/services/bst/draft';
 
 const joinNotes = (values: Array<string | undefined>): string[] =>
   values.map((value) => value?.trim()).filter((value): value is string => Boolean(value));
@@ -36,6 +36,7 @@ export const buildSaleDraftMainPostText = (draft: SaleDraft, resolvedItems: Reso
 
 export const buildSaleDraftItemCommentText = (entry: ResolvedSaleDraftItem): string => {
   const { draftItem, inventoryItem } = entry;
+  const skipCareNotes = isNewBstItem(draftItem.condition, inventoryItem.title);
   const titleParts = splitBstTitle(inventoryItem.title);
   const titleLine = `#${draftItem.itemNumber} ${titleParts.primary}`;
   const detailLines = joinNotes([
@@ -43,12 +44,12 @@ export const buildSaleDraftItemCommentText = (entry: ResolvedSaleDraftItem): str
     [inventoryItem.brand, inventoryItem.size].filter(Boolean).join(' • ') || undefined,
     draftItem.condition ? `Condition: ${draftItem.condition}` : undefined,
     formatMoney(draftItem.price),
-    isNewBstCondition(draftItem.condition) ? undefined : formatBstNoteLabel(entry.resolvedDryingMethod),
+    skipCareNotes ? undefined : formatBstNoteLabel(entry.resolvedDryingMethod),
     entry.resolvedHomeNotes,
     formatBstNoteLabel(draftItem.conditionNotes),
     draftItem.flawTags.length ? `Flaws: ${draftItem.flawTags.join(', ')}` : undefined,
     formatBstNoteLabel(draftItem.flawNotes),
-    isNewBstCondition(draftItem.condition) ? undefined : formatBstNoteLabel(entry.resolvedWashNote),
+    skipCareNotes ? undefined : formatBstNoteLabel(entry.resolvedWashNote),
     entry.resolvedBundleOffersAccepted ? 'Bundle offers accepted' : undefined,
     entry.resolvedOffersAccepted ? 'Offers accepted' : undefined,
   ]);

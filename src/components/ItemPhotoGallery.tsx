@@ -8,6 +8,7 @@ type Props = {
   canAddMore: boolean;
   onAddPhoto: () => void;
   onLockedPress?: () => void;
+  lockedJoined?: boolean;
   onMakePrimary: (index: number) => void;
   onRemove: (index: number) => void;
 };
@@ -17,6 +18,7 @@ export const ItemPhotoGallery: React.FC<Props> = ({
   canAddMore,
   onAddPhoto,
   onLockedPress,
+  lockedJoined = false,
   onMakePrimary,
   onRemove,
 }) => {
@@ -158,12 +160,20 @@ export const ItemPhotoGallery: React.FC<Props> = ({
       alignItems: 'center',
       justifyContent: 'center',
       padding: 8,
+      gap: 2,
     },
     lockedThumbText: {
       fontSize: 12,
-      lineHeight: 14,
+      lineHeight: 15,
       fontWeight: '700',
       color: theme.colors.textPrimary,
+      textAlign: 'center',
+    },
+    lockedThumbSubtext: {
+      fontSize: 11,
+      lineHeight: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
       textAlign: 'center',
     },
   });
@@ -242,7 +252,8 @@ export const ItemPhotoGallery: React.FC<Props> = ({
               </Pressable>
             ) : (
               <Pressable style={styles.lockedThumb} onPress={onLockedPress}>
-                <Text style={styles.lockedThumbText}>Add more photos with Pro</Text>
+                <Text style={styles.lockedThumbText}>Add more photos</Text>
+                <Text style={styles.lockedThumbSubtext}>{lockedJoined ? 'Early access joined' : 'Pro feature'}</Text>
               </Pressable>
             )}
           </ScrollView>

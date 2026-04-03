@@ -183,7 +183,8 @@ CREATE TABLE IF NOT EXISTS settings (
   betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0,
   proTeaserBannerDismissed INTEGER NOT NULL DEFAULT 0,
   missingPhotoRestoreNudgeShown INTEGER NOT NULL DEFAULT 1,
-  hasSeenBstPostingGuide INTEGER NOT NULL DEFAULT 0
+  hasSeenBstPostingGuide INTEGER NOT NULL DEFAULT 0,
+  proEarlyAccessJoined INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sale_drafts (
@@ -315,8 +316,8 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
   if ((row?.count ?? 0) > 0) return;
 
   await db.runAsync(
-    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, developerForceProAccessEnabled, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown, hasSeenBstPostingGuide)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, developerForceProAccessEnabled, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown, hasSeenBstPostingGuide, proEarlyAccessJoined)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     'app',
     'sometimes',
     'detailed',
@@ -344,6 +345,7 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
     0,
     0,
     1,
+    0,
     0,
   );
 };
@@ -1144,6 +1146,25 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
     await db.execAsync(`UPDATE settings SET hasSeenBstPostingGuide = COALESCE(hasSeenBstPostingGuide, 0);`);
     await db.execAsync('PRAGMA user_version = 43;');
     currentVersion = 43;
+  }
+
+  if (currentVersion < 44) {
+    const saleDraftColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('sale_drafts');`);
+    if (!saleDraftColumns.some((column) => column.name === 'previewVisitedAt')) {
+      await db.execAsync('ALTER TABLE sale_drafts ADD COLUMN previewVisitedAt INTEGER;');
+    }
+    await db.execAsync('PRAGMA user_version = 44;');
+    currentVersion = 44;
+  }
+
+  if (currentVersion < 45) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'proEarlyAccessJoined')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN proEarlyAccessJoined INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync(`UPDATE settings SET proEarlyAccessJoined = COALESCE(proEarlyAccessJoined, 0);`);
+    await db.execAsync('PRAGMA user_version = 45;');
+    currentVersion = 45;
   }
 
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');

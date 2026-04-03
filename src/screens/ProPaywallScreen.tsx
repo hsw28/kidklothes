@@ -20,7 +20,7 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   const theme = useAppTheme();
   const { refreshPurchaseState, logEvent, settings, purchaseState, saleDrafts, saleDraftItems, items } = useData();
   const [options, setOptions] = useState<ProPaywallOption[]>([]);
-  const [selectedKind, setSelectedKind] = useState<ProPaywallOption['kind']>('lifetime');
+  const [selectedKind, setSelectedKind] = useState<ProPaywallOption['kind']>('yearly');
   const [loading, setLoading] = useState(false);
   const isPro = hasProAccess(settings, purchaseState);
   const didLogViewRef = React.useRef(false);
@@ -66,11 +66,11 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const selectedOption = useMemo(
     () => options.find((entry) => entry.kind === selectedKind) ?? {
-      kind: 'lifetime' as const,
-      title: '$9.99 lifetime',
-      subtitle: 'Early access lifetime',
-      priceString: '$9.99 one-time',
-      badge: 'Early access',
+      kind: 'yearly' as const,
+      title: 'Yearly',
+      subtitle: '$1.67/month • Save ~45%',
+      priceString: '$19.99 / year',
+      badge: 'Most popular',
       available: false,
     },
     [options, selectedKind],
@@ -78,16 +78,38 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   const isPhotoPaywall = route.params?.source === 'item_multi_photo';
   const isBstCardUnlockPaywall = route.params?.source === 'bst_locked_card' || route.params?.source === 'bst_save_all_cards' || route.params?.source === 'bst_save_collage_locked';
   const totalItems = route.params?.totalItems ?? paywallDraftItems.length ?? 0;
-  const headline = isPhotoPaywall
-    ? 'Add more photos with Pro'
-    : isBstCardUnlockPaywall
-      ? 'Finish your sale post'
-      : 'Finish your BST post in seconds';
+  const headline = 'Unlock Pro';
   const subtext = isPhotoPaywall
     ? 'Free includes 1 photo per item.\nPro features coming soon'
     : isBstCardUnlockPaywall
-      ? 'Create full BST posts in seconds.'
+      ? `Get all ${totalItems} items and export clean images`
       : 'Generate cards for all items, create unlimited drafts, and add multiple photos per item.';
+  const selectedCtaLabel = loading
+    ? 'Please wait…'
+    : selectedKind === 'monthly'
+      ? 'Start monthly plan'
+      : selectedKind === 'yearly'
+        ? 'Get yearly plan'
+        : 'Unlock forever';
+  const bstDisplayCopyByKind: Record<ProPaywallOption['kind'], { title: string; price: string; subtitle: string; badge?: string }> = {
+    monthly: {
+      title: 'Monthly',
+      price: '$2.99 / month',
+      subtitle: 'Cancel anytime',
+    },
+    yearly: {
+      title: 'Yearly',
+      price: '$19.99 / year',
+      subtitle: '$1.67/month • Save ~45%',
+      badge: 'Most popular',
+    },
+    lifetime: {
+      title: 'Lifetime',
+      price: '$29.99 one-time',
+      subtitle: 'Pay once, use forever',
+      badge: 'Limited time',
+    },
+  };
 
   const styles = StyleSheet.create({
     title: {
@@ -100,6 +122,18 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       fontSize: 15,
       lineHeight: 21,
       color: theme.colors.textSecondary,
+    },
+    heroTitle: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.serif,
+    },
+    heroSubheading: {
+      fontSize: 17,
+      lineHeight: 22,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
     },
     dynamicLine: {
       fontSize: 16,
@@ -150,14 +184,14 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     previewLockedOverlay: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(255,255,255,0.58)',
+      backgroundColor: 'rgba(17,24,39,0.34)',
       alignItems: 'center',
       justifyContent: 'center',
     },
     previewLockedText: {
       fontSize: 22,
       fontWeight: '800',
-      color: theme.colors.textPrimary,
+      color: '#FFFFFF',
     },
     options: {
       gap: 12,
@@ -312,8 +346,22 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       <Card>
         <Text style={styles.title}>{headline}</Text>
         {!isBstCardUnlockPaywall ? <Text style={styles.body}>{subtext}</Text> : null}
-        {isBstCardUnlockPaywall && totalItems > 0 ? <Text style={styles.dynamicLine}>{`Get all ${totalItems} items instead of just 2`}</Text> : null}
       </Card>
+
+      {isBstCardUnlockPaywall ? (
+        <Card>
+          <Text style={styles.heroTitle}>Finish your post</Text>
+          <Text style={styles.heroSubheading}>{`Get all ${totalItems} items and export clean images`}</Text>
+          <Text style={styles.body}>You’ve already built your post — unlock the rest to finish it</Text>
+        </Card>
+      ) : null}
+
+      {!isBstCardUnlockPaywall ? (
+        <Card>
+          <Text style={styles.dynamicLine}>Finish your BST post in seconds</Text>
+          <Text style={styles.body}>{subtext}</Text>
+        </Card>
+      ) : null}
 
       {isBstCardUnlockPaywall && previewItems.length ? (
         <Card>
@@ -342,9 +390,9 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       <Card>
         {isBstCardUnlockPaywall ? (
           <>
-            <Text style={styles.bullet}>• Generate unlimited item cards</Text>
-            <Text style={styles.bullet}>• Export clean BST collages</Text>
-            <Text style={styles.bullet}>• Build full sale posts in seconds</Text>
+            <Text style={styles.bullet}>• All item cards</Text>
+            <Text style={styles.bullet}>• Clean, watermark-free images</Text>
+            <Text style={styles.bullet}>• Post-ready in seconds</Text>
           </>
         ) : (
           <>
@@ -366,32 +414,26 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       <View style={styles.options}>
         {options.map((option) => {
           const active = option.kind === selectedKind;
-          const featured = isBstCardUnlockPaywall && option.kind === 'lifetime';
+          const featured = option.kind === 'yearly';
+          const display = isBstCardUnlockPaywall
+            ? bstDisplayCopyByKind[option.kind]
+            : {
+                title: option.title,
+                price: option.priceString,
+                subtitle: option.subtitle ?? '',
+                badge: option.badge,
+              };
           return (
             <Pressable key={option.kind} onPress={() => setSelectedKind(option.kind)}>
               <Card style={[styles.optionCard, featured ? styles.optionCardFeatured : undefined, active ? styles.optionCardActive : undefined]}>
-                {option.badge ? (
+                {display.badge ? (
                   <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{option.badge}</Text>
+                    <Text style={styles.badgeText}>{display.badge}</Text>
                   </View>
                 ) : null}
-                <Text style={styles.optionTitle}>
-                  {isBstCardUnlockPaywall
-                    ? option.kind === 'monthly'
-                      ? '$2.99/month'
-                      : '$9.99 one-time'
-                    : option.kind === 'monthly'
-                      ? 'Monthly subscription'
-                      : 'Early access lifetime'}
-                </Text>
-                <Text style={styles.optionPrice}>{option.priceString}</Text>
-                <Text style={styles.optionMeta}>
-                  {isBstCardUnlockPaywall
-                    ? option.kind === 'monthly'
-                      ? 'Cancel anytime'
-                      : 'Early price (will increase)'
-                    : option.subtitle ?? ''}
-                </Text>
+                <Text style={styles.optionTitle}>{display.title}</Text>
+                <Text style={styles.optionPrice}>{display.price}</Text>
+                <Text style={styles.optionMeta}>{display.subtitle}</Text>
               </Card>
             </Pressable>
           );
@@ -399,8 +441,8 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       </View>
 
       <Card>
-        <PrimaryButton label={loading ? 'Please wait…' : isBstCardUnlockPaywall ? 'Unlock everything' : 'Unlock Pro'} onPress={() => void handleUnlock()} disabled={loading} />
-        {isBstCardUnlockPaywall ? <Text style={styles.ctaNote}>Unlock everything instantly</Text> : null}
+        <PrimaryButton label={isBstCardUnlockPaywall ? selectedCtaLabel : loading ? 'Please wait…' : 'Unlock Pro'} onPress={() => void handleUnlock()} disabled={loading} />
+        {isBstCardUnlockPaywall ? <Text style={styles.ctaNote}>Unlock instantly</Text> : null}
         <PrimaryButton label="Not now" variant="secondary" onPress={() => navigation.goBack()} disabled={loading} />
         <Pressable style={styles.restoreButton} onPress={() => void handleRestore()} disabled={loading}>
           <Text style={styles.optionMeta}>Restore purchases</Text>

@@ -154,6 +154,13 @@ export const formatMoney = (value?: number): string | undefined => {
 export const isNewBstCondition = (condition?: SaleDraftItem['condition']): boolean =>
   condition === 'NWT' || condition === 'NWOT';
 
+export const isNewBstItem = (condition?: SaleDraftItem['condition'], title?: string): boolean => {
+  if (isNewBstCondition(condition)) return true;
+  const normalizedTitle = title?.trim().toLowerCase();
+  if (!normalizedTitle) return false;
+  return /\bnwt\b|\bnwot\b|new with tags?|new with tag\b/.test(normalizedTitle);
+};
+
 export const formatBstNoteLabel = (value?: string): string | undefined => sentencePreservingSeparators(value);
 
 export const splitBstTitle = (title?: string): { primary: string; secondary?: string } => {

@@ -12,6 +12,7 @@ export type BstImageGeneratorInput = {
   resolvedItems: ResolvedSaleDraftItem[];
   brandingMode?: 'free' | 'pro';
   itemCardDraftItemIds?: string[];
+  collagePreviewMode?: CollageViewProps['previewMode'];
 };
 
 export type BstGenerationProgress = {
@@ -39,6 +40,7 @@ export const buildCollageViewModels = (input: BstImageGeneratorInput): BstCollag
     items: resolvedItems,
     pageSize: resolvedItems.length,
     brandingMode: input.brandingMode ?? 'free',
+    previewMode: input.collagePreviewMode ?? 'export',
   }];
 };
 

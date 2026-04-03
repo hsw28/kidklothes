@@ -339,6 +339,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   );
   const [isFetchingPreview, setIsFetchingPreview] = useState(false);
   const [previewCard, setPreviewCard] = useState<PreviewCardState>(() => (route.params?.url ? { status: 'loading', domain: getDomainLabel(route.params.url) } : { status: 'idle' }));
+  const [showPhotoEarlyAccessModal, setShowPhotoEarlyAccessModal] = useState(false);
+  const [photoEarlyAccessJoinedThisSession, setPhotoEarlyAccessJoinedThisSession] = useState(false);
   const [showAdvancedMediaFields, setShowAdvancedMediaFields] = useState(false);
   const [titleTouched, setTitleTouched] = useState(Boolean(sourceItem?.title));
   const [brandTouched, setBrandTouched] = useState(Boolean(sourceItem?.brand));
@@ -401,7 +403,17 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       isPro: hasMultiPhotoAccess,
       triggeredFrom: 'item_form',
     });
-    navigation.navigate('ProPaywall', { source: 'item_multi_photo' });
+    void logEvent('early_access_modal_opened', {
+      surface: 'item_multi_photo',
+      joined: Boolean(settings.proEarlyAccessJoined),
+    });
+    setShowPhotoEarlyAccessModal(true);
+  };
+
+  const joinPhotoEarlyAccess = async () => {
+    await updateSettings({ proEarlyAccessJoined: true });
+    await logEvent('early_access_joined', { surface: 'item_multi_photo' });
+    setPhotoEarlyAccessJoinedThisSession(true);
   };
 
   const defaultWearingSize = useMemo(() => {
@@ -460,8 +472,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     if (sharedImageUrl && isValidHttpImageUrl(sharedImageUrl) && (!imageTouchedRef.current || !imageUrlRef.current.trim())) {
-      setImageUrl(sharedImageUrl);
-      imageUrlRef.current = sharedImageUrl;
+      syncPhotoFields([sharedImageUrl]);
       autofillMetaRef.current.imageAutoValue = sharedImageUrl;
     }
 
@@ -721,11 +732,9 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     const currentImageTouched = imageTouchedRef.current;
     const currentImageUrl = imageUrlRef.current.trim();
     if (primaryImage && (!currentImageTouched || !currentImageUrl || currentImageUrl === autofillMetaRef.current.imageAutoValue)) {
-      setImageUrl(primaryImage);
-      imageUrlRef.current = primaryImage;
-      autofillMetaRef.current.imageAutoValue = primaryImage;
       const extras = previewImages.filter((entry) => entry !== primaryImage).slice(0, hasMultiPhotoAccess ? 5 : 0);
-      setExtraImageUrls(extras.join(', '));
+      syncPhotoFields([primaryImage, ...extras]);
+      autofillMetaRef.current.imageAutoValue = primaryImage;
     }
   };
 
@@ -963,7 +972,12 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     if (status === 'wishlist' && size.trim()) {
-      const awareness = getWishlistAwareness(items, { childId: primaryChildId, clothingType: closetCategoryToClothingType(category), size });
+      const awareness = getWishlistAwareness(items, {
+        childId: primaryChildId,
+        clothingType: closetCategoryToClothingType(category),
+        category,
+        size,
+      });
       const inventoryRealityThreshold = normalizeInventoryRealityThreshold(settings.inventoryRealityCheckOwnedThreshold);
       if (awareness.ownedCount >= inventoryRealityThreshold) {
         Alert.alert('Inventory Reality Check', `You already own ${awareness.ownedCount} ${category ? closetLabel[category] : clothingType} items in size ${size}.`);
@@ -1263,8 +1277,8 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                 <View style={styles.previewCard}>
                   <RemoteImage uri={previewCard.imageUrl} style={styles.previewImage} fallbackLabel={previewCard.status === 'success' ? previewCard.title : 'Preview'} />
                   <View style={styles.previewTextCol}>
-                    <Text style={styles.previewTitle} numberOfLines={2}>{previewCard.title}</Text>
-                    <Text style={styles.previewDomain}>{previewCard.domain}</Text>
+                    <Text style={styles.previewTitle} numberOfLines={2} ellipsizeMode="tail">{previewCard.title}</Text>
+                    <Text style={styles.previewDomain} numberOfLines={1} ellipsizeMode="middle">{previewCard.domain}</Text>
                   </View>
                 </View>
               ) : (
@@ -1371,7 +1385,10 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                   autoCapitalize="none"
                 />
               ) : (
-                <Text style={styles.urlTip}>Multiple photos per item are part of Pro.</Text>
+                <Pressable onPress={openPhotoPaywall}>
+                  <Text style={styles.urlTip}>Add more photos</Text>
+                  <Text style={styles.urlTipSecondary}>{settings.proEarlyAccessJoined ? 'Early access joined' : 'Pro feature'}</Text>
+                </Pressable>
               )}
             </>
           ) : null}
@@ -1384,6 +1401,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
         canAddMore={hasMultiPhotoAccess || photoUris.length === 0}
         onAddPhoto={() => void chooseImageFromLibrary()}
         onLockedPress={openPhotoPaywall}
+        lockedJoined={Boolean(settings.proEarlyAccessJoined)}
         onMakePrimary={(index) => {
           const next = [...photoUris];
           const [chosen] = next.splice(index, 1);
@@ -1693,6 +1711,58 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={showPhotoEarlyAccessModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowPhotoEarlyAccessModal(false);
+          setPhotoEarlyAccessJoinedThisSession(false);
+        }}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => {
+            setShowPhotoEarlyAccessModal(false);
+            setPhotoEarlyAccessJoinedThisSession(false);
+          }}
+        >
+          <Pressable style={styles.modalCard} onPress={() => undefined}>
+            <Text style={styles.modalTitle}>{photoEarlyAccessJoinedThisSession ? 'You’re on the list' : 'Get early access to Pro'}</Text>
+            {photoEarlyAccessJoinedThisSession ? (
+              <Text style={styles.modalText}>We’ll let you know when Pro is ready.</Text>
+            ) : (
+              <>
+                <Text style={styles.modalText}>Be the first to unlock:</Text>
+                <Text style={styles.modalBullet}>• BST post builder (coming soon)</Text>
+                <Text style={styles.modalBullet}>• More photos per item</Text>
+                <Text style={styles.modalBullet}>• Custom categories</Text>
+                <Text style={styles.modalBullet}>• And more features coming soon</Text>
+                <Text style={styles.modalFooter}>We’ll let you know as soon as it’s ready.</Text>
+                <PrimaryButton label="Join early access" onPress={() => void joinPhotoEarlyAccess()} />
+                <PrimaryButton
+                  label="Not now"
+                  variant="secondary"
+                  onPress={() => {
+                    setShowPhotoEarlyAccessModal(false);
+                    setPhotoEarlyAccessJoinedThisSession(false);
+                  }}
+                />
+              </>
+            )}
+            {photoEarlyAccessJoinedThisSession ? (
+              <PrimaryButton
+                label="Done"
+                onPress={() => {
+                  setShowPhotoEarlyAccessModal(false);
+                  setPhotoEarlyAccessJoinedThisSession(false);
+                }}
+              />
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Screen>
   );
 };
@@ -1776,6 +1846,17 @@ const styles = StyleSheet.create({
     color: '#4b5563',
     fontSize: 13,
   },
+  modalBullet: {
+    fontSize: 14,
+    color: '#4b5563',
+    lineHeight: 20,
+  },
+  modalFooter: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#6b7280',
+    lineHeight: 18,
+  },
   similarRow: {
     flexDirection: 'row',
     gap: 8,
@@ -1849,6 +1930,7 @@ const styles = StyleSheet.create({
   },
   previewTextCol: {
     flex: 1,
+    minWidth: 0,
     gap: 6,
   },
   previewImage: {
@@ -1900,5 +1982,12 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginTop: -6,
     marginBottom: 6,
+  },
+  urlTipSecondary: {
+    fontSize: 11,
+    color: '#9ca3af',
+    marginTop: -2,
+    marginBottom: 6,
+    fontWeight: '600',
   },
 });

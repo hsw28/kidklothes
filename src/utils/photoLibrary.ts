@@ -18,12 +18,17 @@ const showPermissionDeniedAlert = () => {
 export const ensurePhotoLibrarySavePermission = async (): Promise<boolean> => {
   const MediaLibrary = getMediaLibraryModule();
   if (!MediaLibrary) return false;
-  const current = await MediaLibrary.getPermissionsAsync();
-  if (current.granted) return true;
-  const requested = await MediaLibrary.requestPermissionsAsync();
-  if (requested.granted) return true;
-  showPermissionDeniedAlert();
-  return false;
+  try {
+    const current = await MediaLibrary.getPermissionsAsync();
+    if (current.granted) return true;
+    const requested = await MediaLibrary.requestPermissionsAsync();
+    if (requested.granted) return true;
+    showPermissionDeniedAlert();
+    return false;
+  } catch (error) {
+    if (__DEV__) console.warn('[photoLibrary] permission check failed', error);
+    return false;
+  }
 };
 
 export const saveImageToPhotoLibrary = async (uri: string): Promise<boolean> => {
@@ -31,6 +36,17 @@ export const saveImageToPhotoLibrary = async (uri: string): Promise<boolean> => 
   if (!MediaLibrary) return false;
   const allowed = await ensurePhotoLibrarySavePermission();
   if (!allowed) return false;
-  await MediaLibrary.saveToLibraryAsync(uri);
-  return true;
+  try {
+    await MediaLibrary.saveToLibraryAsync(uri);
+    return true;
+  } catch (error) {
+    if (__DEV__) console.warn('[photoLibrary] saveToLibraryAsync failed, trying createAssetAsync', { uri, error });
+    try {
+      await MediaLibrary.createAssetAsync(uri);
+      return true;
+    } catch (fallbackError) {
+      if (__DEV__) console.warn('[photoLibrary] createAssetAsync failed', { uri, fallbackError });
+      return false;
+    }
+  }
 };

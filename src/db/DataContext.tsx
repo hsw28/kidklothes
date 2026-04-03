@@ -95,6 +95,7 @@ const defaultSettings: AppSettings = {
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,
   hasSeenBstPostingGuide: false,
+  proEarlyAccessJoined: false,
 };
 
 const DataContext = createContext<DataContextValue | undefined>(undefined);

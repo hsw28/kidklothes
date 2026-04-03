@@ -22,6 +22,10 @@ type Props = NativeStackScreenProps<ClosetStackParamList, 'BstSaleDraftEditor'>;
 type BoolChoice = 'inherit' | 'unset' | 'yes' | 'no';
 type PetTypeOption = (typeof BST_PET_TYPES)[number];
 
+const UNSET_OPTION_LABELS = {
+  unset: 'not set',
+} as const;
+
 const BooleanSelector: React.FC<{
   label: string;
   value: BoolChoice;
@@ -29,7 +33,13 @@ const BooleanSelector: React.FC<{
   onChange: (value: BoolChoice) => void;
 }> = ({ label, value, mode = 'default', onChange }) => {
   const options: BoolChoice[] = mode === 'override' ? ['inherit', 'yes', 'no'] : ['unset', 'yes', 'no'];
-  return <ChipSelector label={label} options={options} value={value} onChange={onChange} accent="sage" />;
+  return <ChipSelector label={label} options={options} value={value} onChange={onChange} accent="sage" optionLabels={UNSET_OPTION_LABELS} />;
+};
+
+const COLLAGE_ORDER_LABELS: Partial<Record<(typeof BST_COLLAGE_ORDER_MODES)[number], string>> = {
+  'highest-price': 'Highest price',
+  'newest-first': 'Newest',
+  custom: 'Custom',
 };
 
 const normalizePhotoChoiceKey = (value: string): string => {
@@ -146,6 +156,15 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       color: theme.colors.textSecondary,
       lineHeight: 20,
     },
+    sectionStack: {
+      gap: 24,
+    },
+    sectionGroup: {
+      gap: 12,
+    },
+    controlStack: {
+      gap: 12,
+    },
     subhead: {
       fontSize: 18,
       fontWeight: '700',
@@ -161,14 +180,38 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       flexWrap: 'wrap',
       gap: 10,
     },
-    itemActionRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
+    collageControlBlock: {
       gap: 10,
-      justifyContent: 'space-between',
+      marginBottom: 12,
+    },
+    itemCardList: {
+      gap: 6,
+      marginTop: 6,
+    },
+    editingPhaseSection: {
+      marginTop: 14,
+    },
+    bottomSection: {
+      marginTop: 28,
+      gap: 28,
+    },
+    simpleDangerSection: {
+      gap: 8,
+      paddingHorizontal: 4,
+    },
+    itemActionRow: {
+      gap: 14,
+      marginTop: 14,
+    },
+    moveRow: {
+      flexDirection: 'row',
+      gap: 10,
     },
     itemActionButton: {
-      flexGrow: 1,
+      width: '100%',
+    },
+    moveActionButton: {
+      flex: 1,
       minWidth: 132,
     },
     itemTitle: {
@@ -224,9 +267,10 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       fontSize: 13,
     },
     inlineLink: {
-      fontSize: 13,
-      fontWeight: '700',
+      fontSize: 12,
+      fontWeight: '600',
       color: theme.colors.accentPeriwinkle,
+      opacity: 0.82,
     },
   });
 
@@ -464,7 +508,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
     >
       <Card>
         <Text style={styles.title}>{buildSaleDraftName(draft)}</Text>
-        <Text style={styles.body}>{draftItems.length} item{draftItems.length === 1 ? '' : 's'} included</Text>
+        <Text style={styles.body}>{draftItems.length} item{draftItems.length === 1 ? '' : 's'}</Text>
         {!canDeleteDraft ? (
           <Text style={styles.body}>Free includes 1 active BST draft at a time. Keep updating this draft as your sale post until you upgrade to Pro for multiple drafts and draft deletion.</Text>
         ) : null}
@@ -475,15 +519,14 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
           onBlur={() => void saveDraftTextField('title', draftTitleInput, draft.title)}
           placeholder="Spring Purge"
         />
-        <Text style={styles.body}>Collage export uses one single-image BST grid and automatically adjusts columns based on how many items are in the draft.</Text>
-        <Text style={styles.body}>Main post photo</Text>
-        <Text style={styles.body}>Use the collage, or upload your own with Pro.</Text>
+        <Text style={styles.subhead}>Main post image</Text>
+        <Text style={styles.body}>We’ll create a collage from your items for your main post photo, or use your own image</Text>
         {draft.customHeaderImageUri ? (
           <Image source={{ uri: draft.customHeaderImageUri }} style={{ width: '100%', aspectRatio: 1.2, borderRadius: 20, backgroundColor: theme.colors.surfaceMuted }} resizeMode="cover" />
         ) : null}
         <View style={styles.actions}>
           <PrimaryButton
-            label={draft.customHeaderImageUri ? 'Replace Custom Header Image' : 'Upload Custom Header Image (Pro)'}
+            label={draft.customHeaderImageUri ? 'Replace custom image (Pro)' : 'Upload custom image (Pro)'}
             variant="secondary"
             onPress={() => void pickCustomHeaderImage()}
           />
@@ -495,201 +538,257 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
             />
           ) : null}
         </View>
+        <Text style={styles.meta}>Make your post stand out</Text>
       </Card>
 
       <Card>
-        <Text style={styles.subhead}>Sale-wide defaults</Text>
-        <ChipSelector
-          label="Smoke note"
-          options={['unset', ...BST_SMOKE_NOTES]}
-          value={(draft.defaultSmokeNote ?? 'unset') as 'unset' | (typeof BST_SMOKE_NOTES)[number]}
-          onChange={(value) => void updateDraftPreservingScroll({ defaultSmokeNote: value === 'unset' ? undefined : value })}
-        />
-        <ChipSelector
-          label="Pet types"
-          options={['none', 'dog', 'cat', 'other']}
-          selectedValues={draft.defaultPetTypes ?? []}
-          onChange={(value) => {
-            const nextValues = togglePetTypeSelection(draft.defaultPetTypes ?? [], value);
-            if (!nextValues.includes('other')) {
-              setPetNoteInput('');
-            }
-            void updateDraftPreservingScroll({
-              defaultPetTypes: nextValues.length ? nextValues : undefined,
-              ...(!nextValues.includes('other') ? { defaultPetNote: undefined } : {}),
-            });
-          }}
-          accent="sage"
-        />
-        {draft.defaultPetTypes?.includes('other') ? (
-          <FormInput
-            label="Pet note"
-            value={petNoteInput}
-            onChangeText={setPetNoteInput}
-            onBlur={() => void saveDraftTextField('defaultPetNote', petNoteInput, draft.defaultPetNote)}
-          />
-        ) : null}
-        <FormInput
-          label="Wash note"
-          value={washNoteInput}
-          onChangeText={setWashNoteInput}
-          onBlur={() => void saveDraftTextField('defaultWashNote', washNoteInput, draft.defaultWashNote)}
-          multiline
-        />
-        <ChipSelector
-          label="Drying method"
-          options={['unset', ...BST_DRYING_METHODS]}
-          value={(draft.defaultDryingMethod ?? 'unset') as 'unset' | (typeof BST_DRYING_METHODS)[number]}
-          onChange={(value) => void updateDraftPreservingScroll({ defaultDryingMethod: value === 'unset' ? undefined : value })}
-        />
-        <Text style={styles.body}>Wash and dry notes will not apply to items marked new or new with tag.</Text>
-        <Pressable onPress={() => void beginIndividualFieldEditing('drying')}>
-          <Text style={styles.inlineLink}>Set drying individually for items</Text>
-        </Pressable>
-        <BooleanSelector
-          label="Offers accepted"
-          value={draft.defaultOffersAccepted === undefined ? 'unset' : draft.defaultOffersAccepted ? 'yes' : 'no'}
-          onChange={(value) => void updateDraftPreservingScroll({ defaultOffersAccepted: value === 'unset' ? undefined : value === 'yes' })}
-        />
-        <Pressable onPress={() => void beginIndividualFieldEditing('offers')}>
-          <Text style={styles.inlineLink}>Set offers individually for items</Text>
-        </Pressable>
-        <BooleanSelector
-          label="Bundle offers accepted"
-          value={draft.defaultBundleOffersAccepted === undefined ? 'unset' : draft.defaultBundleOffersAccepted ? 'yes' : 'no'}
-          onChange={(value) => void updateDraftPreservingScroll({ defaultBundleOffersAccepted: value === 'unset' ? undefined : value === 'yes' })}
-        />
-        <Pressable onPress={() => void beginIndividualFieldEditing('bundle')}>
-          <Text style={styles.inlineLink}>Set bundle offers individually for items</Text>
-        </Pressable>
-        <FormInput
-          label="Shipping summary for main post"
-          value={shippingNoteInput}
-          onChangeText={setShippingNoteInput}
-          onBlur={() => void saveDraftTextField('defaultShippingNote', shippingNoteInput, draft.defaultShippingNote)}
-          placeholder="Buyer pays exact shipping • Pirate Ship available"
-          multiline
-        />
-        <FormInput
-          label="Payment note"
-          value={paymentNoteInput}
-          onChangeText={setPaymentNoteInput}
-          onBlur={() => void saveDraftTextField('defaultPaymentNote', paymentNoteInput, draft.defaultPaymentNote)}
-          multiline
-        />
-      </Card>
+        <Text style={styles.subhead}>Apply to all items</Text>
+        <Text style={styles.body}>These apply to all items unless edited individually</Text>
+        <View style={styles.sectionStack}>
+          <View style={styles.sectionGroup}>
+            <View style={styles.controlStack}>
+              <ChipSelector
+                label="Smoke note"
+                options={['unset', ...BST_SMOKE_NOTES]}
+                value={(draft.defaultSmokeNote ?? 'unset') as 'unset' | (typeof BST_SMOKE_NOTES)[number]}
+                onChange={(value) => void updateDraftPreservingScroll({ defaultSmokeNote: value === 'unset' ? undefined : value })}
+                optionLabels={UNSET_OPTION_LABELS}
+              />
+            </View>
+          </View>
 
-      <Card>
-        <Text style={styles.subhead}>Included items</Text>
-        <Text style={styles.body}>
-          Tap Edit to add item-specific BST details like condition, flaws, wash notes, photo choice, and offers settings. Reusable BST details you save here will prefill future drafts for this item.
-        </Text>
-        <Text style={styles.subhead}>Order for collage</Text>
-        <Text style={styles.body}>Top-left items get the most attention.</Text>
-        <ChipSelector
-          label="Collage order"
-          options={[...BST_COLLAGE_ORDER_MODES]}
-          value={draft.collageOrderMode}
-          onChange={(value) => {
-            if (value === 'custom') {
-              void updateDraftPreservingScroll({ collageOrderMode: 'custom' });
-              return;
-            }
-            void applyAutoSort(value);
-          }}
-          accent="periwinkle"
-        />
-        {draftItems.map((draftItem, index) => {
-          const inventoryItem = itemMap.get(draftItem.itemId);
-          if (!inventoryItem) return null;
-          const imageUri = draftItem.selectedPhotoUri || getItemDisplayImageUri(inventoryItem);
-          return (
-            <Card key={draftItem.id} style={{ backgroundColor: theme.colors.surfaceMuted }}>
-              <View style={styles.row}>
-                {imageUri ? <Image source={{ uri: imageUri }} style={styles.thumb} /> : <View style={styles.thumb} />}
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={styles.itemTitle}>#{draftItem.itemNumber} {inventoryItem.title}</Text>
-                  <Text style={styles.meta}>{[inventoryItem.brand, inventoryItem.size, draftItem.condition].filter(Boolean).join(' • ') || 'Listing details not set yet'}</Text>
-                  <Text style={styles.meta}>{formatMoney(draftItem.price) ?? 'No price yet'}</Text>
-                </View>
-              </View>
-              <View style={styles.itemActionRow}>
-                <PrimaryButton
-                  label="Move Up"
-                  variant="secondary"
-                  style={styles.itemActionButton}
-                  onPress={() => {
-                    if (index === 0) return;
-                    const ordered = [...draftItems];
-                    const swap = ordered[index - 1];
-                    ordered[index - 1] = ordered[index];
-                    ordered[index] = swap;
-                    void applyOrderedDraftIds(ordered.map((entry) => entry.id), 'custom');
-                  }}
+          <View style={styles.sectionGroup}>
+            <View style={styles.controlStack}>
+              <ChipSelector
+                label="Pet types"
+                options={['none', 'dog', 'cat', 'other']}
+                selectedValues={draft.defaultPetTypes ?? []}
+                onChange={(value) => {
+                  const nextValues = togglePetTypeSelection(draft.defaultPetTypes ?? [], value);
+                  if (!nextValues.includes('other')) {
+                    setPetNoteInput('');
+                  }
+                  void updateDraftPreservingScroll({
+                    defaultPetTypes: nextValues.length ? nextValues : undefined,
+                    ...(!nextValues.includes('other') ? { defaultPetNote: undefined } : {}),
+                  });
+                }}
+                accent="sage"
+              />
+              {draft.defaultPetTypes?.includes('other') ? (
+                <FormInput
+                  label="Pet note"
+                  value={petNoteInput}
+                  onChangeText={setPetNoteInput}
+                  onBlur={() => void saveDraftTextField('defaultPetNote', petNoteInput, draft.defaultPetNote)}
                 />
-                <PrimaryButton label="Edit" variant="secondary" style={styles.itemActionButton} onPress={() => setEditingItemId(draftItem.id)} />
-                <PrimaryButton
-                  label="Remove"
-                  variant="danger"
-                  style={styles.itemActionButton}
-                  onPress={() => {
-                    if (shouldConfirmSelectionReset) {
-                      Alert.alert(
-                        'Changing items will reset your generated cards',
-                        'Changing items will reset your generated cards.',
-                        [
+              ) : null}
+            </View>
+          </View>
+
+          <View style={styles.sectionGroup}>
+            <View style={styles.controlStack}>
+              <FormInput
+                label="Wash note"
+                value={washNoteInput}
+                onChangeText={setWashNoteInput}
+                onBlur={() => void saveDraftTextField('defaultWashNote', washNoteInput, draft.defaultWashNote)}
+                multiline
+              />
+            </View>
+            <Pressable onPress={() => setEditingItemId(draftItems[0]?.id ?? null)}>
+              <Text style={styles.inlineLink}>Add wash note individually for each item</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.sectionGroup}>
+            <View style={styles.controlStack}>
+              <ChipSelector
+                label="Drying method"
+                options={['unset', ...BST_DRYING_METHODS]}
+                value={(draft.defaultDryingMethod ?? 'unset') as 'unset' | (typeof BST_DRYING_METHODS)[number]}
+                onChange={(value) => void updateDraftPreservingScroll({ defaultDryingMethod: value === 'unset' ? undefined : value })}
+                optionLabels={UNSET_OPTION_LABELS}
+              />
+              <Text style={styles.body}>Wash and dry notes will not apply to items marked new or new with tag.</Text>
+            </View>
+            <Pressable onPress={() => void beginIndividualFieldEditing('drying')}>
+              <Text style={styles.inlineLink}>Set drying individually for items</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.sectionGroup}>
+            <View style={styles.controlStack}>
+              <BooleanSelector
+                label="Offers accepted"
+                value={draft.defaultOffersAccepted === undefined ? 'unset' : draft.defaultOffersAccepted ? 'yes' : 'no'}
+                onChange={(value) => void updateDraftPreservingScroll({ defaultOffersAccepted: value === 'unset' ? undefined : value === 'yes' })}
+              />
+            </View>
+            <Pressable onPress={() => void beginIndividualFieldEditing('offers')}>
+              <Text style={styles.inlineLink}>Set offers individually for items</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.sectionGroup}>
+            <View style={styles.controlStack}>
+              <BooleanSelector
+                label="Bundle offers accepted"
+                value={draft.defaultBundleOffersAccepted === undefined ? 'unset' : draft.defaultBundleOffersAccepted ? 'yes' : 'no'}
+                onChange={(value) => void updateDraftPreservingScroll({ defaultBundleOffersAccepted: value === 'unset' ? undefined : value === 'yes' })}
+              />
+            </View>
+            <Pressable onPress={() => void beginIndividualFieldEditing('bundle')}>
+              <Text style={styles.inlineLink}>Set bundle offers individually for items</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.sectionGroup}>
+            <View style={styles.controlStack}>
+              <FormInput
+                label="Shipping (shown in post)"
+                value={shippingNoteInput}
+                onChangeText={setShippingNoteInput}
+                onBlur={() => void saveDraftTextField('defaultShippingNote', shippingNoteInput, draft.defaultShippingNote)}
+                placeholder="Buyer pays exact shipping • Pirate Ship available"
+                multiline
+              />
+            </View>
+          </View>
+
+          <View style={styles.sectionGroup}>
+            <View style={styles.controlStack}>
+              <FormInput
+                label="Payment note"
+                value={paymentNoteInput}
+                onChangeText={setPaymentNoteInput}
+                onBlur={() => void saveDraftTextField('defaultPaymentNote', paymentNoteInput, draft.defaultPaymentNote)}
+                multiline
+              />
+            </View>
+          </View>
+        </View>
+      </Card>
+
+      <View style={styles.editingPhaseSection}>
+        <Card>
+          <Text style={styles.subhead}>Included items</Text>
+          <Text style={styles.body}>Tap Edit to add condition, notes, and pricing</Text>
+          <Text style={styles.subhead}>Arrange for collage</Text>
+          <View style={styles.collageControlBlock}>
+            <Text style={styles.body}>{`Items appear in this order in your post image\nPut your best items first`}</Text>
+            <ChipSelector
+              options={[...BST_COLLAGE_ORDER_MODES]}
+              value={draft.collageOrderMode}
+              optionLabels={COLLAGE_ORDER_LABELS}
+              onChange={(value) => {
+                if (value === 'custom') {
+                  void updateDraftPreservingScroll({ collageOrderMode: 'custom' });
+                  return;
+                }
+                void applyAutoSort(value);
+              }}
+              accent="periwinkle"
+            />
+          </View>
+          <View style={styles.itemCardList}>
+            {draftItems.map((draftItem, index) => {
+              const inventoryItem = itemMap.get(draftItem.itemId);
+              if (!inventoryItem) return null;
+              const imageUri = draftItem.selectedPhotoUri || getItemDisplayImageUri(inventoryItem);
+              return (
+                <Card key={draftItem.id} style={{ backgroundColor: theme.colors.surfaceMuted }}>
+                  <View style={styles.row}>
+                    {imageUri ? <Image source={{ uri: imageUri }} style={styles.thumb} /> : <View style={styles.thumb} />}
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={styles.itemTitle}>#{draftItem.itemNumber} {inventoryItem.title}</Text>
+                      <Text style={styles.meta}>{[inventoryItem.brand, inventoryItem.size, draftItem.condition].filter(Boolean).join(' • ') || 'Listing details not set yet'}</Text>
+                      <Text style={styles.meta}>{formatMoney(draftItem.price) ?? 'No price yet'}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.itemActionRow}>
+                    <PrimaryButton label="Edit" style={styles.itemActionButton} onPress={() => setEditingItemId(draftItem.id)} />
+                    <View style={styles.moveRow}>
+                      <PrimaryButton
+                        label="Move Up"
+                        variant="secondary"
+                        style={styles.moveActionButton}
+                        onPress={() => {
+                          if (index === 0) return;
+                          const ordered = [...draftItems];
+                          const swap = ordered[index - 1];
+                          ordered[index - 1] = ordered[index];
+                          ordered[index] = swap;
+                          void applyOrderedDraftIds(ordered.map((entry) => entry.id), 'custom');
+                        }}
+                      />
+                      <PrimaryButton
+                        label="Move Down"
+                        variant="secondary"
+                        style={styles.moveActionButton}
+                        onPress={() => {
+                          if (index === draftItems.length - 1) return;
+                          const ordered = [...draftItems];
+                          const swap = ordered[index + 1];
+                          ordered[index + 1] = ordered[index];
+                          ordered[index] = swap;
+                          void applyOrderedDraftIds(ordered.map((entry) => entry.id), 'custom');
+                        }}
+                      />
+                    </View>
+                    <PrimaryButton
+                      label="Remove"
+                      variant="dangerSecondary"
+                      style={styles.itemActionButton}
+                      onPress={() => {
+                        if (shouldConfirmSelectionReset) {
+                          Alert.alert(
+                            'Changing items will reset your generated cards',
+                            'Changing items will reset your generated cards.',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Remove',
+                                style: 'destructive',
+                                onPress: () => {
+                                  void (async () => {
+                                    await updateDraftPreservingScroll({ freeGeneratedCardItemIds: [] });
+                                    await removeSaleDraftItem(draftItem.id);
+                                  })();
+                                },
+                              },
+                            ],
+                          );
+                          return;
+                        }
+                        Alert.alert('Remove item', 'Remove this item from the draft?', [
                           { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Remove',
-                            style: 'destructive',
-                            onPress: () => {
-                              void (async () => {
-                                await updateDraftPreservingScroll({ freeGeneratedCardItemIds: [] });
-                                await removeSaleDraftItem(draftItem.id);
-                              })();
-                            },
-                          },
-                        ],
-                      );
-                      return;
-                    }
-                    Alert.alert('Remove item', 'Remove this item from the draft?', [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Remove', style: 'destructive', onPress: () => void removeSaleDraftItem(draftItem.id) },
-                    ]);
-                  }}
-                />
-                <PrimaryButton
-                  label="Move Down"
-                  variant="secondary"
-                  style={styles.itemActionButton}
-                  onPress={() => {
-                    if (index === draftItems.length - 1) return;
-                    const ordered = [...draftItems];
-                    const swap = ordered[index + 1];
-                    ordered[index + 1] = ordered[index];
-                    ordered[index] = swap;
-                    void applyOrderedDraftIds(ordered.map((entry) => entry.id), 'custom');
-                  }}
-                />
-              </View>
-            </Card>
-          );
-        })}
-      </Card>
+                          { text: 'Remove', style: 'destructive', onPress: () => void removeSaleDraftItem(draftItem.id) },
+                        ]);
+                      }}
+                    />
+                  </View>
+                </Card>
+              );
+            })}
+          </View>
+        </Card>
+      </View>
 
       <Card>
         <Text style={styles.subhead}>Create your post</Text>
-        <Text style={styles.body}>Preview your collage, item cards, and post text.</Text>
+        <Text style={styles.body}>See your collage, item cards, and post text</Text>
         <PrimaryButton label="Preview post" onPress={() => navigation.navigate('BstSaleDraftPreview', { draftId: draft.id })} />
       </Card>
 
       {canDeleteDraft ? (
-        <Card>
-          <Text style={styles.subhead}>Delete draft</Text>
-          <Text style={styles.body}>Remove this BST draft and its draft-specific item settings for this sale post.</Text>
-          <PrimaryButton label="Delete Draft" variant="danger" onPress={confirmDeleteDraft} />
-        </Card>
+        <View style={styles.bottomSection}>
+          <View style={styles.simpleDangerSection}>
+            <Text style={styles.subhead}>Delete draft</Text>
+            <Text style={styles.body}>Permanently delete this draft</Text>
+            <PrimaryButton label="Delete Draft" variant="danger" onPress={confirmDeleteDraft} />
+          </View>
+        </View>
       ) : null}
 
       <Modal visible={Boolean(editingDraftItem && editingInventoryItem)} transparent animationType="slide" onRequestClose={() => setEditingItemId(null)}>
@@ -711,6 +810,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                   options={['unset', ...BST_CONDITIONS]}
                   value={itemConditionValue}
                   onChange={setItemConditionValue}
+                  optionLabels={UNSET_OPTION_LABELS}
                 />
                 <FormInput label="Condition notes" value={itemConditionNotesInput} onChangeText={setItemConditionNotesInput} multiline />
                 <Text style={styles.meta}>Selected photo</Text>

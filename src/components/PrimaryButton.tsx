@@ -5,7 +5,7 @@ import { useAppTheme } from '@/theme';
 interface PrimaryButtonProps {
   label: string;
   onPress: () => void | Promise<void>;
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: 'primary' | 'secondary' | 'danger' | 'dangerSecondary';
   style?: ViewStyle;
   disabled?: boolean;
 }
@@ -38,6 +38,11 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, va
     danger: {
       backgroundColor: theme.isDark ? '#7A3A3A' : '#E3B1AA',
     },
+    dangerSecondary: {
+      backgroundColor: theme.colors.background,
+      borderWidth: 1,
+      borderColor: theme.isDark ? '#A85F5F' : '#D59A92',
+    },
     text: {
       fontSize: 14,
       fontWeight: '600',
@@ -45,6 +50,9 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, va
     },
     lightText: {
       color: theme.isDark ? '#1E1E1E' : '#1E1E1E',
+    },
+    dangerSecondaryText: {
+      color: theme.isDark ? '#F1C2BE' : '#9F4F46',
     },
   });
 
@@ -67,7 +75,15 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({ label, onPress, va
       }}
       style={[styles.button, styles[variant], disabled ? styles.buttonDisabled : undefined, style]}
     >
-      <Text style={[styles.text, variant !== 'secondary' && styles.lightText]}>{label}</Text>
+      <Text
+        style={[
+          styles.text,
+          variant !== 'secondary' && variant !== 'dangerSecondary' && styles.lightText,
+          variant === 'dangerSecondary' ? styles.dangerSecondaryText : undefined,
+        ]}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 };
