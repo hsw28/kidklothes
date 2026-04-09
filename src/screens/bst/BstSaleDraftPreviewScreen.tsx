@@ -88,12 +88,14 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       <Text style={styles.pricingPrimary}>Finish this post</Text>
       <View style={styles.priceRow}>
         {foundingOfferVisible && foundingOffer.discountedPriceString ? (
-          <Text style={styles.introPrice}>{`${foundingOffer.discountedPriceString} founder price`}</Text>
+          <Text style={styles.introPrice}>{`${foundingOffer.discountedPriceString} first year`}</Text>
         ) : (
           <Text style={styles.standardPrice}>{bstPricePrimary}</Text>
         )}
       </View>
-      <Text style={styles.priceCaption}>Add remaining items + export clean images</Text>
+      <Text style={styles.priceCaption}>
+        {foundingOfferVisible ? 'Founder price • then $19.99/year after' : 'Add remaining items + export clean images'}
+      </Text>
     </View>
   );
 

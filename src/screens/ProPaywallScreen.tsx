@@ -144,7 +144,7 @@ const foundingPaywallContent: PaywallContent = {
     'Add multiple photos per item',
     'Unlock custom tags and stronger filters',
   ],
-  ctaSubtext: 'Yearly includes special first-year pricing for eligible new subscribers',
+  ctaSubtext: 'Founder price $9.99 first year',
   secondaryHeader: 'Everything you unlock with Pro',
   secondaryBullets: [
     'Create your own categories',
@@ -318,16 +318,17 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       };
     });
   }, [foundingOffer, foundingVisible, options]);
+  const foundingIntroPrice = foundingOffer.discountedPriceString || '$9.99';
   const selectedOption = useMemo(
     () => displayOptions.find((entry) => entry.kind === selectedKind) ?? {
       kind: 'yearly' as const,
       title: 'Yearly',
       subtitle: '$1.67/month • Save ~45%',
-      priceString: '$19.99 / year',
+      priceString: foundingVisible ? foundingIntroPrice : '$19.99 / year',
       badge: 'Most popular',
       available: false,
     },
-    [displayOptions, selectedKind],
+    [displayOptions, foundingIntroPrice, foundingVisible, selectedKind],
   );
   const bstSelectedOption = useMemo(
     () => options.find((entry) => entry.kind === 'yearly')
@@ -373,7 +374,6 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     const yearlyOption = options.find((entry) => entry.kind === 'yearly');
     return isPlaceholderPrice(yearlyOption?.priceString) ? '$19.99 / year' : String(yearlyOption?.priceString ?? '$19.99 / year');
   }, [options]);
-  const foundingIntroPrice = foundingOffer.discountedPriceString || '$9.99';
 
   const styles = StyleSheet.create({
     title: {
@@ -809,7 +809,7 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                         <Text style={styles.foundingOriginalPrice}>{foundingYearlyBasePrice}</Text>
                         <Text style={styles.foundingIntroPrice}>{display.price}</Text>
                       </View>
-                      <Text style={styles.foundingSavings}>Special first-year price</Text>
+                      <Text style={styles.foundingSavings}>Founder price $9.99 first year</Text>
                     </View>
                   ) : (
                     <Text style={styles.optionPrice}>{display.price}</Text>

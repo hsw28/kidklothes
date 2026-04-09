@@ -35,12 +35,13 @@ const featureCards = [
 export const ExploreProScreen: React.FC<Props> = ({ navigation }) => {
   const theme = useAppTheme();
   const { items, settings, purchaseState, getEventCount, logEvent } = useData();
-  const [foundingVisible, setFoundingVisible] = useState(false);
+  const founderDefaultVisible = !shouldSuppressFoundingOffer(settings, purchaseState);
+  const [foundingVisible, setFoundingVisible] = useState(founderDefaultVisible);
   const [isFoundingMember, setIsFoundingMember] = useState(Boolean(settings.foundingMemberJoined));
   const [monthlyPrice, setMonthlyPrice] = useState('$2.99/month');
   const [yearlyPrice, setYearlyPrice] = useState('$19.99/year');
   const [lifetimePrice, setLifetimePrice] = useState('$29.99 one-time');
-  const [foundingPrice, setFoundingPrice] = useState<string | null>(null);
+  const [foundingPrice, setFoundingPrice] = useState<string | null>(founderDefaultVisible ? '$9.99' : null);
   const proAccessEnabled = hasProAccess(settings, purchaseState);
 
   const styles = useMemo(() => StyleSheet.create({
@@ -203,6 +204,13 @@ export const ExploreProScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         </Card>
 
+        {featureCards.map((card) => (
+          <Card key={card.title}>
+            <Text style={styles.featureTitle}>{card.title}</Text>
+            <Text style={styles.featureBody}>{card.body}</Text>
+          </Card>
+        ))}
+
         {!proAccessEnabled ? (
           <Card style={styles.pricingCard}>
             <Text style={styles.sectionTitle}>Pricing</Text>
@@ -218,7 +226,7 @@ export const ExploreProScreen: React.FC<Props> = ({ navigation }) => {
                     <Text style={styles.foundingOriginal}>{yearlyPrice}</Text>
                     <Text style={styles.foundingCurrent}>{foundingPrice}</Text>
                   </View>
-                  <Text style={styles.pricingMeta}>Special first-year price</Text>
+                  <Text style={styles.pricingMeta}>Founder price $9.99 first year</Text>
                 </>
               ) : (
                 <Text style={styles.pricingValue}>{yearlyPrice}</Text>
@@ -230,13 +238,6 @@ export const ExploreProScreen: React.FC<Props> = ({ navigation }) => {
             </View>
           </Card>
         ) : null}
-
-        {featureCards.map((card) => (
-          <Card key={card.title}>
-            <Text style={styles.featureTitle}>{card.title}</Text>
-            <Text style={styles.featureBody}>{card.body}</Text>
-          </Card>
-        ))}
 
         <Card>
           {proAccessEnabled ? (
