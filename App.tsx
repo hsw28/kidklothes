@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { ActionSheetIOS, Alert, AlertButton, Linking, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import * as ExpoLinking from 'expo-linking';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
+import { AppToastHost } from './src/components/AppToastHost';
 import { PrimaryButton } from './src/components/PrimaryButton';
 import { UndoToastHost } from './src/components/UndoToastHost';
 import { DataProvider } from './src/db/DataContext';
@@ -492,6 +493,7 @@ export default function App() {
               <MissingPhotoRestoreNudge />
               <ShareToAppBridge />
               <RootNavigator />
+              <AppToastHost />
               <UndoToastHost />
             </NavigationContainer>
           </AppBootstrapGate>

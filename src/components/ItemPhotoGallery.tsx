@@ -252,8 +252,7 @@ export const ItemPhotoGallery: React.FC<Props> = ({
               </Pressable>
             ) : (
               <Pressable style={styles.lockedThumb} onPress={onLockedPress}>
-                <Text style={styles.lockedThumbText}>Add more photos</Text>
-                <Text style={styles.lockedThumbSubtext}>{lockedJoined ? 'Early access joined' : 'Pro feature'}</Text>
+                <Text style={styles.lockedThumbText}>Add more photos   Pro</Text>
               </Pressable>
             )}
           </ScrollView>

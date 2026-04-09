@@ -6,6 +6,8 @@ import {
   BstCollageGridSize,
   Child,
   ChildItem,
+  CustomCategory,
+  CustomTag,
   FilterPreset,
   ID,
   Item,
@@ -27,10 +29,13 @@ import { getMaxKidsAllowed } from '@/config/betaLimits';
 import { makeId } from '@/utils/id';
 import { inferSizeScheme, isShoeCategory, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
 import { normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
+import { normalizeCustomTagKey, resolvePresetTag } from '@/utils/tagSystem';
+import { FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/bstLimits';
 import { getDb, initDatabase } from './sqlite';
 
 export interface NewChildInput {
   name: string;
+  sortOrder?: number;
   photoUri?: string;
   notes?: string;
   usesMixedSizes?: boolean;
@@ -125,6 +130,15 @@ export interface SaveFilterPresetInput {
   query?: string;
 }
 
+export interface NewCustomCategoryInput {
+  name: string;
+  icon?: string;
+}
+
+export interface NewCustomTagInput {
+  name: string;
+}
+
 export interface BulkItemPatchInput {
   status?: Item['status'];
   appendTag?: string;
@@ -159,6 +173,7 @@ export interface UpdateSaleDraftInput {
   defaultPaymentNote?: string;
   collageGridSize?: BstCollageGridSize;
   collageOrderMode?: BstCollageOrderMode;
+  showPricesOnCollage?: boolean;
   customHeaderImageUri?: string;
   freeGeneratedCardItemIds?: ID[];
   freeGenerationConsumedAt?: number | null;
@@ -196,6 +211,8 @@ interface StoreState {
   children: Child[];
   items: Item[];
   childItems: ChildItem[];
+  customTags: CustomTag[];
+  customCategories: CustomCategory[];
   storageLocations: StorageLocation[];
   printAliases: PrintAlias[];
   purchaseState?: PurchaseStateSnapshot;
@@ -240,6 +257,7 @@ export interface ListRecentItemsInput {
 type ChildRow = {
   id: string;
   name: string;
+  sortOrder: number | null;
   photoUri: string | null;
   notes: string | null;
   hiddenClosetCategories: string | null;
@@ -354,6 +372,26 @@ type PrintAliasRow = {
   deletedAt: string | null;
 };
 
+type CustomCategoryRow = {
+  id: string;
+  name: string;
+  icon: string | null;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+};
+
+type CustomTagRow = {
+  id: string;
+  name: string;
+  normalizedName: string;
+  source: string;
+  childIdsJson: string | null;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+};
+
 type OutfitRow = {
   id: string;
   childId: string;
@@ -388,6 +426,7 @@ type SettingsRow = {
   lastShoppingType: string | null;
   lastShoppingChildId: string | null;
   lastPromptedAt: number | null;
+  lastBackupAt: number | null;
   lastUpsellShownAt: number | null;
   closetCategoryOrder: string | null;
   hiddenClosetCategoriesGlobal: string | null;
@@ -398,11 +437,15 @@ type SettingsRow = {
   developerModeEnabled: number | null;
   devProUnlocked: number | null;
   developerForceProAccessEnabled: number | null;
+  developerActLikeFirstTimeUser: number | null;
   betaKidLimitBannerDismissed: number | null;
   proTeaserBannerDismissed: number | null;
   missingPhotoRestoreNudgeShown: number | null;
   hasSeenBstPostingGuide: number | null;
+  hasSeenBstEntryOnboarding: number | null;
+  hasSeenStructuredTagsEducation: number | null;
   proEarlyAccessJoined: number | null;
+  foundingMemberJoined: number | null;
 };
 
 type SaleDraftRow = {
@@ -420,6 +463,7 @@ type SaleDraftRow = {
   defaultPaymentNote: string | null;
   collageGridSize: string | null;
   collageOrderMode: string | null;
+  showPricesOnCollage: number | null;
   customHeaderImageUri: string | null;
   freeGeneratedCardItemIdsJson: string | null;
   freeGenerationConsumedAt: number | null;
@@ -491,6 +535,7 @@ const defaultSettings: AppSettings = {
   advancedFeaturesUnlocked: false,
   lastShoppingType: undefined,
   lastShoppingChildId: undefined,
+  lastBackupAt: undefined,
   lastUpsellShownAt: undefined,
   closetCategoryOrder: undefined,
   hiddenClosetCategoriesGlobal: [],
@@ -500,11 +545,15 @@ const defaultSettings: AppSettings = {
   inventoryRealityCheckOwnedThreshold: 5,
   developerModeEnabled: false,
   developerForceProAccessEnabled: false,
+  developerActLikeFirstTimeUser: false,
   betaKidLimitBannerDismissed: false,
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,
   hasSeenBstPostingGuide: false,
+  hasSeenBstEntryOnboarding: false,
+  hasSeenStructuredTagsEducation: false,
   proEarlyAccessJoined: false,
+  foundingMemberJoined: false,
 };
 
 const parseStringList = (value: string | null): string[] => {
@@ -567,6 +616,7 @@ const deriveItemSizingFields = (input: {
 const mapChild = (row: ChildRow): Child => ({
   id: row.id,
   name: row.name,
+  sortOrder: row.sortOrder ?? 0,
   photoUri: row.photoUri ?? undefined,
   notes: row.notes ?? undefined,
   usesMixedSizes: Boolean(row.usesMixedSizes ?? 0),
@@ -589,6 +639,25 @@ const mapChild = (row: ChildRow): Child => ({
   updatedAt: row.updatedAt,
   deletedAt: row.deletedAt ?? undefined,
 });
+
+const normalizeItemCondition = (condition?: string | null): Item['condition'] | undefined => {
+  switch (condition) {
+    case 'new-with-tags':
+      return 'new-with-tags';
+    case 'new-without-tags':
+      return 'new-without-tags';
+    case 'like-new':
+      return 'like-new';
+    case 'good':
+      return 'good';
+    case 'play':
+      return 'play';
+    case 'donate':
+      return 'play';
+    default:
+      return undefined;
+  }
+};
 
 const mapChildItem = (row: ChildItemRow): ChildItem => ({
   id: row.id,
@@ -665,7 +734,7 @@ const mapItem = (row: ItemRow, tags: string[], brandTags: string[], childIds: st
   fabric: row.fabric ?? undefined,
   fitRating: (row.fitRating as Item['fitRating']) ?? undefined,
   fitException: (row.fitException as Item['fitException']) ?? undefined,
-  condition: (row.condition as Item['condition']) ?? undefined,
+  condition: normalizeItemCondition(row.condition),
   bstSelectedPhotoUri: row.bstSelectedPhotoUri ?? undefined,
   bstCondition: (row.bstCondition as Item['bstCondition']) ?? undefined,
   bstConditionNotes: row.bstConditionNotes ?? undefined,
@@ -701,6 +770,25 @@ const mapOutfit = (row: OutfitRow, tags: string[]): Outfit => ({
   weatherHint: row.weatherHint ?? undefined,
 });
 
+const mapCustomCategory = (row: CustomCategoryRow): CustomCategory => ({
+  id: row.id,
+  name: row.name,
+  icon: row.icon ?? undefined,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+  deletedAt: row.deletedAt ?? undefined,
+});
+
+const mapCustomTag = (row: CustomTagRow): CustomTag => ({
+  id: row.id,
+  name: row.name,
+  normalizedName: row.normalizedName,
+  source: row.source === 'legacy' ? 'legacy' : 'user',
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+  deletedAt: row.deletedAt ?? undefined,
+});
+
 const mapSettings = (row?: SettingsRow | null): AppSettings => {
   if (!row) return defaultSettings;
   const legacyDevProUnlocked = row.devProUnlocked === 1;
@@ -716,6 +804,7 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
     lastShoppingType: (row.lastShoppingType as AppSettings['lastShoppingType']) ?? undefined,
     lastShoppingChildId: row.lastShoppingChildId ?? undefined,
     lastPromptedAt: row.lastPromptedAt ?? undefined,
+    lastBackupAt: row.lastBackupAt ?? undefined,
     lastUpsellShownAt: row.lastUpsellShownAt ?? undefined,
     closetCategoryOrder: sanitizeOrder(parseStringList(row.closetCategoryOrder), { includeOther: true }),
     hiddenClosetCategoriesGlobal: sanitizeHiddenCategories(parseStringList(row.hiddenClosetCategoriesGlobal), { includeOther: true }),
@@ -728,11 +817,15 @@ const mapSettings = (row?: SettingsRow | null): AppSettings => {
     inventoryRealityCheckOwnedThreshold: normalizeInventoryRealityThreshold(row.inventoryRealityCheckOwnedThreshold),
     developerModeEnabled: row.developerModeEnabled === 1,
     developerForceProAccessEnabled: (row.developerForceProAccessEnabled ?? (legacyDevProUnlocked ? 1 : 0)) === 1,
+    developerActLikeFirstTimeUser: row.developerActLikeFirstTimeUser === 1,
     betaKidLimitBannerDismissed: row.betaKidLimitBannerDismissed === 1,
     proTeaserBannerDismissed: row.proTeaserBannerDismissed === 1,
     missingPhotoRestoreNudgeShown: row.missingPhotoRestoreNudgeShown === 1,
     hasSeenBstPostingGuide: row.hasSeenBstPostingGuide === 1,
+    hasSeenBstEntryOnboarding: row.hasSeenBstEntryOnboarding === 1,
+    hasSeenStructuredTagsEducation: row.hasSeenStructuredTagsEducation === 1,
     proEarlyAccessJoined: row.proEarlyAccessJoined === 1,
+    foundingMemberJoined: row.foundingMemberJoined === 1,
   };
 };
 
@@ -786,6 +879,7 @@ const mapSaleDraft = (row: SaleDraftRow): SaleDraft => ({
   defaultPaymentNote: row.defaultPaymentNote ?? undefined,
   collageGridSize: (row.collageGridSize as SaleDraft['collageGridSize']) ?? 'Auto',
   collageOrderMode: (row.collageOrderMode as SaleDraft['collageOrderMode']) ?? 'highest-price',
+  showPricesOnCollage: row.showPricesOnCollage !== 0,
   customHeaderImageUri: row.customHeaderImageUri ?? undefined,
   freeGeneratedCardItemIds: parseStringList(row.freeGeneratedCardItemIdsJson),
   freeGenerationConsumedAt: row.freeGenerationConsumedAt ?? undefined,
@@ -822,6 +916,10 @@ const mapSaleDraftItem = (row: SaleDraftItemRow): SaleDraftItem => ({
 const normalizeTagName = (name: string) => normalizeGenericToken(name).replace(/\s+/g, ' ').trim();
 const normalizeBrandName = (name: string) => normalizeGenericToken(name).replace(/\s+/g, ' ').trim();
 const normalizeChildName = (name: string) => normalizeWhitespace(name).trim().toLocaleLowerCase();
+const normalizeCustomCategoryName = (name: string) => normalizeWhitespace(name).trim();
+const normalizeCustomCategoryIcon = (icon?: string | null) => trimOrNull(icon ?? undefined) ?? undefined;
+const buildCustomCategoryId = (name: string) => `custom:${normalizeGenericToken(name).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`;
+const normalizeCustomTagName = (name: string) => normalizeWhitespace(name).trim();
 
 const duplicateChildNameError = () => {
   const error = new Error('There is already a child with that name.');
@@ -962,6 +1060,32 @@ const replaceItemBrands = async (itemId: ID, brands: string[]) => {
   }
 };
 
+const syncCustomTagRegistry = async (tags: string[]) => {
+  const db = await getDb();
+  const now = Date.now();
+  const unique = Array.from(new Set(tags.map((entry) => normalizeCustomTagName(entry)).filter(Boolean)));
+  for (const name of unique) {
+    const normalizedName = normalizeCustomTagKey(name);
+    if (!normalizedName) continue;
+    if (resolvePresetTag(name)) continue;
+    await db.runAsync(
+      `INSERT INTO custom_tags (id, name, normalizedName, source, createdAt, updatedAt, deletedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(normalizedName) DO UPDATE SET
+         name = excluded.name,
+         updatedAt = excluded.updatedAt,
+         deletedAt = NULL;`,
+      makeId(),
+      name,
+      normalizedName,
+      'user',
+      now,
+      now,
+      null,
+    );
+  }
+};
+
 const upsertChildItem = async (input: {
   childId: ID;
   itemId: ID;
@@ -1050,6 +1174,8 @@ export const repository = {
       childrenRows,
       itemRows,
       childItemRows,
+      customTagRows,
+      customCategoryRows,
       storageLocationRows,
       printAliasRows,
       purchaseStateRow,
@@ -1064,9 +1190,11 @@ export const repository = {
       saleDraftItemRows,
     ] =
       await Promise.all([
-      db.getAllAsync<ChildRow>('SELECT * FROM children WHERE deletedAt IS NULL ORDER BY createdAt DESC;'),
+      db.getAllAsync<ChildRow>('SELECT * FROM children WHERE deletedAt IS NULL ORDER BY sortOrder ASC, createdAt DESC, id ASC;'),
       db.getAllAsync<ItemRow>('SELECT * FROM items WHERE deletedAt IS NULL ORDER BY updatedAt DESC;'),
       db.getAllAsync<ChildItemRow>('SELECT * FROM child_items WHERE deletedAt IS NULL ORDER BY updatedAt DESC;'),
+      db.getAllAsync<CustomTagRow>('SELECT * FROM custom_tags WHERE deletedAt IS NULL ORDER BY name COLLATE NOCASE ASC, createdAt ASC;'),
+      db.getAllAsync<CustomCategoryRow>('SELECT * FROM custom_categories WHERE deletedAt IS NULL ORDER BY name COLLATE NOCASE ASC, createdAt ASC;'),
       db.getAllAsync<StorageLocationRow>('SELECT * FROM storage_locations WHERE deletedAt IS NULL ORDER BY updatedAt DESC;'),
       db.getAllAsync<PrintAliasRow>('SELECT * FROM print_aliases WHERE deletedAt IS NULL ORDER BY updatedAt DESC;'),
       db.getFirstAsync<PurchaseStateRow>('SELECT * FROM purchase_state WHERE id = 1;'),
@@ -1125,6 +1253,8 @@ export const repository = {
       children: childrenRows.map(mapChild),
       items: itemRows.map((row) => mapItem(row, itemTagMap.get(row.id) ?? [], itemBrandMap.get(row.id) ?? [], childIdsByItem.get(row.id) ?? [])),
       childItems: childItemRows.map(mapChildItem),
+      customTags: customTagRows.map(mapCustomTag),
+      customCategories: customCategoryRows.map(mapCustomCategory),
       storageLocations: storageLocationRows.map(mapStorageLocation),
       printAliases: printAliasRows.map(mapPrintAlias),
       purchaseState: mapPurchaseState(purchaseStateRow),
@@ -1157,7 +1287,7 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     await db.runAsync(
-      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, devProUnlocked = ?, developerForceProAccessEnabled = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ?, hasSeenBstPostingGuide = ?, proEarlyAccessJoined = ? WHERE id = ?;`,
+      `UPDATE settings SET detailPromptMode = ?, closetAddDefaultView = ?, notificationsEnabled = ?, notifyWeeklyTidy = ?, notifyOutgrow = ?, monetizationEnabled = ?, guidedOnboarding = ?, guidedOnboardingCompleted = ?, advancedFeaturesUnlocked = ?, lastShoppingType = ?, lastShoppingChildId = ?, lastPromptedAt = ?, lastBackupAt = ?, lastUpsellShownAt = ?, closetCategoryOrder = ?, hiddenClosetCategoriesGlobal = ?, wishlistCategoryOrder = ?, hiddenWishlistCategories = ?, kidsPreviewCategories = ?, inventoryRealityCheckOwnedThreshold = ?, developerModeEnabled = ?, devProUnlocked = ?, developerForceProAccessEnabled = ?, developerActLikeFirstTimeUser = ?, betaKidLimitBannerDismissed = ?, proTeaserBannerDismissed = ?, missingPhotoRestoreNudgeShown = ?, hasSeenBstPostingGuide = ?, hasSeenBstEntryOnboarding = ?, hasSeenStructuredTagsEducation = ?, proEarlyAccessJoined = ?, foundingMemberJoined = ? WHERE id = ?;`,
       'never',
       next.closetAddDefaultView,
       next.notificationsEnabled ? 1 : 0,
@@ -1170,6 +1300,7 @@ export const repository = {
       next.lastShoppingType ?? null,
       next.lastShoppingChildId ?? null,
       next.lastPromptedAt ?? null,
+      next.lastBackupAt ?? null,
       next.lastUpsellShownAt ?? null,
       next.closetCategoryOrder ? JSON.stringify(sanitizeCategoryOrder(next.closetCategoryOrder, { includeOther: true })) : null,
       JSON.stringify(sanitizeHiddenCategories(next.hiddenClosetCategoriesGlobal, { includeOther: true })),
@@ -1182,11 +1313,15 @@ export const repository = {
       next.developerModeEnabled ? 1 : 0,
       next.developerForceProAccessEnabled ? 1 : 0,
       next.developerForceProAccessEnabled ? 1 : 0,
+      next.developerActLikeFirstTimeUser ? 1 : 0,
       next.betaKidLimitBannerDismissed ? 1 : 0,
       next.proTeaserBannerDismissed ? 1 : 0,
       next.missingPhotoRestoreNudgeShown ? 1 : 0,
       next.hasSeenBstPostingGuide ? 1 : 0,
+      next.hasSeenBstEntryOnboarding ? 1 : 0,
+      next.hasSeenStructuredTagsEducation ? 1 : 0,
       next.proEarlyAccessJoined ? 1 : 0,
+      next.foundingMemberJoined ? 1 : 0,
       'app',
     );
 
@@ -1261,10 +1396,15 @@ export const repository = {
     }
 
     await assertUniqueChildName(db, normalizedName);
+    const maxSortRow = await db.getFirstAsync<{ maxSortOrder: number | null }>(
+      'SELECT MAX(sortOrder) AS maxSortOrder FROM children WHERE deletedAt IS NULL;',
+    );
+    const nextSortOrder = input.sortOrder ?? ((maxSortRow?.maxSortOrder ?? -1) + 1);
 
     const child: Child = {
       id: makeId(),
       name: normalizedName,
+      sortOrder: nextSortOrder,
       photoUri: normalizeUrl(input.photoUri) || undefined,
       notes: trimOrNull(input.notes) ?? undefined,
       usesMixedSizes: Boolean(input.usesMixedSizes),
@@ -1288,9 +1428,10 @@ export const repository = {
     };
 
     await db.runAsync(
-      'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, currentSizeCodes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      'INSERT INTO children (id, name, sortOrder, photoUri, notes, hiddenClosetCategories, usesMixedSizes, currentSizeCodes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
       child.id,
       child.name,
+      child.sortOrder,
       child.photoUri ?? null,
       child.notes ?? null,
       JSON.stringify(child.hiddenClosetCategories),
@@ -1325,6 +1466,7 @@ export const repository = {
     const updated: Child = {
       id: row.id,
       name: updatedName,
+      sortOrder: patch.sortOrder ?? row.sortOrder ?? 0,
       photoUri: patch.photoUri !== undefined ? normalizeUrl(patch.photoUri) || undefined : row.photoUri ?? undefined,
       notes: patch.notes !== undefined ? trimOrNull(patch.notes) ?? undefined : row.notes ?? undefined,
       usesMixedSizes: patch.usesMixedSizes !== undefined ? Boolean(patch.usesMixedSizes) : Boolean(row.usesMixedSizes ?? 0),
@@ -1351,8 +1493,9 @@ export const repository = {
     };
 
     await db.runAsync(
-      'UPDATE children SET name = ?, photoUri = ?, notes = ?, hiddenClosetCategories = ?, usesMixedSizes = ?, currentSizeCodes = ?, apparelSizeCurrent = ?, apparelSizeNext = ?, shoeSizeCurrent = ?, shoeSizeNext = ?, shoeSizeSystem = ?, currentSizeCode = ?, currentSizeOther = ?, nextSizeCode = ?, nextSizeOther = ?, updatedAt = ? WHERE id = ?;',
+      'UPDATE children SET name = ?, sortOrder = ?, photoUri = ?, notes = ?, hiddenClosetCategories = ?, usesMixedSizes = ?, currentSizeCodes = ?, apparelSizeCurrent = ?, apparelSizeNext = ?, shoeSizeCurrent = ?, shoeSizeNext = ?, shoeSizeSystem = ?, currentSizeCode = ?, currentSizeOther = ?, nextSizeCode = ?, nextSizeOther = ?, updatedAt = ? WHERE id = ?;',
       updated.name,
+      updated.sortOrder,
       updated.photoUri ?? null,
       updated.notes ?? null,
       JSON.stringify(updated.hiddenClosetCategories),
@@ -1371,6 +1514,25 @@ export const repository = {
       id,
     );
     return updated;
+  },
+
+  async reorderChildren(orderedChildIds: ID[]): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const currentChildren = await db.getAllAsync<{ id: string }>(
+      'SELECT id FROM children WHERE deletedAt IS NULL ORDER BY sortOrder ASC, createdAt DESC, id ASC;',
+    );
+    const currentIds = currentChildren.map((child) => child.id);
+    const requestedIds = orderedChildIds.filter((id) => currentIds.includes(id));
+    const remainingIds = currentIds.filter((id) => !requestedIds.includes(id));
+    const finalIds = [...requestedIds, ...remainingIds];
+    const now = Date.now();
+
+    await runInTransaction(db, async () => {
+      for (const [index, childId] of finalIds.entries()) {
+        await db.runAsync('UPDATE children SET sortOrder = ?, updatedAt = ? WHERE id = ?;', index, now, childId);
+      }
+    });
   },
 
   async deleteChild(id: ID): Promise<void> {
@@ -1562,6 +1724,7 @@ export const repository = {
         );
 
         await replaceItemTags(item.id, item.tags);
+        await syncCustomTagRegistry(item.tags);
         await replaceItemBrands(item.id, item.brandTags);
 
         if (childIds.length > 0) {
@@ -1859,6 +2022,7 @@ export const repository = {
         );
 
         await replaceItemTags(id, updated.tags);
+        await syncCustomTagRegistry(updated.tags);
         await replaceItemBrands(id, updated.brandTags);
 
         await syncChildItemsForItem({
@@ -1884,6 +2048,177 @@ export const repository = {
       quantity: normalizeQuantity(input.quantity),
     });
     return [item];
+  },
+
+  async createCustomCategory(input: NewCustomCategoryInput): Promise<CustomCategory> {
+    await initDatabase();
+    const db = await getDb();
+    const now = Date.now();
+    const name = normalizeCustomCategoryName(input.name);
+    if (!name) throw new Error('Category name is required.');
+    const id = buildCustomCategoryId(name);
+    if (!id || id === 'custom:') throw new Error('Category name is required.');
+
+    const existing = await db.getFirstAsync<CustomCategoryRow>(
+      'SELECT * FROM custom_categories WHERE id = ? AND deletedAt IS NULL;',
+      id,
+    );
+    if (existing) {
+      const error = new Error('A custom category with that name already exists.');
+      (error as Error & { code?: string }).code = 'DUPLICATE_CUSTOM_CATEGORY';
+      throw error;
+    }
+
+    const category: CustomCategory = {
+      id,
+      name,
+      icon: normalizeCustomCategoryIcon(input.icon),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await db.runAsync(
+      `INSERT INTO custom_categories (id, name, icon, createdAt, updatedAt, deletedAt)
+       VALUES (?, ?, ?, ?, ?, ?);`,
+      category.id,
+      category.name,
+      category.icon ?? null,
+      category.createdAt,
+      category.updatedAt,
+      null,
+    );
+
+    return category;
+  },
+
+  async deleteCustomCategory(id: ID): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const existing = await db.getFirstAsync<CustomCategoryRow>(
+      'SELECT * FROM custom_categories WHERE id = ? AND deletedAt IS NULL;',
+      id,
+    );
+    if (!existing) return;
+
+    const now = Date.now();
+    await db.runAsync(
+      'UPDATE items SET category = ?, clothingType = ?, updatedAt = ? WHERE category = ? AND deletedAt IS NULL;',
+      'other',
+      'other',
+      now,
+      id,
+    );
+    await db.runAsync(
+      'UPDATE custom_categories SET deletedAt = ?, updatedAt = ? WHERE id = ?;',
+      now,
+      now,
+      id,
+    );
+  },
+
+  async createCustomTag(input: NewCustomTagInput): Promise<CustomTag> {
+    await initDatabase();
+    const db = await getDb();
+    const now = Date.now();
+    const name = normalizeCustomTagName(input.name);
+    const normalizedName = normalizeCustomTagKey(name);
+    if (!name || !normalizedName) throw new Error('Tag name is required.');
+    if (resolvePresetTag(name)) throw new Error('That tag is already included as a preset.');
+
+    const existing = await db.getFirstAsync<CustomTagRow>(
+      'SELECT * FROM custom_tags WHERE normalizedName = ? AND deletedAt IS NULL;',
+      normalizedName,
+    );
+    if (existing) return mapCustomTag(existing);
+
+    const tag: CustomTag = {
+      id: makeId(),
+      name,
+      normalizedName,
+      source: 'user',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await db.runAsync(
+      `INSERT INTO custom_tags (id, name, normalizedName, source, childIdsJson, createdAt, updatedAt, deletedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+      tag.id,
+      tag.name,
+      tag.normalizedName,
+      tag.source,
+      null,
+      tag.createdAt,
+      tag.updatedAt,
+      null,
+    );
+    return tag;
+  },
+
+  async updateCustomTag(id: ID, input: NewCustomTagInput): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const existing = await db.getFirstAsync<CustomTagRow>('SELECT * FROM custom_tags WHERE id = ? AND deletedAt IS NULL;', id);
+    if (!existing) return;
+    const name = normalizeCustomTagName(input.name);
+    const normalizedName = normalizeCustomTagKey(name);
+    if (!name || !normalizedName) throw new Error('Tag name is required.');
+    if (resolvePresetTag(name)) throw new Error('That tag is already included as a preset.');
+
+    const conflict = await db.getFirstAsync<CustomTagRow>(
+      'SELECT * FROM custom_tags WHERE normalizedName = ? AND id != ? AND deletedAt IS NULL;',
+      normalizedName,
+      id,
+    );
+    if (conflict) throw new Error('A custom tag with that name already exists.');
+
+    const itemsWithTags = await db.getAllAsync<{ id: string; tags: string | null }>('SELECT id, tags FROM items WHERE deletedAt IS NULL;');
+    const now = Date.now();
+    for (const row of itemsWithTags) {
+      const parsed = (() => {
+        try {
+          return row.tags ? (JSON.parse(row.tags) as string[]) : [];
+        } catch {
+          return [];
+        }
+      })();
+      const nextTags = parsed.map((entry) => (normalizeCustomTagKey(entry) === existing.normalizedName ? name : entry));
+      if (JSON.stringify(nextTags) === JSON.stringify(parsed)) continue;
+      await db.runAsync('UPDATE items SET tags = ?, updatedAt = ? WHERE id = ?;', JSON.stringify(nextTags), now, row.id);
+      await replaceItemTags(row.id, nextTags);
+    }
+
+    await db.runAsync(
+      'UPDATE custom_tags SET name = ?, normalizedName = ?, childIdsJson = ?, updatedAt = ? WHERE id = ?;',
+      name,
+      normalizedName,
+      null,
+      now,
+      id,
+    );
+  },
+
+  async deleteCustomTag(id: ID): Promise<void> {
+    await initDatabase();
+    const db = await getDb();
+    const existing = await db.getFirstAsync<CustomTagRow>('SELECT * FROM custom_tags WHERE id = ? AND deletedAt IS NULL;', id);
+    if (!existing) return;
+    const now = Date.now();
+    const itemsWithTags = await db.getAllAsync<{ id: string; tags: string | null }>('SELECT id, tags FROM items WHERE deletedAt IS NULL;');
+    for (const row of itemsWithTags) {
+      const parsed = (() => {
+        try {
+          return row.tags ? (JSON.parse(row.tags) as string[]) : [];
+        } catch {
+          return [];
+        }
+      })();
+      const nextTags = parsed.filter((entry) => normalizeCustomTagKey(entry) !== existing.normalizedName);
+      if (nextTags.length === parsed.length) continue;
+      await db.runAsync('UPDATE items SET tags = ?, updatedAt = ? WHERE id = ?;', JSON.stringify(nextTags), now, row.id);
+      await replaceItemTags(row.id, nextTags);
+    }
+    await db.runAsync('UPDATE custom_tags SET deletedAt = ?, updatedAt = ? WHERE id = ?;', now, now, id);
   },
 
   async markItemsWorn(itemIds: ID[], timestamp = Date.now()): Promise<void> {
@@ -2205,6 +2540,8 @@ export const repository = {
       children: data.children,
       items: data.items,
       childItems: data.childItems,
+      customTags: data.customTags,
+      customCategories: data.customCategories,
       storageLocations: data.storageLocations,
       printAliases: data.printAliases,
       purchaseState: data.purchaseState,
@@ -2227,6 +2564,8 @@ export const repository = {
       DELETE FROM tags;
       DELETE FROM brands;
       DELETE FROM print_aliases;
+      DELETE FROM custom_tags;
+      DELETE FROM custom_categories;
       DELETE FROM child_items;
       DELETE FROM storage_locations;
       DELETE FROM purchase_state;
@@ -2240,9 +2579,10 @@ export const repository = {
 
     for (const child of payload.children) {
       await db.runAsync(
-        'INSERT INTO children (id, name, photoUri, notes, hiddenClosetCategories, usesMixedSizes, currentSizeCodes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        'INSERT INTO children (id, name, sortOrder, photoUri, notes, hiddenClosetCategories, usesMixedSizes, currentSizeCodes, apparelSizeCurrent, apparelSizeNext, shoeSizeCurrent, shoeSizeNext, shoeSizeSystem, currentSizeCode, currentSizeOther, nextSizeCode, nextSizeOther, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
         child.id,
         child.name,
+        child.sortOrder ?? 0,
         child.photoUri ?? null,
         child.notes ?? null,
         JSON.stringify(child.hiddenClosetCategories ?? []),
@@ -2347,6 +2687,7 @@ export const repository = {
         ...importItemValues,
       );
       await replaceItemTags(item.id, item.tags);
+      await syncCustomTagRegistry(item.tags);
       await replaceItemBrands(item.id, item.brandTags ?? [item.brand ?? '']);
     }
 
@@ -2364,6 +2705,34 @@ export const repository = {
         link.createdAt,
         link.updatedAt,
         link.deletedAt ?? null,
+      );
+    }
+
+    for (const category of payload.customCategories ?? []) {
+      await db.runAsync(
+        `INSERT INTO custom_categories (id, name, icon, createdAt, updatedAt, deletedAt)
+         VALUES (?, ?, ?, ?, ?, ?);`,
+        category.id,
+        category.name,
+        category.icon ?? null,
+        category.createdAt,
+        category.updatedAt,
+        category.deletedAt ?? null,
+      );
+    }
+
+    for (const tag of payload.customTags ?? []) {
+      await db.runAsync(
+        `INSERT INTO custom_tags (id, name, normalizedName, source, childIdsJson, createdAt, updatedAt, deletedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        tag.id,
+        tag.name,
+        tag.normalizedName,
+        tag.source,
+        null,
+        tag.createdAt,
+        tag.updatedAt,
+        tag.deletedAt ?? null,
       );
     }
 
@@ -2437,8 +2806,8 @@ export const repository = {
 
     for (const draft of payload.saleDrafts ?? []) {
       await db.runAsync(
-        `INSERT INTO sale_drafts (id, title, status, defaultSmokeNote, defaultPetType, defaultPetNote, defaultWashNote, defaultDryingMethod, defaultBundleOffersAccepted, defaultOffersAccepted, defaultShippingNote, defaultPaymentNote, collageGridSize, collageOrderMode, customHeaderImageUri, freeGeneratedCardItemIdsJson, freeGenerationConsumedAt, previewVisitedAt, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        `INSERT INTO sale_drafts (id, title, status, defaultSmokeNote, defaultPetType, defaultPetNote, defaultWashNote, defaultDryingMethod, defaultBundleOffersAccepted, defaultOffersAccepted, defaultShippingNote, defaultPaymentNote, collageGridSize, collageOrderMode, showPricesOnCollage, customHeaderImageUri, freeGeneratedCardItemIdsJson, freeGenerationConsumedAt, previewVisitedAt, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         draft.id,
         draft.title ?? null,
         draft.status,
@@ -2453,6 +2822,7 @@ export const repository = {
         draft.defaultPaymentNote ?? null,
         draft.collageGridSize ?? 'Auto',
         draft.collageOrderMode ?? 'highest-price',
+        draft.showPricesOnCollage ? 1 : 0,
         draft.customHeaderImageUri ?? null,
         JSON.stringify(draft.freeGeneratedCardItemIds ?? []),
         draft.freeGenerationConsumedAt ?? null,
@@ -2498,19 +2868,6 @@ export const repository = {
     await initDatabase();
     const db = await getDb();
     const now = Date.now();
-    const draft: SaleDraft = {
-      id: makeId(),
-      title: normalizeSaleDraftTitle(input.title),
-      status: 'draft',
-      collageGridSize: 'Auto',
-      collageOrderMode: 'highest-price',
-      customHeaderImageUri: undefined,
-      freeGeneratedCardItemIds: [],
-      freeGenerationConsumedAt: undefined,
-      previewVisitedAt: undefined,
-      createdAt: now,
-      updatedAt: now,
-    };
     const uniqueItemIds = Array.from(new Set(input.itemIds));
     const sourceItems = uniqueItemIds.length
       ? await db.getAllAsync<ItemRow>(`SELECT * FROM items WHERE id IN (${uniqueItemIds.map(() => '?').join(', ')});`, ...uniqueItemIds)
@@ -2535,16 +2892,32 @@ export const repository = {
       }
       return (originalIndexById.get(leftId) ?? 0) - (originalIndexById.get(rightId) ?? 0);
     });
+    const draft: SaleDraft = {
+      id: makeId(),
+      title: normalizeSaleDraftTitle(input.title),
+      status: 'draft',
+      collageGridSize: 'Auto',
+      collageOrderMode: 'highest-price',
+      showPricesOnCollage: true,
+      customHeaderImageUri: undefined,
+      freeGeneratedCardItemIds: orderedItemIds.slice(0, FREE_BST_ITEM_CARD_LIMIT),
+      freeGenerationConsumedAt: undefined,
+      // Seed preview state up front so the preview screen can render without an immediate write-back.
+      previewVisitedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
 
     await runInTransaction(db, async () => {
       await db.runAsync(
-        `INSERT INTO sale_drafts (id, title, status, collageGridSize, collageOrderMode, customHeaderImageUri, freeGeneratedCardItemIdsJson, freeGenerationConsumedAt, previewVisitedAt, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        `INSERT INTO sale_drafts (id, title, status, collageGridSize, collageOrderMode, showPricesOnCollage, customHeaderImageUri, freeGeneratedCardItemIdsJson, freeGenerationConsumedAt, previewVisitedAt, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         draft.id,
         draft.title ?? null,
         draft.status,
         draft.collageGridSize,
         draft.collageOrderMode,
+        draft.showPricesOnCollage ? 1 : 0,
         draft.customHeaderImageUri ?? null,
         JSON.stringify(draft.freeGeneratedCardItemIds),
         draft.freeGenerationConsumedAt ?? null,
@@ -2599,6 +2972,7 @@ export const repository = {
       defaultWashNote: patch.defaultWashNote === undefined ? mapSaleDraft(existing).defaultWashNote : normalizeSaleDraftText(patch.defaultWashNote),
       defaultShippingNote: patch.defaultShippingNote === undefined ? mapSaleDraft(existing).defaultShippingNote : normalizeSaleDraftText(patch.defaultShippingNote),
       defaultPaymentNote: patch.defaultPaymentNote === undefined ? mapSaleDraft(existing).defaultPaymentNote : normalizeSaleDraftText(patch.defaultPaymentNote),
+      showPricesOnCollage: patch.showPricesOnCollage === undefined ? mapSaleDraft(existing).showPricesOnCollage : Boolean(patch.showPricesOnCollage),
       customHeaderImageUri: patch.customHeaderImageUri === undefined ? mapSaleDraft(existing).customHeaderImageUri : normalizeSaleDraftText(patch.customHeaderImageUri),
       freeGeneratedCardItemIds: patch.freeGeneratedCardItemIds === undefined ? mapSaleDraft(existing).freeGeneratedCardItemIds : patch.freeGeneratedCardItemIds,
       freeGenerationConsumedAt:
@@ -2609,7 +2983,7 @@ export const repository = {
     };
     await db.runAsync(
       `UPDATE sale_drafts
-       SET title = ?, status = ?, defaultSmokeNote = ?, defaultPetType = ?, defaultPetNote = ?, defaultWashNote = ?, defaultDryingMethod = ?, defaultBundleOffersAccepted = ?, defaultOffersAccepted = ?, defaultShippingNote = ?, defaultPaymentNote = ?, collageGridSize = ?, collageOrderMode = ?, customHeaderImageUri = ?, freeGeneratedCardItemIdsJson = ?, freeGenerationConsumedAt = ?, previewVisitedAt = ?, updatedAt = ?
+       SET title = ?, status = ?, defaultSmokeNote = ?, defaultPetType = ?, defaultPetNote = ?, defaultWashNote = ?, defaultDryingMethod = ?, defaultBundleOffersAccepted = ?, defaultOffersAccepted = ?, defaultShippingNote = ?, defaultPaymentNote = ?, collageGridSize = ?, collageOrderMode = ?, showPricesOnCollage = ?, customHeaderImageUri = ?, freeGeneratedCardItemIdsJson = ?, freeGenerationConsumedAt = ?, previewVisitedAt = ?, updatedAt = ?
        WHERE id = ?;`,
       next.title ?? null,
       next.status,
@@ -2624,6 +2998,7 @@ export const repository = {
       next.defaultPaymentNote ?? null,
       next.collageGridSize ?? 'Auto',
       next.collageOrderMode ?? 'highest-price',
+      next.showPricesOnCollage ? 1 : 0,
       next.customHeaderImageUri ?? null,
       JSON.stringify(next.freeGeneratedCardItemIds ?? []),
       next.freeGenerationConsumedAt ?? null,

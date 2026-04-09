@@ -12,8 +12,8 @@ import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
 import { ClothingType } from '@/models';
 import { ClosetStackParamList } from '@/navigation/types';
-import { ClosetSizeMode, closetCategoryForItem, getSizeAnchors } from '@/utils/closetViewInsights';
-import { ClosetCategory, closetCategoryToClothingType, closetLabel } from '@/utils/categories';
+import { ClosetSizeMode, getSizeAnchors, itemCategoryKey } from '@/utils/closetViewInsights';
+import { closetCategoryToClothingType, getCategoryLabel } from '@/utils/categories';
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { categoryForItem, getChildItems, getDuplicateAdjacentGroups, getSizeUpCounts, getWearingNowByCategory, sizeToNumber } from '@/utils/fitInsights';
 import { normalizePrintName } from '@/utils/printName';
@@ -22,9 +22,10 @@ import { formatSizeDisplay, getChildCurrentSizeText, getChildNextSizeText } from
 import { useAppTheme } from '@/theme';
 import { cacheRemoteImage } from '@/utils/imageCache';
 import { getItemDisplayFallbackUri, getItemDisplayImageUri } from '@/utils/itemMedia';
-import { getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
+import { formatSizeFilterDisplayLabel, getSizeChipTransitionOnTap, normalizeSizeLabel, partitionSizeEntriesForDisplay, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 import { buildBstPostCaption } from '@/utils/bstPost';
 import { copyTextToClipboard, showCopyPostOptions } from '@/utils/copyPostUi';
+import { getItemTagSearchTokens } from '@/utils/tagSystem';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'CategorySnapshot'>;
 
@@ -72,15 +73,16 @@ const tokenMatch = (value: { title: string; printName?: string | null; brand?: s
     .filter(Boolean);
   if (tokens.length === 0) return true;
 
-  const haystack = [value.title, value.printName ?? '', value.brand ?? '', (value.brandTags ?? []).join(' '), (value.tags ?? []).join(' ')].join(' ').toLowerCase();
+  const haystack = [value.title, value.printName ?? '', value.brand ?? '', (value.brandTags ?? []).join(' '), (value.tags ?? []).join(' '), getItemTagSearchTokens({ tags: value.tags ?? [], seasonTags: [] }).join(' ')].join(' ').toLowerCase();
   return tokens.every((token) => haystack.includes(token));
 };
 
 export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) => {
   const theme = useAppTheme();
-  const { children, items, childItems, storageLocations, settings, updateItemCachedImage } = useData();
+  const { children, items, childItems, customCategories, storageLocations, settings, updateItemCachedImage } = useData();
   const child = children.find((entry) => entry.id === route.params.childId);
-  const category = route.params.category as ClosetCategory;
+  const category = route.params.category;
+  const categoryLabel = getCategoryLabel(category, customCategories);
   const [sizeModeFilter, setSizeModeFilter] = useState<ClosetSizeMode>(route.params.sizeMode ?? 'both');
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
   const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>(route.params.brandIds?.length ? route.params.brandIds : route.params.brandId ? [route.params.brandId] : []);
@@ -158,7 +160,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     if (!child) return null;
     const childData = getChildItems(child, items, childItems);
     const linkMap = new Map(childItems.filter((link) => link.childId === child.id).map((link) => [link.itemId, link.storageLocationId ?? '']));
-    const owned = childData.items.filter((item) => item.status === 'owned' && closetCategoryForItem(item) === category);
+    const owned = childData.items.filter((item) => item.status === 'owned' && itemCategoryKey(item) === category);
     return { childData, linkMap, owned };
   }, [child, items, childItems, category]);
 
@@ -193,6 +195,10 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     if (sizeModeFilter === 'both') return presentSizeEntries;
     return activeSizeEntries.length > 0 ? activeSizeEntries : presentSizeEntries;
   }, [sizeModeFilter, activeSizeEntries, presentSizeEntries]);
+  const groupedVisibleExactSizeEntries = useMemo(
+    () => partitionSizeEntriesForDisplay(visibleExactSizeEntries),
+    [visibleExactSizeEntries],
+  );
 
   const activeSizeNormalizedSet = useMemo(() => new Set(activeSizeEntries.map((entry) => entry.normalized)), [activeSizeEntries]);
 
@@ -333,7 +339,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     const { childData, linkMap } = categoryBaseItems;
     const owned = childData.items.filter((item) => {
       if (item.status !== 'owned') return false;
-      if (closetCategoryForItem(item) !== category) return false;
+      if (itemCategoryKey(item) !== category) return false;
       if (locationFilter === 'All') return true;
       const locationId = linkMap.get(item.id) ?? '';
       if (locationFilter === 'Unassigned') return !locationId;
@@ -352,7 +358,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
       : queryFiltered;
     const wearingNowAll = getWearingNowByCategory(childData.items.filter((item) => item.status === 'owned'), child);
     const currentSize = wearingNowAll.get(category);
-    const nextSize = anchors.nextByCategory.get(category);
+    const nextSize = anchors.nextByCategory.get(category as any);
     const currentCount = currentSize ? styleFiltered.filter((item) => item.size === currentSize).length : 0;
     const normalizedNextSize = normalizeSizeLabel(nextSize ?? '');
     const sizeUpsCount = normalizedNextSize
@@ -388,7 +394,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     if (!childData) return [];
     const groups = new Map<string, { printName: string; sizes: Set<string>; count: number }>();
     childData.items
-      .filter((item) => item.status === 'owned' && closetCategoryForItem(item) === category && (item.printNameNorm || item.printName?.trim()))
+      .filter((item) => item.status === 'owned' && itemCategoryKey(item) === category && (item.printNameNorm || item.printName?.trim()))
       .filter((item) => matchesSelectedBrands(item, selectedBrandIds))
       .filter((item) => (styleFilter === 'All' ? true : normalizeStyleName(item.styleName) === normalizeStyleName(styleFilter)))
       .filter((item) => (season ? (item.seasonTags ?? []).some((tag) => tag.toLowerCase().trim() === season.toLowerCase().trim()) : true))
@@ -460,7 +466,6 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
     [child?.name, sizeExportLabel],
   );
   const shareHeaderLine2 = useMemo(() => {
-    const categoryLabel = closetLabel[category] || 'Closet';
     if (selectedBrandIds.length === 1) return `${selectedBrandIds[0]} ${categoryLabel}`;
     if (selectedBrandIds.length > 1) return `${selectedBrandIds.length} brands ${categoryLabel}`;
     return `All brands ${categoryLabel}`;
@@ -541,7 +546,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
   }, [preparingSnapshot, snapshotImageLoadKeys.length]);
   const copyPostToClipboard = useCallback(() => {
     const brandToken = selectedBrandIds.length === 1 ? selectedBrandIds[0] : selectedBrandIds.length > 1 ? `${selectedBrandIds.length} brands` : '';
-    const categoryToken = closetLabel[category] || 'Closet';
+    const categoryToken = categoryLabel || 'Closet';
     const titleLine = `${child?.name ? `${child.name} – ` : ''}${sizeExportLabel} ${[brandToken, categoryToken].filter(Boolean).join(' ')} (${gridItems.length} items)`.replace(/\s+/g, ' ').trim();
     const filters: Array<{ key: string; value: string }> = [];
     if (styleFilter !== 'All') filters.push({ key: 'Style', value: styleFilter });
@@ -617,7 +622,7 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
             <Text style={styles.meta}>Preparing snapshot...</Text>
           </View>
         ) : null}
-        <Text style={[styles.title, { fontFamily: theme.fonts.serif }]}>{child.name} {closetLabel[category]}</Text>
+        <Text style={[styles.title, { fontFamily: theme.fonts.serif }]}>{child.name} {categoryLabel}</Text>
         {query ? <Text style={styles.searchResultsMeta}>Search results for "{query}"</Text> : null}
         <View style={styles.filtersBlock}>
           <View style={styles.sizeToggleWrap}>
@@ -636,16 +641,47 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
                 <Text style={[styles.sizeChipText, compactGrid ? styles.sizeChipTextActive : null]}>{compactGrid ? 'Comfortable Grid' : 'Compact Grid'}</Text>
               </Pressable>
             </View>
-            {visibleExactSizeEntries.length > 0 ? (
+            {groupedVisibleExactSizeEntries.standard.length > 0 ? (
               <View style={styles.sizeToggleRow}>
-                {visibleExactSizeEntries.slice(0, 16).map((entry) => {
+                {groupedVisibleExactSizeEntries.standard.map((entry) => {
                   const active = selectedSizeChip === entry.normalized;
                   return (
-                    <Pressable key={`snapshot-size-${entry.normalized}`} style={[styles.sizeChip, active ? styles.sizeChipActive : null]} onPress={() => selectSpecificSizeChip(entry.label)}>
-                      <Text style={[styles.sizeChipText, active ? styles.sizeChipTextActive : null]}>{entry.label}</Text>
+                    <Pressable
+                      key={`snapshot-size-${entry.normalized}`}
+                      style={[styles.sizeChip, styles.sizeChipCompact, active ? styles.sizeChipActive : null]}
+                      onPress={() => selectSpecificSizeChip(entry.label)}
+                      accessibilityRole="button"
+                      accessibilityLabel={entry.label}
+                    >
+                      <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.sizeChipText, active ? styles.sizeChipTextActive : null]}>
+                        {formatSizeFilterDisplayLabel(entry.label)}
+                      </Text>
                     </Pressable>
                   );
                 })}
+              </View>
+            ) : null}
+            {groupedVisibleExactSizeEntries.custom.length > 0 ? (
+              <View style={styles.customSizeSection}>
+                <Text style={styles.customSizeSectionTitle}>Custom Fit Notes</Text>
+                <View style={styles.customSizeList}>
+                  {groupedVisibleExactSizeEntries.custom.map((entry) => {
+                    const active = selectedSizeChip === entry.normalized;
+                    return (
+                      <Pressable
+                        key={`snapshot-size-note-${entry.normalized}`}
+                        style={[styles.customSizeCard, active ? styles.customSizeCardActive : null]}
+                        onPress={() => selectSpecificSizeChip(entry.label)}
+                        accessibilityRole="button"
+                        accessibilityLabel={entry.label}
+                      >
+                        <Text style={[styles.customSizeCardText, active ? styles.customSizeCardTextActive : null]}>
+                          {formatSizeFilterDisplayLabel(entry.label, { sentenceCase: true })}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               </View>
             ) : null}
           </View>
@@ -701,9 +737,9 @@ export const CategorySnapshotScreen: React.FC<Props> = ({ route, navigation }) =
         {gridItems.length === 0 ? (
           <View style={{ marginTop: 12 }}>
             <EmptyState
-              title={query ? `No search results in ${closetLabel[category]}` : `No ${closetLabel[category]} in ${sizeModeLabel}`}
-              subtitle={query ? `No ${closetLabel[category].toLowerCase()} match "${query}" with the current filters.` : 'Try another filter or add your first item for this category.'}
-              actionLabel={`Add ${closetLabel[category]}`}
+              title={query ? `No search results in ${categoryLabel}` : `No ${categoryLabel} in ${sizeModeLabel}`}
+              subtitle={query ? `No ${categoryLabel.toLowerCase()} match "${query}" with the current filters.` : 'Try another filter or add your first item for this category.'}
+              actionLabel={`Add ${categoryLabel}`}
               onActionPress={addCategoryFromSnapshot}
             />
           </View>
@@ -876,6 +912,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAF5F1',
     borderWidth: 1,
     borderColor: '#EAE1D8',
+    minHeight: 38,
+    justifyContent: 'center',
+  },
+  sizeChipCompact: {
+    maxWidth: 126,
   },
   sizeChipActive: {
     backgroundColor: '#F7E4DE',
@@ -887,6 +928,42 @@ const styles = StyleSheet.create({
     color: '#1F1A17',
   },
   sizeChipTextActive: {
+    color: '#1F1A17',
+  },
+  customSizeSection: {
+    gap: 8,
+    marginTop: 4,
+  },
+  customSizeSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#716A63',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  customSizeList: {
+    gap: 8,
+  },
+  customSizeCard: {
+    width: '100%',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#EAE1D8',
+    backgroundColor: '#F8F2EC',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  customSizeCardActive: {
+    backgroundColor: '#F7E4DE',
+    borderColor: '#E89C8A',
+  },
+  customSizeCardText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#716A63',
+    fontWeight: '500',
+  },
+  customSizeCardTextActive: {
     color: '#1F1A17',
   },
   grid: {

@@ -59,5 +59,23 @@ target 'LayetteOut' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+
+    # Xcode toolchain workaround: fmt's consteval path can fail to compile in Pods
+    # with newer Apple clang versions. Disable it in the vendored pod headers so the
+    # iOS build can complete consistently for this app.
+    fmt_base = File.join(installer.sandbox.root, 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base)
+      content = File.read(fmt_base)
+      unless content.include?('LayetteOut fmt workaround')
+        patched = content.gsub(
+          /^(#elif defined\(__cpp_consteval\)\n#  define FMT_USE_CONSTEVAL) 1/,
+          "\\1 0 // LayetteOut fmt workaround"
+        )
+        if patched != content
+          File.chmod(0644, fmt_base)
+          File.write(fmt_base, patched)
+        end
+      end
+    end
   end
 end

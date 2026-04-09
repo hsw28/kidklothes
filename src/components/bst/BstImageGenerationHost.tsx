@@ -20,6 +20,26 @@ type RenderJob =
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const captureViewShotSafely = async (viewShotRef: React.RefObject<ViewShot | null>): Promise<string> => {
+  const capture = (viewShotRef.current as any)?.capture;
+  if (typeof capture !== 'function') {
+    throw new Error('BST image capture is unavailable right now.');
+  }
+
+  try {
+    const primary = await capture({ format: 'jpg', quality: 0.92, result: 'tmpfile' });
+    if (primary) return primary;
+  } catch {
+    // Try one lighter fallback before surfacing an error.
+  }
+
+  const fallback = await capture({ format: 'jpg', quality: 0.82, result: 'tmpfile' });
+  if (!fallback) {
+    throw new Error('BST image capture failed. Try again in a moment.');
+  }
+  return fallback;
+};
+
 export const BstImageGenerationHost = forwardRef<BstImageGeneratorHandle>((_, ref) => {
   const viewShotRef = useRef<ViewShot | null>(null);
   const readyResolverRef = useRef<(() => void) | null>(null);
@@ -82,14 +102,12 @@ export const BstImageGenerationHost = forwardRef<BstImageGeneratorHandle>((_, re
       await waitForAssets;
       await wait(220);
 
-      const capturedUri = await (viewShotRef.current as any)?.capture?.({ format: 'png', quality: 1, result: 'tmpfile' });
-      if (capturedUri) {
-        uris.push(await persistCapturedUri(capturedUri, job.prefix, index));
-      }
+      const capturedUri = await captureViewShotSafely(viewShotRef);
+      uris.push(await persistCapturedUri(capturedUri, job.prefix, index));
       readyResolverRef.current = null;
       expectedLoadsRef.current = 0;
       setRenderJob({ kind: 'idle' });
-      await wait(60);
+      await wait(120);
     }
     return uris;
   };

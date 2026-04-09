@@ -34,8 +34,10 @@ import { ActivityLogScreen } from '@/screens/ActivityLogScreen';
 import { ActivitySnapshotScreen } from '@/screens/ActivitySnapshotScreen';
 import { PrivacySummaryScreen } from '@/screens/PrivacySummaryScreen';
 import { SellBinScreen } from '@/screens/SellBinScreen';
+import { SiblingMatchesScreen } from '@/screens/SiblingMatchesScreen';
 import { TermsOfServiceScreen } from '@/screens/TermsOfServiceScreen';
 import { TermsSummaryScreen } from '@/screens/TermsSummaryScreen';
+import { ExploreProScreen } from '@/screens/ExploreProScreen';
 import { useData } from '@/db/DataContext';
 import { useAppTheme } from '@/theme';
 import {
@@ -72,6 +74,7 @@ const ClosetStackNavigator = () => {
     <ClosetStack.Screen name="GuidedOrganizing" component={GuidedOrganizingScreen} options={{ title: 'Organize Setup' }} />
     <ClosetStack.Screen name="GuidedSnapshot" component={GuidedSnapshotScreen} options={{ title: 'Snapshot' }} />
     <ClosetStack.Screen name="ClosetHome" component={ClosetHomeScreen} options={{ headerTitle: brandedTitle('Closet') }} />
+    <ClosetStack.Screen name="SiblingMatches" component={SiblingMatchesScreen} options={{ title: 'Sibling Matches' }} />
     <ClosetStack.Screen name="BeforeYouBuy" component={BeforeYouBuyScreen} options={{ title: 'Going Shopping' }} />
     <ClosetStack.Screen name="BrandSnapshot" component={BrandSnapshotScreen} options={{ title: 'Brand Snapshot' }} />
     <ClosetStack.Screen name="DropPrep" component={DropPrepScreen} options={{ headerTitle: brandedTitle('Drop Prep') }} />
@@ -153,6 +156,8 @@ const SettingsStackNavigator = () => {
       }}
     >
       <SettingsStack.Screen name="SettingsHome" component={SettingsScreen} options={{ title: 'Settings' }} />
+      <SettingsStack.Screen name="ExplorePro" component={ExploreProScreen} options={{ title: 'Explore Pro' }} />
+      <SettingsStack.Screen name="ProPaywall" component={ProPaywallScreen} options={{ title: 'Unlock Pro', presentation: 'modal' }} />
       <SettingsStack.Screen name="MissingPhotoRepair" component={MissingPhotoRepairScreen} options={{ title: 'Missing Photos' }} />
       <SettingsStack.Screen name="PrivacySummary" component={PrivacySummaryScreen} options={{ title: 'Privacy Summary' }} />
       <SettingsStack.Screen name="TermsSummary" component={TermsSummaryScreen} options={{ title: 'Terms Summary' }} />

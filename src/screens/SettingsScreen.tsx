@@ -1,30 +1,32 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Linking, PanResponder, PanResponderInstance, Platform, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, PanResponder, PanResponderInstance, Platform, Pressable, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
 import { ChipSelector } from '@/components/ChipSelector';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { ProComingSoonModal } from '@/components/ProComingSoonModal';
 import { ProComingSoonTeaser } from '@/components/ProComingSoonTeaser';
 import { Screen } from '@/components/Screen';
 import { appConfig } from '@/config';
 import { useData } from '@/db/DataContext';
 import { repository } from '@/db/repository';
-import { ActivityEvent, AppSettings, BackupPayload, Child } from '@/models';
+import { BackupRestorePreview, ActivityEvent, AppSettings, Child } from '@/models';
 import { SettingsStackParamList } from '@/navigation/types';
+import { exportBackupArchive, prepareBackupRestore, restorePreparedBackup, shareBackupArchive, cleanupPreparedBackupRestore } from '@/services/backup/manualBackup';
 import { getPostHogDebugState } from '@/services/analytics/posthog';
 import { FREE_BST_DRAFT_LIMIT, countActiveSaleDrafts } from '@/services/bst/bstLimits';
+import { shouldSuppressFoundingOffer } from '@/services/foundingOffer';
 import { getProAccessState } from '@/services/proAccess';
-import { debugPrintPurchasesDiagnostics, getBstProPaywallOptions, getPurchasesDebugSnapshot, PurchasesDebugSnapshot } from '@/services/purchases';
+import { debugPrintPurchasesDiagnostics, getBstProPaywallOptions, getFoundingMemberYearlyOffer, getPurchasesDebugSnapshot, PurchasesDebugSnapshot } from '@/services/purchases';
 import {
   ClosetCategory,
   closetCategories,
   closetLabel,
+  getCategoryGlyphForId,
+  getCategoryLabel,
   getConfiguredKidsPreviewCategories,
   KIDS_PREVIEW_CATEGORIES,
   reorderCategoryList,
-  sanitizeCategoryOrder,
 } from '@/utils/categories';
 import { isAdvancedUnlocked } from '@/utils/featureUnlock';
 import { getChildItems, getCoveredNudges, getDeclutterInsights, getSizeUpCounts, getWearingNowByCategory } from '@/utils/fitInsights';
@@ -32,13 +34,12 @@ import { INVENTORY_REALITY_THRESHOLDS, normalizeInventoryRealityThreshold } from
 import { cacheRemoteImage, findPersistedImageByFilename, isAppOwnedImageUri, persistLocalImage } from '@/utils/imageCache';
 import { getItemLocalImageUri, getItemRemoteImageUri } from '@/utils/itemMedia';
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
-import * as FileSystem from 'expo-file-system';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import Constants from 'expo-constants';
 import { PRIVACY_POLICY_URL } from '@/constants/legal';
+import { useAppToast } from '@/hooks/useAppToast';
 
 const closetAddViewModes: AppSettings['closetAddDefaultView'][] = ['detailed', 'simple'];
 const DEV_SAMPLE_MARKER = '[DEV_SAMPLE_GENERATED]';
@@ -59,6 +60,48 @@ const SOCIAL_LINKS = [
   },
 ];
 
+const getFilenameFromUri = (uri: string): string => {
+  const parts = uri.split('/');
+  return parts[parts.length - 1] || 'backup.zip';
+};
+
+const getBackupErrorMessage = (error: unknown, context: 'open' | 'restore' | 'export'): string => {
+  const raw = error instanceof Error ? error.message : '';
+
+  if (context === 'export') {
+    if (/storage device available/i.test(raw) || /sharing/i.test(raw) || /share/i.test(raw)) {
+      return 'The backup was created, but we could not open the share sheet on this device.';
+    }
+    return raw || 'Could not create a backup zip.';
+  }
+  if (/corrupted/i.test(raw) || /invalid/i.test(raw)) {
+    return 'This backup file looks corrupted and could not be opened.';
+  }
+  if (/missing one or more required files/i.test(raw) || /missing required metadata/i.test(raw)) {
+    return 'This backup is missing required files and cannot be restored.';
+  }
+  if (/newer than this app can restore/i.test(raw) || /schema/i.test(raw) || /item count does not match/i.test(raw) || /image count does not match/i.test(raw)) {
+    return 'This backup is not compatible with this version of the app.';
+  }
+  if (context === 'restore') {
+    return 'Restore failed. Your previous data was restored.';
+  }
+  return 'Could not open this backup.';
+};
+
+const getBackupTimeEstimate = (imageCount: number): string => {
+  if (imageCount >= 1200) return 'around 4-6 minutes';
+  if (imageCount >= 500) return 'around 2-4 minutes';
+  if (imageCount >= 150) return 'around 1-3 minutes';
+  return 'under a minute';
+};
+
+const waitForNextPaint = async () => {
+  await new Promise<void>((resolve) => {
+    setTimeout(() => resolve(), 0);
+  });
+};
+
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<SettingsStackParamList>>();
   const {
@@ -72,24 +115,27 @@ export const SettingsScreen: React.FC = () => {
     items,
     saleDrafts,
     storageLocations,
+    customCategories,
     addChild,
     addItem,
     archiveItems,
     createStorageLocation,
     deleteChild,
     deleteStorageLocation,
-    exportBackup,
     getEvents,
-    importBackup,
+    getEventCount,
   } = useData();
+  const { showToast } = useAppToast();
   const [repairingImages, setRepairingImages] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupStatusMessage, setBackupStatusMessage] = useState<string | undefined>(undefined);
   const [restoreProgress, setRestoreProgress] = useState({ total: 0, processed: 0, recovered: 0, failed: 0, noSource: 0 });
-  const [showProModal, setShowProModal] = useState(false);
   const [bstDebugEvents, setBstDebugEvents] = useState<ActivityEvent[]>([]);
   const [paywallProductsReady, setPaywallProductsReady] = useState<boolean | null>(null);
   const [paywallProductDebug, setPaywallProductDebug] = useState<Array<{ kind: string; title: string; packageIdentifier?: string; available: boolean }>>([]);
   const [purchaseDiagnostics, setPurchaseDiagnostics] = useState<PurchasesDebugSnapshot | null>(null);
   const [posthogDebug, setPosthogDebug] = useState(getPostHogDebugState());
+  const [foundingOfferVisible, setFoundingOfferVisible] = useState(false);
   const versionTapTimesRef = useRef<number[]>([]);
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
   const proAccess = getProAccessState(settings, purchaseState);
@@ -114,6 +160,13 @@ export const SettingsScreen: React.FC = () => {
     () => [...saleDrafts].filter((draft) => draft.status !== 'archived').sort((a, b) => b.updatedAt - a.updatedAt)[0],
     [saleDrafts],
   );
+  const lastBackupLabel = settings.lastBackupAt ? new Date(settings.lastBackupAt).toLocaleString() : 'Never';
+  const approximateManagedImageCount = useMemo(() => {
+    const itemImageCount = items.filter((item) => Boolean(item.cachedImageUri || item.imageUrls?.length || item.imageUrl)).length;
+    const savedDraftImageCount = saleDrafts.filter((draft) => Boolean(draft.customHeaderImageUri)).length;
+    return itemImageCount + savedDraftImageCount;
+  }, [items, saleDrafts]);
+  const exportTimeEstimate = getBackupTimeEstimate(approximateManagedImageCount);
 
   const loadDevBstDebug = React.useCallback(async () => {
     if (!showDeveloperSection) return;
@@ -145,6 +198,29 @@ export const SettingsScreen: React.FC = () => {
     void loadDevBstDebug();
   }, [loadDevBstDebug]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const foundingSummary = await getFoundingMemberYearlyOffer();
+      if (cancelled) return;
+      setFoundingOfferVisible(
+        foundingSummary.status === 'available'
+        && !proAccess.hasProAccess
+        && !shouldSuppressFoundingOffer(settings, purchaseState),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    proAccess.hasProAccess,
+    purchaseState?.isEntitled,
+    settings.guidedOnboarding,
+    settings.guidedOnboardingCompleted,
+    settings.developerModeEnabled,
+    settings.developerForceProAccessEnabled,
+  ]);
+
   const openExternalLink = async (url: string, label: string) => {
     try {
       await Linking.openURL(url);
@@ -153,24 +229,18 @@ export const SettingsScreen: React.FC = () => {
     }
   };
 
-  const updateKidsPreviewCategoryOrder = async (category: ClosetCategory, direction: 'up' | 'down') => {
-    const current = sanitizeCategoryOrder(settings.kidsPreviewCategories, {
-      includeOther: true,
-      fallback: getConfiguredKidsPreviewCategories(settings),
-    });
+  const updateKidsPreviewCategoryOrder = async (category: string, direction: 'up' | 'down') => {
+    const current = getConfiguredKidsPreviewCategories(settings, customCategories);
     await updateSettings({ kidsPreviewCategories: reorderCategoryList(current, category, direction) });
   };
 
-  const toggleKidsPreviewCategory = async (category: ClosetCategory) => {
-    const current = sanitizeCategoryOrder(settings.kidsPreviewCategories, {
-      includeOther: true,
-      fallback: getConfiguredKidsPreviewCategories(settings),
-    });
+  const toggleKidsPreviewCategory = async (category: string) => {
+    const current = getConfiguredKidsPreviewCategories(settings, customCategories);
     const next = current.includes(category)
       ? current.filter((entry) => entry !== category)
       : [...current, category];
     await updateSettings({
-      kidsPreviewCategories: next.length > 0 ? next : [...KIDS_PREVIEW_CATEGORIES],
+      kidsPreviewCategories: next.length > 0 ? next : getConfiguredKidsPreviewCategories(undefined, customCategories),
     });
   };
 
@@ -206,45 +276,117 @@ export const SettingsScreen: React.FC = () => {
     await updateSettings({ lastPromptedAt: Date.now() });
   };
 
-  const exportJsonBackup = async () => {
+  const finishRestorePreview = async (preview?: BackupRestorePreview) => {
+    await cleanupPreparedBackupRestore(preview).catch(() => undefined);
+    setBackupStatusMessage(undefined);
+    setBackupBusy(false);
+  };
+
+  const runRestoreBackup = async (preview: BackupRestorePreview) => {
     try {
-      const payload = await exportBackup();
-      const baseDir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
-      if (!baseDir) {
-        Alert.alert('Export failed', 'No writable directory found.');
-        return;
-      }
-
-      const uri = `${baseDir}layette-out-backup-${Date.now()}.json`;
-      await LegacyFileSystem.writeAsStringAsync(uri, JSON.stringify(payload, null, 2));
-
-      const canShare = await Sharing.isAvailableAsync();
-      if (!canShare) {
-        Alert.alert('Backup saved', `Backup saved locally at:\n${uri}`);
-        return;
-      }
-
-      await Sharing.shareAsync(uri, {
-        dialogTitle: 'Export Layette Out Backup',
-        mimeType: 'application/json',
-      });
-    } catch {
-      Alert.alert('Export failed', 'Could not export backup JSON.');
+      await restorePreparedBackup(preview);
+      await refresh();
+      showToast('Backup restored successfully.', 'success');
+    } catch (error) {
+      const message = getBackupErrorMessage(error, 'restore');
+      showToast(message, 'error');
+    } finally {
+      await finishRestorePreview(preview);
     }
   };
 
-  const importJsonBackup = async () => {
+  const exportAppBackup = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setBackupStatusMessage(`Preparing backup zip. Estimated time: ${exportTimeEstimate}. Keep Layette Out open until the share sheet appears.`);
+    await waitForNextPaint();
     try {
-      const picked = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true });
-      if (picked.canceled) return;
+      const result = await exportBackupArchive();
+      await refresh();
+      const backupFileName = getFilenameFromUri(result.archiveUri);
+      setBackupStatusMessage('Opening the share sheet so you can save the backup.');
+      try {
+        await shareBackupArchive(result.archiveUri);
+        showToast(`Backup exported: ${backupFileName}`, 'success');
+      } catch (shareError) {
+        Alert.alert(
+          'Backup Created',
+          [
+            `We created ${backupFileName}, but could not open the share sheet.`,
+            '',
+            'Your backup file is saved locally at:',
+            result.archiveUri,
+          ].join('\n'),
+        );
+        showToast(`Backup created: ${backupFileName}`, 'success');
+      }
+    } catch (error) {
+      const message = getBackupErrorMessage(error, 'export');
+      showToast(message, 'error');
+    } finally {
+      setBackupStatusMessage(undefined);
+      setBackupBusy(false);
+    }
+  };
+
+  const restoreAppBackup = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setBackupStatusMessage('Opening Files so you can choose a backup zip.');
+    await waitForNextPaint();
+
+    let preview: BackupRestorePreview | undefined;
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: ['application/zip', 'application/x-zip-compressed'],
+        copyToCacheDirectory: true,
+      });
+      if (picked.canceled) {
+        setBackupBusy(false);
+        return;
+      }
 
       const file = picked.assets[0];
-      const raw = await LegacyFileSystem.readAsStringAsync(file.uri);
-      const parsed = JSON.parse(raw) as BackupPayload;
-      await importBackup(parsed);
-      Alert.alert('Import complete', 'Backup was imported successfully.');
-    } catch {
-      Alert.alert('Import failed', 'Could not import backup JSON.');
+      setBackupStatusMessage('Checking the selected backup. Keep Layette Out open while we verify it.');
+      preview = await prepareBackupRestore(file.uri);
+      const preparedPreview = preview;
+      const exportDate = new Date(preparedPreview.manifest.exportedAt).toLocaleString();
+      const restoreTimeEstimate = getBackupTimeEstimate(preparedPreview.manifest.imageCount);
+      Alert.alert(
+        'Restore Backup',
+        [
+          `Exported: ${exportDate}`,
+          `App version: ${preparedPreview.manifest.appVersion}`,
+          `Schema version: ${preparedPreview.manifest.schemaVersion}`,
+          `Items: ${preparedPreview.manifest.itemCount}`,
+          `Images: ${preparedPreview.manifest.imageCount}`,
+          `Estimated time: ${restoreTimeEstimate}`,
+          '',
+          'This will replace current data.',
+          'Keep Layette Out open until restore finishes.',
+        ].join('\n'),
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => {
+              void finishRestorePreview(preparedPreview);
+            },
+          },
+          {
+            text: 'Restore',
+            style: 'destructive',
+            onPress: () => {
+              setBackupStatusMessage(`Restoring backup and replacing current data. Estimated time: ${restoreTimeEstimate}. Keep Layette Out open until this finishes.`);
+              void runRestoreBackup(preparedPreview);
+            },
+          },
+        ],
+      );
+    } catch (error) {
+      await finishRestorePreview(preview);
+      const message = getBackupErrorMessage(error, 'open');
+      showToast(message, 'error');
     }
   };
 
@@ -539,7 +681,19 @@ export const SettingsScreen: React.FC = () => {
           Data stays local. Configure optional reminder nudges and backup/export.
         </Text>
       </Card>
-      {!proAccess.hasProAccess ? <ProComingSoonTeaser variant="card" onPress={() => setShowProModal(true)} /> : null}
+      {!proAccess.hasProAccess ? <ProComingSoonTeaser variant="card" onPress={() => navigation.navigate('ExplorePro')} /> : null}
+      <Card>
+        <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Explore Pro</Text>
+        <Text style={{ color: '#6b7280' }}>
+          Preview premium features and see how Pro can help with matching, selling, and closet organization.
+        </Text>
+        {settings.foundingMemberJoined ? (
+          <Text style={{ color: '#6b7280', fontWeight: '700', marginTop: 8 }}>You’re a Founding Member</Text>
+        ) : foundingOfferVisible ? (
+          <Text style={{ color: '#7c89d9', fontWeight: '700', marginTop: 8 }}>Founding Member pricing available</Text>
+        ) : null}
+        <PrimaryButton label="View Pro features →" variant="secondary" onPress={() => navigation.navigate('ExplorePro')} />
+      </Card>
       <Card>
         <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Follow for Updates</Text>
         <Text style={{ color: '#6b7280' }}>
@@ -645,8 +799,9 @@ export const SettingsScreen: React.FC = () => {
           Configure which categories appear on Kids cards. Closet and Wishlist category layout can be edited directly from those screens (long-press a category, then use the reorder controls).
         </Text>
         <KidsPreviewPrefsEditor
-          ordered={sanitizeCategoryOrder(settings.kidsPreviewCategories, { includeOther: true, fallback: getConfiguredKidsPreviewCategories(settings) })}
-          visible={new Set(getConfiguredKidsPreviewCategories(settings))}
+          ordered={getConfiguredKidsPreviewCategories(settings, customCategories)}
+          visible={new Set(getConfiguredKidsPreviewCategories(settings, customCategories))}
+          customCategories={customCategories}
           onMove={updateKidsPreviewCategoryOrder}
           onToggleVisible={toggleKidsPreviewCategory}
         />
@@ -688,8 +843,38 @@ export const SettingsScreen: React.FC = () => {
       <PrimaryButton label="Run Reminder Check" variant="secondary" onPress={runReminderCheck} />
       {advancedUnlocked ? <PrimaryButton label="Purge Review" variant="secondary" onPress={runPurgeReview} /> : null}
       {advancedUnlocked ? <PrimaryButton label="Size-Up Dashboard" variant="secondary" onPress={runSizeUpCoverage} /> : null}
-      <PrimaryButton label="Export JSON Backup" variant="secondary" onPress={exportJsonBackup} />
-      <PrimaryButton label="Import JSON Backup" variant="secondary" onPress={importJsonBackup} />
+      <Card>
+        <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Backup & Restore</Text>
+        <Text style={{ marginTop: 8, color: '#4b5563' }}>Last Backup Date: {lastBackupLabel}</Text>
+        <Text style={{ marginTop: 8, color: '#6b7280' }}>
+          Export saves app data and app-managed photos to a backup zip outside the app.
+        </Text>
+        <Text style={{ marginTop: 8, color: '#6b7280' }}>
+          Restore replaces current app data with the selected backup.
+        </Text>
+        <Text style={{ marginTop: 8, color: '#6b7280' }}>
+          Backups do not include non-app-managed local files or temporary share-extension data.
+        </Text>
+        <Text style={{ marginTop: 8, color: '#4b5563', fontWeight: '600' }}>
+          Rough export time for your current library: {exportTimeEstimate}
+        </Text>
+        <Text style={{ marginTop: 8, color: '#991b1b', fontWeight: '600' }}>
+          Warning: restoring a backup does not merge changes.
+        </Text>
+        <Text style={{ marginTop: 8, color: '#6b7280' }}>
+          Large backups can take several minutes. Keep the app open until export or restore finishes.
+        </Text>
+      </Card>
+      {backupBusy && backupStatusMessage ? (
+        <Card>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <ActivityIndicator size="small" color="#4B5563" />
+            <Text style={{ flex: 1, color: '#4b5563' }}>{backupStatusMessage}</Text>
+          </View>
+        </Card>
+      ) : null}
+      <PrimaryButton label={backupBusy ? 'Working...' : `Export Backup (${exportTimeEstimate})`} variant="secondary" onPress={exportAppBackup} disabled={backupBusy} />
+      <PrimaryButton label={backupBusy ? 'Working...' : 'Restore Backup'} variant="secondary" onPress={restoreAppBackup} disabled={backupBusy} />
       {!advancedUnlocked ? (
         <Text style={{ color: '#6b7280' }}>Advanced features are locked. Auto-unlock at 20 total items or 12 items for one child, or unlock manually above.</Text>
       ) : null}
@@ -741,6 +926,12 @@ export const SettingsScreen: React.FC = () => {
             value={settings.developerForceProAccessEnabled ? 'On' : 'Off'}
             onChange={(value) => updateSettings({ developerForceProAccessEnabled: value === 'On' })}
           />
+          <ChipSelector
+            label="Act Like First-Time User"
+            options={['Off', 'On']}
+            value={settings.developerActLikeFirstTimeUser ? 'On' : 'Off'}
+            onChange={(value) => updateSettings({ developerActLikeFirstTimeUser: value === 'On' })}
+          />
           <PrimaryButton
             label="Turn Off Developer Mode"
             variant="secondary"
@@ -748,6 +939,7 @@ export const SettingsScreen: React.FC = () => {
               await updateSettings({
                 developerModeEnabled: false,
                 developerForceProAccessEnabled: false,
+                developerActLikeFirstTimeUser: false,
               });
               Alert.alert('Developer Mode Disabled', 'Hidden developer controls are now turned off.');
             }}
@@ -864,7 +1056,7 @@ export const SettingsScreen: React.FC = () => {
         label="Reset Guided Start"
         variant="secondary"
         onPress={async () => {
-          await updateSettings({ guidedOnboardingCompleted: false, guidedOnboarding: true });
+          await updateSettings({ guidedOnboardingCompleted: false, guidedOnboarding: true, hasSeenBstEntryOnboarding: false });
           Alert.alert('Reset', 'Guided start will show again on next Closet launch.');
         }}
       />
@@ -900,11 +1092,6 @@ export const SettingsScreen: React.FC = () => {
           Version {appVersionLabel}{settings.developerModeEnabled ? ' • Developer Mode' : ''}
         </Text>
       </Pressable>
-      <ProComingSoonModal
-        visible={showProModal}
-        onClose={() => setShowProModal(false)}
-        onFeedback={() => { void openKidLimitFeedbackEmail(children.length); }}
-      />
     </Screen>
   );
 };
@@ -1028,17 +1215,18 @@ const DraggableCategoryPrefsEditor: React.FC<DraggableCategoryPrefsEditorProps> 
 };
 
 type KidsPreviewPrefsEditorProps = {
-  ordered: ClosetCategory[];
-  visible: Set<ClosetCategory>;
-  onMove: (category: ClosetCategory, direction: 'up' | 'down') => Promise<void>;
-  onToggleVisible: (category: ClosetCategory) => Promise<void>;
+  ordered: string[];
+  visible: Set<string>;
+  customCategories: Array<{ id: string; name: string; icon?: string }>;
+  onMove: (category: string, direction: 'up' | 'down') => Promise<void>;
+  onToggleVisible: (category: string) => Promise<void>;
 };
 
-const KidsPreviewPrefsEditor: React.FC<KidsPreviewPrefsEditorProps> = ({ ordered, visible, onMove, onToggleVisible }) => (
+const KidsPreviewPrefsEditor: React.FC<KidsPreviewPrefsEditorProps> = ({ ordered, visible, customCategories, onMove, onToggleVisible }) => (
   <View style={{ marginTop: 12, gap: 6 }}>
     <Text style={{ fontWeight: '700', color: '#1f2937' }}>Kids Card Categories</Text>
     <Text style={{ color: '#6b7280' }}>Choose which categories appear on Kids cards and reorder them. All categories are shown by default.</Text>
-    {closetCategories.map((category) => {
+    {ordered.map((category) => {
       const enabled = visible.has(category);
       const index = ordered.indexOf(category);
       return (
@@ -1053,7 +1241,7 @@ const KidsPreviewPrefsEditor: React.FC<KidsPreviewPrefsEditorProps> = ({ ordered
           }}
         >
           <Text style={{ flex: 1, color: enabled ? '#111827' : '#9ca3af' }}>
-            {closetLabel[category]}{enabled ? '' : ' (hidden)'}
+            {getCategoryGlyphForId(category, customCategories)} {getCategoryLabel(category, customCategories)}{enabled ? '' : ' (hidden)'}
           </Text>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Pressable disabled={!enabled || index <= 0} onPress={() => void onMove(category, 'up')}>

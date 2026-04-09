@@ -81,7 +81,14 @@ export const BstSaleDraftListScreen: React.FC<Props> = ({ navigation }) => {
         ))
       )}
 
-      <ProComingSoonModal visible={showProModal} onClose={() => setShowProModal(false)} onFeedback={undefined} />
+      <ProComingSoonModal
+        visible={showProModal}
+        onClose={() => setShowProModal(false)}
+        onUnlock={() => {
+          setShowProModal(false);
+          navigation.navigate('ProPaywall', { entryContext: 'bst' });
+        }}
+      />
     </Screen>
   );
 };

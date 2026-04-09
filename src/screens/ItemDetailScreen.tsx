@@ -11,9 +11,9 @@ import { useReviewPrompt } from '@/hooks/useReviewPrompt';
 import { useUndoToast } from '@/hooks/useUndoToast';
 import { ItemsStackParamList } from '@/navigation/types';
 import { closetCategoryForItem } from '@/utils/closetViewInsights';
-import { closetLabel } from '@/utils/categories';
+import { getCategoryLabel, isCustomCategoryId } from '@/utils/categories';
 import { resolveOutboundLink } from '@/utils/outbound';
-import { formatItemCategoryLabel } from '@/utils/itemLabels';
+import { formatConditionLabel, formatItemCategoryLabel } from '@/utils/itemLabels';
 import { getItemDisplayFallbackUri, getItemDisplayImageUri } from '@/utils/itemMedia';
 
 type Props = NativeStackScreenProps<ItemsStackParamList, 'ItemDetail'>;
@@ -23,6 +23,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     items,
     children,
     childItems,
+    customCategories,
     settings,
     trackOutboundClick,
     markItemsWorn,
@@ -53,6 +54,11 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const linkedChildId = itemLinks[0]?.childId || item?.childIds[0];
   const linkedChildName = linkedChildId ? children.find((child) => child.id === linkedChildId)?.name : undefined;
   const linkedChildNames = children.filter((child) => item?.childIds.includes(child.id)).map((child) => child.name);
+  const [targetResaleInput, setTargetResaleInput] = useState(item?.targetResalePrice?.toString() ?? '');
+
+  useEffect(() => {
+    setTargetResaleInput(item?.targetResalePrice?.toString() ?? '');
+  }, [item?.id, item?.targetResalePrice]);
 
   if (!item) {
     return (
@@ -62,12 +68,6 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   }
 
-  const [targetResaleInput, setTargetResaleInput] = useState(item.targetResalePrice?.toString() ?? '');
-
-  useEffect(() => {
-    setTargetResaleInput(item.targetResalePrice?.toString() ?? '');
-  }, [item.id, item.targetResalePrice]);
-
   const resolvedOutbound = resolveOutboundLink(item.url ?? '', {
     canonicalUrl: item.canonicalUrl ?? item.url,
     monetize: settings.monetizationEnabled,
@@ -75,7 +75,8 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const itemImageUri = getItemDisplayImageUri(item);
   const itemImageFallbackUri = getItemDisplayFallbackUri(item);
   const itemClosetCategory = closetCategoryForItem(item);
-  const categoryLabel = closetLabel[itemClosetCategory];
+  const itemCategoryKey = isCustomCategoryId(item.category) ? item.category : itemClosetCategory;
+  const categoryLabel = getCategoryLabel(itemCategoryKey, customCategories);
   const canOpenCategory = Boolean(linkedChildId);
   const styleName = (item.styleName || '').trim();
   const printName = (item.printName || '').trim();
@@ -139,7 +140,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         {kidFitLabel(item.kidFit) ? <Text style={styles.label}>Fit on Kid: {kidFitLabel(item.kidFit)}</Text> : null}
         {item.brandSizeNote ? <Text style={styles.label}>Fit note: {item.brandSizeNote}</Text> : null}
         {item.status !== 'wishlist' ? <Text style={styles.label}>Worn count: {item.wornCount}</Text> : null}
-        {item.condition ? <Text style={styles.label}>Condition: {item.condition}</Text> : null}
+        {item.condition ? <Text style={styles.label}>Condition: {formatConditionLabel(item.condition)}</Text> : null}
         {item.purchasePrice !== undefined ? <Text style={styles.label}>Purchase price: ${item.purchasePrice.toFixed(2)}</Text> : null}
         {item.status === 'for-sale' ? (
           <>
@@ -199,7 +200,7 @@ export const ItemDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               screen: 'CategorySnapshot',
               params: {
                 childId: linkedChildId,
-                category: itemClosetCategory,
+                category: itemCategoryKey,
                 sizeMode: 'both',
               },
             });

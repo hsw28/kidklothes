@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, Linking, Platform, Pressable, StyleSheet, Text, Vibration, View, useWindowDimensions } from 'react-native';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BstImageGenerationHost } from '@/components/bst/BstImageGenerationHost';
 import { BstCollageRenderer, BstItemCardRenderer } from '@/components/bst/BstAssetRenderers';
@@ -12,6 +12,7 @@ import { ClosetStackParamList } from '@/navigation/types';
 import {
   trackBstCardLimitHit,
   trackBstCollageGenerated,
+  trackBstDraftDeleted,
   trackBstItemCardGenerated,
   trackBstItemCardGeneratedCount,
   trackBstListingTextCopied,
@@ -21,6 +22,8 @@ import { FREE_BST_ITEM_CARD_LIMIT, getRemainingFreeBstCardSlots, sanitizeFreeGen
 import { buildSaleDraftName, resolveSaleDraftItems } from '@/services/bst/draft';
 import { buildCollageViewModels, BstImageGeneratorHandle, generateCollages, generateItemCards } from '@/services/bst/bstImageGenerator';
 import { canGenerateUnlimitedCards, hasProAccess } from '@/services/proAccess';
+import { shouldSuppressFoundingOffer } from '@/services/foundingOffer';
+import { FoundingMemberOfferSummary, getBstProPaywallOptions, getFoundingMemberYearlyOffer } from '@/services/purchases';
 import { buildSaleDraftItemCommentText, buildSaleDraftMainPostText } from '@/services/bst/text';
 import { useAppTheme } from '@/theme';
 import { copyTextToClipboard } from '@/utils/copyPostUi';
@@ -28,69 +31,8 @@ import { ensurePhotoLibrarySavePermission, saveImageToPhotoLibrary } from '@/uti
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'BstSaleDraftPreview'>;
 
-const triggerLightHaptic = () => {
-  try {
-    const Haptics = require('expo-haptics');
-    if (Haptics?.impactAsync && Haptics?.ImpactFeedbackStyle?.Light) {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      return;
-    }
-  } catch {
-    // Fall back to a tiny vibration pulse when haptics isn't available.
-  }
-  Vibration.vibrate(10);
-};
-
-const LockedCardPressable: React.FC<React.PropsWithChildren<{ onUnlock: () => void }>> = ({ onUnlock, children }) => {
-  const scale = useRef(new Animated.Value(1)).current;
-  const unlockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pressedRef = useRef(false);
-
-  useEffect(() => () => {
-    if (unlockTimeoutRef.current) clearTimeout(unlockTimeoutRef.current);
-  }, []);
-
-  const handlePressIn = () => {
-    pressedRef.current = true;
-    if (unlockTimeoutRef.current) {
-      clearTimeout(unlockTimeoutRef.current);
-      unlockTimeoutRef.current = null;
-    }
-    triggerLightHaptic();
-    scale.stopAnimation();
-    Animated.timing(scale, {
-      toValue: 0.97,
-      duration: 90,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    if (!pressedRef.current) return;
-    pressedRef.current = false;
-    scale.stopAnimation();
-    Animated.spring(scale, {
-      toValue: 1,
-      speed: 20,
-      bounciness: 5,
-      useNativeDriver: true,
-    }).start();
-    unlockTimeoutRef.current = setTimeout(() => {
-      onUnlock();
-      unlockTimeoutRef.current = null;
-    }, 70);
-  };
-
-  return (
-    <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut}>
-      <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>
-    </Pressable>
-  );
-};
-
 export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { saleDrafts, saleDraftItems, items, settings, purchaseState, updateSaleDraft, updateSettings, logEvent } = useData();
+  const { saleDrafts, saleDraftItems, items, settings, purchaseState, updateSaleDraft, updateSettings, deleteSaleDraft, logEvent, getEventCount } = useData();
   const theme = useAppTheme();
   const { width: windowWidth } = useWindowDimensions();
   const [capturedCollageUris, setCapturedCollageUris] = useState<string[]>([]);
@@ -100,9 +42,14 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
   const [generationStatus, setGenerationStatus] = useState<string | null>(null);
   const [progressFraction, setProgressFraction] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [statusTarget, setStatusTarget] = useState<'collage' | 'items' | null>(null);
   const [copiedDraftItemIds, setCopiedDraftItemIds] = useState<string[]>([]);
   const [recentlyCopiedDraftItemIds, setRecentlyCopiedDraftItemIds] = useState<string[]>([]);
+  const [recentlyCopiedMainPost, setRecentlyCopiedMainPost] = useState(false);
   const [postedDraftItemIds, setPostedDraftItemIds] = useState<string[]>([]);
+  const [yearlyPriceLabel, setYearlyPriceLabel] = useState('$19.99');
+  const [foundingOffer, setFoundingOffer] = useState<FoundingMemberOfferSummary>({ status: 'inactive' });
+  const [foundingOfferVisible, setFoundingOfferVisible] = useState(false);
   const generatorRef = useRef<BstImageGeneratorHandle | null>(null);
   const didLogOpenRef = useRef(false);
   const hasShownPostingGuideRef = useRef(Boolean(settings.hasSeenBstPostingGuide));
@@ -133,6 +80,22 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
   const shouldShowLockedCards = !unlimitedCards && resolvedItems.length > FREE_BST_ITEM_CARD_LIMIT;
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copiedStateTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const bstPricePrimary = foundingOfferVisible && foundingOffer.discountedPriceString ? foundingOffer.discountedPriceString : yearlyPriceLabel;
+  const itemsRemainingForFullPost = Math.max(0, resolvedItems.length - FREE_BST_ITEM_CARD_LIMIT);
+
+  const renderBstUnlockPrice = () => (
+    <View style={styles.pricingBlock}>
+      <Text style={styles.pricingPrimary}>Finish this post</Text>
+      <View style={styles.priceRow}>
+        {foundingOfferVisible && foundingOffer.discountedPriceString ? (
+          <Text style={styles.introPrice}>{`${foundingOffer.discountedPriceString} founder price`}</Text>
+        ) : (
+          <Text style={styles.standardPrice}>{bstPricePrimary}</Text>
+        )}
+      </View>
+      <Text style={styles.priceCaption}>Add remaining items + export clean images</Text>
+    </View>
+  );
 
   const styles = StyleSheet.create({
     title: {
@@ -167,6 +130,20 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       flexWrap: 'wrap',
       gap: 10,
     },
+    actionBlock: {
+      gap: 8,
+      marginTop: 4,
+    },
+    centeredActionBlock: {
+      alignItems: 'center',
+    },
+    centeredActionButton: {
+      minWidth: 220,
+      alignSelf: 'center',
+    },
+    rightAlignedActions: {
+      justifyContent: 'flex-end',
+    },
     previewStack: {
       gap: 14,
     },
@@ -196,10 +173,15 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       backgroundColor: theme.colors.accentPrimary,
     },
     freeTierCard: {
-      backgroundColor: theme.colors.accentPeriwinkleSoft,
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      paddingVertical: 12,
     },
     lockedPreviewWrap: {
       position: 'relative',
+      overflow: 'hidden',
+      borderRadius: 24,
     },
     lockedPreviewDimmed: {
       opacity: 0.5,
@@ -263,6 +245,48 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       color: theme.colors.textSecondary,
       textAlign: 'center',
     },
+    pricingBlock: {
+      gap: 4,
+    },
+    priceRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    pricingPrimary: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: theme.colors.textPrimary,
+      textAlign: 'center',
+    },
+    introPrice: {
+      fontSize: 20,
+      fontWeight: '800',
+      color: theme.colors.textPrimary,
+    },
+    standardPrice: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: theme.colors.textPrimary,
+      textAlign: 'center',
+    },
+    priceCaption: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+    },
+    pricingValue: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textPrimary,
+      textAlign: 'center',
+    },
+    pricingAlt: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+    },
     unlockSubtext: {
       fontSize: 13,
       lineHeight: 19,
@@ -288,29 +312,26 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       color: theme.colors.textSecondary,
       lineHeight: 18,
     },
-    upgradeSection: {
+    miniUpsell: {
       gap: 8,
       marginTop: 4,
-    },
-    stickyFooter: {
-      marginHorizontal: theme.spacing.screen,
-      marginBottom: 10,
-      backgroundColor: theme.colors.surface,
+      padding: 12,
       borderRadius: 18,
-      borderWidth: theme.isDark ? 1 : 0.5,
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
       borderColor: theme.colors.border,
-      padding: 14,
-      gap: 10,
-      shadowColor: theme.colors.shadow,
-      shadowOpacity: 0.1,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 4,
+      alignItems: 'center',
     },
-    stickyFooterText: {
-      fontSize: 13,
-      fontWeight: '700',
+    miniUpsellTitle: {
+      fontSize: 15,
+      fontWeight: '800',
       color: theme.colors.textPrimary,
+      textAlign: 'center',
+    },
+    miniUpsellBody: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      lineHeight: 18,
       textAlign: 'center',
     },
     helperTitle: {
@@ -318,12 +339,48 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       fontWeight: '700',
       color: theme.colors.textPrimary,
     },
+    detailSummaryCard: {
+      gap: 10,
+    },
+    detailSummaryList: {
+      gap: 4,
+    },
+    detailSummaryLine: {
+      fontSize: 13,
+      lineHeight: 18,
+      color: theme.colors.textSecondary,
+    },
     sectionHeaderWrap: {
       gap: 4,
+    },
+    itemActionStack: {
+      gap: 10,
+    },
+    itemTextSection: {
+      gap: 8,
+    },
+    itemTextLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
+    },
+    itemTextBlock: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceMuted,
+      paddingHorizontal: 14,
+      paddingVertical: 14,
+    },
+    itemTextContent: {
+      fontSize: 14,
+      lineHeight: 21,
+      color: theme.colors.textPrimary,
     },
     commentRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'space-between',
       gap: 12,
       paddingVertical: 10,
       borderBottomWidth: 1,
@@ -340,8 +397,11 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       fontSize: 15,
       fontWeight: '700',
       color: theme.colors.textPrimary,
+      minWidth: 28,
     },
     commentSummary: {
+      flex: 1,
+      minWidth: 0,
       fontSize: 13,
       color: theme.colors.textSecondary,
       lineHeight: 18,
@@ -349,15 +409,23 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
     rowActions: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
+      marginLeft: 8,
+      flexShrink: 0,
     },
     miniAction: {
+      minWidth: 78,
       paddingHorizontal: 12,
       paddingVertical: 8,
       borderRadius: 14,
       backgroundColor: theme.colors.surfaceMuted,
       borderWidth: 1,
       borderColor: theme.colors.border,
+      alignItems: 'center',
+    },
+    editAction: {
+      minWidth: 0,
+      paddingHorizontal: 10,
     },
     miniActionText: {
       fontSize: 13,
@@ -378,6 +446,36 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
     hasShownPostingGuideRef.current = Boolean(settings.hasSeenBstPostingGuide);
   }, [settings.hasSeenBstPostingGuide]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [options, foundingSummary] = await Promise.all([
+        getBstProPaywallOptions(),
+        getFoundingMemberYearlyOffer(),
+      ]);
+      if (cancelled) return;
+      const yearlyOption = options.find((entry) => entry.kind === 'yearly');
+      const normalizedYearlyPrice = yearlyOption?.priceString?.split(' / ')[0]?.trim();
+      if (normalizedYearlyPrice) setYearlyPriceLabel(normalizedYearlyPrice);
+      setFoundingOffer(foundingSummary);
+      setFoundingOfferVisible(
+        foundingSummary.status === 'available'
+        && !proAccessEnabled
+        && !shouldSuppressFoundingOffer(settings, purchaseState),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    proAccessEnabled,
+    purchaseState?.isEntitled,
+    settings.guidedOnboarding,
+    settings.guidedOnboardingCompleted,
+    settings.developerModeEnabled,
+    settings.developerForceProAccessEnabled,
+  ]);
+
   useEffect(() => () => {
     if (copyFeedbackTimeoutRef.current) clearTimeout(copyFeedbackTimeoutRef.current);
     Object.values(copiedStateTimeoutsRef.current).forEach((timeout) => clearTimeout(timeout));
@@ -385,9 +483,6 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
 
   useEffect(() => {
     if (!draft) return;
-    if (!draft.previewVisitedAt) {
-      void updateSaleDraft(draft.id, { previewVisitedAt: Date.now() });
-    }
     if (didLogOpenRef.current) return;
     didLogOpenRef.current = true;
     void trackBstPreviewOpened(logEvent, {
@@ -397,38 +492,14 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       isPro: proAccessEnabled,
       triggeredFrom: 'preview',
     });
-  }, [draft, logEvent, proAccessEnabled, resolvedItems.length, selectedFreeCardDraftItemIds.length, updateSaleDraft]);
+  }, [draft, logEvent, proAccessEnabled, resolvedItems.length, selectedFreeCardDraftItemIds.length]);
 
-  useEffect(() => {
-    if (!draft) return;
-    const storedIds = draft.freeGeneratedCardItemIds ?? [];
-    if (storedIds.length === selectedFreeCardDraftItemIds.length && storedIds.every((id, index) => id === selectedFreeCardDraftItemIds[index])) {
-      return;
-    }
-    void updateSaleDraft(draft.id, { freeGeneratedCardItemIds: selectedFreeCardDraftItemIds });
-  }, [draft?.freeGeneratedCardItemIds, draft?.id, selectedFreeCardDraftItemIds, updateSaleDraft]);
-
-  if (!draft) {
-    return (
-      <Screen>
-        <EmptyState title="Draft not found" subtitle="This BST draft is no longer available." />
-      </Screen>
-    );
-  }
-
-  if (!resolvedItems.length) {
-    return (
-      <Screen>
-        <EmptyState title="No items in this draft" subtitle="Add or restore draft items before generating previews." />
-      </Screen>
-    );
-  }
-
-  const draftName = buildSaleDraftName(draft);
-  const mainPostText = buildSaleDraftMainPostText(draft, resolvedItems);
+  const draftName = draft ? buildSaleDraftName(draft) : 'BST Draft';
+  const mainPostText = draft ? buildSaleDraftMainPostText(draft, resolvedItems) : '';
   const goToPaywall = (
     source: 'bst_card_limit' | 'bst_draft_limit' | 'bst_locked_export' | 'bst_locked_card' | 'bst_save_all_cards' | 'bst_save_collage_locked',
   ) => {
+    if (!draft) return;
     if (source !== 'bst_draft_limit') {
       void trackBstCardLimitHit(logEvent, {
         draftId: draft.id,
@@ -439,20 +510,31 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
         triggeredFrom: source,
       });
     }
-    navigation.navigate('ProPaywall', { source, draftId: draft.id, totalItems: resolvedItems.length });
+    navigation.navigate('ProPaywall', { source, draftId: draft.id, totalItems: resolvedItems.length, entryContext: 'bst' });
+  };
+
+  const showFreePreviewUsedPrompt = () => {
+    Alert.alert(
+      'Free preview used for this post',
+      'Finish your post to include all items',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Finish this post', onPress: () => goToPaywall('bst_save_all_cards') },
+      ],
+    );
   };
 
   const getOrCreateFreeUnlockIds = async () => {
+    if (!draft) return undefined;
     if (unlimitedCards) return resolvedItems.map((entry) => entry.draftItem.id);
     if (selectedFreeCardDraftItemIds.length > 0) return selectedFreeCardDraftItemIds;
     if (freeGenerationConsumed) {
-      goToPaywall('bst_card_limit');
+      showFreePreviewUsedPrompt();
       return undefined;
     }
     const nextUnlockIds = resolvedItems.slice(0, FREE_BST_ITEM_CARD_LIMIT).map((entry) => entry.draftItem.id);
     await updateSaleDraft(draft.id, {
       freeGeneratedCardItemIds: nextUnlockIds,
-      freeGenerationConsumedAt: Date.now(),
     });
     return nextUnlockIds;
   };
@@ -460,6 +542,7 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
   const generateAssets = async ({ includeCollage = true, includeItemCards = true }: { includeCollage?: boolean; includeItemCards?: boolean } = {}) => {
     if (!draft || generating) return;
     try {
+      setStatusTarget(includeItemCards ? 'items' : 'collage');
       setGenerating(true);
       setGenerationStatus(includeCollage && includeItemCards ? 'Preparing BST images…' : includeItemCards ? 'Preparing item images…' : 'Preparing collage…');
       setProgressFraction(0.04);
@@ -556,6 +639,7 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
   };
 
   const copyText = (label: string, text: string, locked = false) => {
+    if (!draft) return;
     if (locked) {
       goToPaywall('bst_locked_export');
       return;
@@ -605,6 +689,14 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
     }, 1500);
   };
 
+  const copyMainPostText = () => {
+    copyText('Post text', mainPostText);
+    setRecentlyCopiedMainPost(true);
+    setTimeout(() => {
+      setRecentlyCopiedMainPost(false);
+    }, 1500);
+  };
+
   const openPhotosApp = async () => {
     const url = Platform.select({
       ios: 'photos-redirect://',
@@ -640,7 +732,9 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       'Saved to Photos',
       collageIncluded
         ? `Saved ${savedCount} images ✔\n1 collage + ${itemCardCount} item card${itemCardCount === 1 ? '' : 's'}`
-        : `Saved ${savedCount} free item${savedCount === 1 ? '' : 's'} ✔\nUnlock to export all items`,
+        : unlimitedCards
+          ? `Saved ${savedCount} item card${savedCount === 1 ? '' : 's'} ✔`
+          : `Saved ${savedCount} free item${savedCount === 1 ? '' : 's'} ✔\nUnlock to export all items`,
       [
         {
           text: 'Open Photos',
@@ -667,7 +761,13 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
   };
 
   const handleSaveItemCards = async () => {
+    if (!draft) return;
     if (exporting || generating) return;
+    if (!unlimitedCards && freeGenerationConsumed) {
+      showFreePreviewUsedPrompt();
+      return;
+    }
+    setStatusTarget('items');
     setExporting(true);
     setGenerationStatus('Saving item cards…');
     setProgressFraction(0.08);
@@ -697,6 +797,9 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
         setProgressFraction(totalToSave > 0 ? 0.82 + ((savedCount / totalToSave) * 0.18) : 0.9);
       }
       if (savedCount > 0) {
+        if (!unlimitedCards && !freeGenerationConsumed) {
+          await updateSaleDraft(draft.id, { freeGenerationConsumedAt: Date.now() });
+        }
         showExportSuccess(savedCount, orderedUris.length, false);
         setCopyFeedback('Saved — open Facebook to post');
         if (copyFeedbackTimeoutRef.current) clearTimeout(copyFeedbackTimeoutRef.current);
@@ -720,7 +823,13 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
   };
 
   const handleSaveCollage = async () => {
+    if (!draft) return;
     if (exporting || generating) return;
+    if (!unlimitedCards) {
+      goToPaywall('bst_save_collage_locked');
+      return;
+    }
+    setStatusTarget('collage');
     setExporting(true);
     setGenerationStatus('Saving collage…');
     setProgressFraction(0.08);
@@ -783,8 +892,8 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
     }
   };
 
-  const renderSaveStatus = () =>
-    generating || exporting || generationStatus || copyFeedback ? (
+  const renderSaveStatus = (target: 'collage' | 'items') =>
+    statusTarget === target && (generating || exporting || generationStatus || copyFeedback) ? (
       <View style={styles.progressWrap}>
         {(generating || exporting) && progressFraction !== null ? (
           <View style={styles.progressTrack}>
@@ -798,31 +907,105 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
       </View>
     ) : null;
 
+  const confirmDeleteDraft = () => {
+    if (!draft) return;
+    const deletingDraftId = draft.id;
+    const deletingItemCount = resolvedItems.length;
+    Alert.alert(
+      'Delete draft?',
+      'Delete this draft? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete draft',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                await deleteSaleDraft(deletingDraftId);
+                navigation.replace('BstSaleDraftList');
+                void trackBstDraftDeleted(logEvent, {
+                  draftId: deletingDraftId,
+                  itemCount: deletingItemCount,
+                  triggeredFrom: 'draft_preview',
+                });
+              } catch (error) {
+                const message = error instanceof Error && error.message ? error.message : 'Try deleting the draft again.';
+                Alert.alert('Unable to delete draft', message);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable
+          onPress={confirmDeleteDraft}
+          accessibilityRole="button"
+          accessibilityLabel="More actions"
+          hitSlop={8}
+        >
+          <Text style={{ color: theme.colors.textPrimary, fontSize: 24, lineHeight: 24, fontWeight: '600' }}>⋯</Text>
+        </Pressable>
+      ),
+    });
+  }, [navigation, theme.colors.textPrimary, draft?.id, resolvedItems.length]);
+
+  if (!draft) {
+    return (
+      <Screen>
+        <EmptyState title="Draft not found" subtitle="This BST draft is no longer available." />
+      </Screen>
+    );
+  }
+
+  if (!resolvedItems.length) {
+    return (
+      <Screen>
+        <EmptyState title="No items in this draft" subtitle="Add or restore draft items before generating previews." />
+      </Screen>
+    );
+  }
+
   return (
-    <Screen
-      style={!unlimitedCards && shouldShowLockedCards ? { paddingBottom: theme.spacing.section + 110 } : undefined}
-      overlay={
-        !unlimitedCards && shouldShowLockedCards ? (
-          <View style={styles.stickyFooter}>
-            <Text style={styles.stickyFooterText}>Unlock all items • $9.99</Text>
-            <PrimaryButton label="Unlock all items" onPress={() => goToPaywall('bst_save_all_cards')} />
-          </View>
-        ) : undefined
-      }
-    >
+    <Screen>
       <Card>
         <Text style={styles.title}>Your post is almost ready</Text>
-        <Text style={styles.previewNote}>{`Post to Facebook in 3 steps:\n\n1. Save your images\n2. Paste post\n3. Copy items into comments`}</Text>
+        <Text style={styles.previewNote}>{`Post in 3 steps:\n\n1. Save post image\n2. Copy caption\n3. Save comment cards`}</Text>
+      </Card>
+
+      <Card style={styles.detailSummaryCard}>
+        <Text style={styles.sectionTitle}>Post details & defaults</Text>
+        <Text style={styles.body}>Edit the BST settings for this post, including wash notes, drying, smoke, pets, and offers.</Text>
+        <View style={styles.detailSummaryList}>
+          <Text style={styles.detailSummaryLine}>Wash note: {draft.defaultWashNote?.trim() || 'Not set'}</Text>
+          <Text style={styles.detailSummaryLine}>Drying: {draft.defaultDryingMethod || 'Not set'}</Text>
+          <Text style={styles.detailSummaryLine}>Smoke: {draft.defaultSmokeNote || 'Not set'}</Text>
+          <Text style={styles.detailSummaryLine}>
+            Pets: {draft.defaultPetTypes?.length ? draft.defaultPetTypes.join(', ') : 'Not set'}
+          </Text>
+          <Text style={styles.detailSummaryLine}>
+            Offers: {draft.defaultOffersAccepted === undefined ? 'Not set' : draft.defaultOffersAccepted ? 'Accepted' : 'Not accepted'}
+          </Text>
+          <Text style={styles.detailSummaryLine}>
+            Bundle offers: {draft.defaultBundleOffersAccepted === undefined ? 'Not set' : draft.defaultBundleOffersAccepted ? 'Accepted' : 'Not accepted'}
+          </Text>
+        </View>
+        <PrimaryButton
+          label="Edit post details"
+          variant="secondary"
+          onPress={() => navigation.navigate('BstSaleDraftEditor', { draftId: draft.id })}
+        />
       </Card>
 
       {!unlimitedCards ? (
         <Card style={styles.freeTierCard}>
-          <Text style={styles.sectionTitle}>Finish your post</Text>
-          <Text style={styles.body}>{`${FREE_BST_ITEM_CARD_LIMIT} of ${resolvedItems.length} items included — unlock the rest and export clean images`}</Text>
-          <View style={styles.upgradeSection}>
-            <Text style={styles.unlockButtonNote}>Ready to post in seconds</Text>
-            <PrimaryButton label="Unlock all items" onPress={() => goToPaywall('bst_save_all_cards')} />
-          </View>
+          <Text style={styles.body}>{`${FREE_BST_ITEM_CARD_LIMIT} of ${resolvedItems.length} items included — add ${itemsRemainingForFullPost} more to finish`}</Text>
+          {renderBstUnlockPrice()}
         </Card>
       ) : null}
 
@@ -831,6 +1014,16 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
           <Text style={styles.sectionTitle}>Images</Text>
         </View>
         <Text style={styles.helperTitle}>Main post image</Text>
+        {!usingCustomHeaderImage ? (
+          <View style={styles.actions}>
+            <PrimaryButton
+              label={draft.showPricesOnCollage ? 'Hide prices on collage' : 'Show prices on collage'}
+              variant="secondary"
+              onPress={() => void updateSaleDraft(draft.id, { showPricesOnCollage: !draft.showPricesOnCollage })}
+              disabled={generating || exporting}
+            />
+          </View>
+        ) : null}
         <View style={styles.previewStack}>
           {usingCustomHeaderImage && customHeaderImageUri ? (
             <View style={{ gap: 10 }}>
@@ -845,6 +1038,7 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
                   pageCount={page.pageCount}
                   items={page.items}
                   pageSize={page.pageSize}
+                  showPricesOnCollage={page.showPricesOnCollage}
                   width={previewWidth}
                   brandingMode={brandingMode}
                   previewMode={!unlimitedCards ? 'free-preview' : 'export'}
@@ -853,55 +1047,58 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
             ))
           )}
         </View>
-        <View style={styles.actions}>
+        <View style={[styles.actions, styles.centeredActionBlock]}>
           <PrimaryButton
-            label={exporting || generating ? 'Saving collage…' : 'Save collage'}
+            label={exporting || generating ? 'Saving post image…' : 'Save post image'}
+            style={styles.centeredActionButton}
             onPress={() => void handleSaveCollage()}
             disabled={generating || exporting}
           />
         </View>
-        <Text style={styles.helperTitle}>Comment images</Text>
-        <View style={styles.actions}>
+        {!unlimitedCards ? (
+          <View style={styles.miniUpsell}>
+            <Text style={styles.miniUpsellTitle}>Clean collage export</Text>
+            <Text style={styles.miniUpsellBody}>Export clean post image (no watermark overlay)</Text>
+          </View>
+        ) : null}
+        {!unlimitedCards ? (
+          <View style={styles.limitCallout}>
+            <Text style={styles.limitTitle}>{`${FREE_BST_ITEM_CARD_LIMIT} of ${resolvedItems.length} items included — add ${itemsRemainingForFullPost} more to finish`}</Text>
+          </View>
+        ) : null}
+        {renderSaveStatus('collage')}
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Caption</Text>
+        <View style={styles.textBlock}>
+          <Text style={styles.textContent}>{mainPostText}</Text>
+        </View>
+        <View style={styles.actionBlock}>
+          {recentlyCopiedMainPost ? (
+            <PrimaryButton label="Copied ✓" variant="secondary" disabled onPress={() => undefined} />
+          ) : (
+            <PrimaryButton label="Copy caption" variant="secondary" onPress={copyMainPostText} disabled={generating} />
+          )}
+          <Text style={styles.body}>Check group rules to see if they have specific formatting rules for sale posts.</Text>
+        </View>
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Item cards</Text>
+        <Text style={styles.body}>Each card includes the image plus the text you&apos;ll paste into comments below your post.</Text>
+        <View style={[styles.actions, styles.centeredActionBlock]}>
           <PrimaryButton
-            label={exporting || generating ? 'Saving item images…' : !unlimitedCards ? 'Save item images (2 free)' : 'Save item images'}
-            variant="secondary"
+            label={exporting || generating ? 'Saving item cards…' : !unlimitedCards ? 'Save item cards (2 free)' : 'Save item cards'}
+            style={styles.centeredActionButton}
             onPress={() => void handleSaveItemCards()}
             disabled={generating || exporting}
           />
         </View>
-        {!unlimitedCards ? (
-          <>
-            <View style={styles.limitCallout}>
-              <Text style={styles.limitTitle}>{`2 of ${resolvedItems.length} items included`}</Text>
-              <Text style={styles.limitBody}>Save 2 items free</Text>
-              <Text style={styles.limitBody}>Unlock all items for full export</Text>
-            </View>
-            <View style={styles.actions}>
-              <PrimaryButton label="Unlock all items" onPress={() => goToPaywall('bst_save_all_cards')} />
-            </View>
-          </>
-        ) : null}
-        {renderSaveStatus()}
-      </Card>
-
-      <Card>
-        <Text style={styles.sectionTitle}>Post text</Text>
-        <View style={styles.textBlock}>
-          <Text style={styles.textContent}>{mainPostText}</Text>
-        </View>
-        <Text style={styles.body}>Check group rules to see if they have specific formatting rules for sale posts.</Text>
-        <View style={styles.actions}>
-          <PrimaryButton label="Copy post" variant="secondary" onPress={() => copyText('Post text', mainPostText)} disabled={generating} />
-        </View>
-      </Card>
-
-      <Card>
-        <Text style={styles.sectionTitle}>Item comments</Text>
-        <Text style={styles.body}>Copy each item&apos;s comment below your post</Text>
+        {renderSaveStatus('items')}
         {!unlimitedCards ? (
           <View style={styles.limitCallout}>
-            <Text style={styles.limitTitle}>{`${FREE_BST_ITEM_CARD_LIMIT} of ${resolvedItems.length} items included`}</Text>
-            <Text style={styles.limitBody}>Unlock all items to export the rest</Text>
+            <Text style={styles.limitTitle}>{`${FREE_BST_ITEM_CARD_LIMIT} of ${resolvedItems.length} items included — add ${itemsRemainingForFullPost} more to finish`}</Text>
           </View>
         ) : null}
         {resolvedItems.map((entry) => {
@@ -917,55 +1114,72 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
             <View key={entry.draftItem.id} style={styles.itemSection}>
               {!unlimitedCards ? <Text style={styles.stateLabel}>{showLockedCard ? 'Locked' : 'Included'}</Text> : null}
               <View style={[styles.previewStack, styles.lockedPreviewWrap]}>
-                <Pressable
-                  onPress={() => navigation.navigate('BstSaleDraftEditor', { draftId: draft.id, editDraftItemId: entry.draftItem.id })}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Edit item ${entry.draftItem.itemNumber}`}
-                  style={showLockedCard ? styles.lockedPreviewDimmed : undefined}
-                >
-                  <BstItemCardRenderer
-                    draftTitle={draftName}
-                    entry={entry}
-                    width={previewWidth}
-                    brandingMode={brandingMode}
-                    previewMode={showLockedCard ? 'free-preview' : 'export'}
-                  />
-                </Pressable>
                 {showLockedCard ? (
-                  <LockedCardPressable onUnlock={() => goToPaywall('bst_locked_card')}>
-                    <View style={styles.lockedOverlay}>
-                      <Text style={styles.lockedOverlayTitle}>Locked</Text>
-                      <Text style={styles.lockedOverlayBody}>Unlock to export</Text>
-                    </View>
-                  </LockedCardPressable>
+                  <View style={styles.lockedPreviewDimmed}>
+                    <BstItemCardRenderer
+                      draftTitle={draftName}
+                      entry={entry}
+                      width={previewWidth}
+                      brandingMode={brandingMode}
+                      previewMode="free-preview"
+                    />
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={() => navigation.navigate('BstSaleDraftEditor', { draftId: draft.id, editDraftItemId: entry.draftItem.id, returnToPreview: true })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit item ${entry.draftItem.itemNumber}`}
+                  >
+                    <BstItemCardRenderer
+                      draftTitle={draftName}
+                      entry={entry}
+                      width={previewWidth}
+                      brandingMode={brandingMode}
+                      previewMode="export"
+                    />
+                  </Pressable>
+                )}
+                {showLockedCard ? (
+                  <View style={styles.lockedOverlay}>
+                    <Text style={styles.lockedOverlayTitle}>Locked</Text>
+                    <Text style={styles.lockedOverlayBody}>Included with full post</Text>
+                  </View>
                 ) : null}
               </View>
-              <View style={styles.commentRow}>
-                <View style={styles.commentInfo}>
-                  <Text style={styles.commentNumber}>#{entry.draftItem.itemNumber}</Text>
-                  <Text numberOfLines={1} style={styles.commentSummary}>{summary || entry.inventoryItem.title}</Text>
+              {showLockedCard ? (
+                <View style={styles.commentRow}>
+                  <View style={styles.commentInfo}>
+                    <Text style={styles.commentNumber}>#{entry.draftItem.itemNumber}</Text>
+                    <Text numberOfLines={1} style={styles.commentSummary}>{summary || entry.inventoryItem.title}</Text>
+                  </View>
                 </View>
-                <View style={styles.rowActions}>
-                  {showLockedCard ? (
-                    <Pressable style={styles.miniAction} onPress={() => goToPaywall('bst_locked_card')}>
-                      <Text style={styles.miniActionText}>Unlock</Text>
-                    </Pressable>
-                  ) : (
-                    <>
+              ) : (
+                <View style={styles.itemActionStack}>
+                  <View style={styles.actionBlock}>
+                    <PrimaryButton
+                      label="Edit item details"
+                      variant="secondary"
+                      onPress={() => navigation.navigate('BstSaleDraftEditor', { draftId: draft.id, editDraftItemId: entry.draftItem.id, returnToPreview: true })}
+                    />
+                  </View>
+                  <View style={styles.itemTextSection}>
+                    <Text style={styles.itemTextLabel}>Comment text</Text>
+                    <View style={styles.itemTextBlock}>
+                      <Text style={styles.itemTextContent}>{buildSaleDraftItemCommentText(entry)}</Text>
+                    </View>
+                    <View style={styles.actionBlock}>
                       {!copied ? (
-                        <Pressable
-                          style={styles.miniAction}
+                        <PrimaryButton
+                          label="Copy comment text"
+                          variant="secondary"
                           onPress={() => copyItemComment(entry.draftItem.id, entry.draftItem.itemNumber, buildSaleDraftItemCommentText(entry))}
-                        >
-                          <Text style={styles.miniActionText}>Copy</Text>
-                        </Pressable>
+                        />
                       ) : recentlyCopied ? (
-                        <View style={styles.miniAction}>
-                          <Text style={styles.miniActionText}>Copied ✓</Text>
-                        </View>
+                        <PrimaryButton label="Copied ✓" variant="secondary" disabled onPress={() => undefined} />
                       ) : (
-                        <Pressable
-                          style={[styles.miniAction, isPosted ? styles.postedChip : undefined]}
+                        <PrimaryButton
+                          label={isPosted ? 'Posted' : 'Mark posted'}
+                          variant="secondary"
                           onPress={() => {
                             setPostedDraftItemIds((current) =>
                               current.includes(entry.draftItem.id)
@@ -973,26 +1187,15 @@ export const BstSaleDraftPreviewScreen: React.FC<Props> = ({ route, navigation }
                                 : [...current, entry.draftItem.id],
                             );
                           }}
-                        >
-                          <Text style={styles.miniActionText}>{isPosted ? 'Posted' : 'Mark posted'}</Text>
-                        </Pressable>
+                        />
                       )}
-                    </>
-                  )}
+                    </View>
+                  </View>
                 </View>
-              </View>
+              )}
             </View>
           );
         })}
-        {!unlimitedCards && shouldShowLockedCards ? (
-          <>
-            <Text style={styles.body}>Unlock all items to export the rest</Text>
-            <View style={styles.actions}>
-              <PrimaryButton label="Unlock all items" onPress={() => goToPaywall('bst_save_all_cards')} />
-              <PrimaryButton label="Post with 2 items (free)" variant="secondary" onPress={() => undefined} />
-            </View>
-          </>
-        ) : null}
       </Card>
       <BstImageGenerationHost ref={generatorRef} />
     </Screen>

@@ -9,6 +9,7 @@ type ExtraConfig = {
   REVENUECAT_OFFERING_ID?: string;
   REVENUECAT_PRO_ENTITLEMENT_ID?: string;
   MONETIZATION_ENABLED?: boolean | string;
+  FOUNDING_MEMBER_ENABLED?: boolean | string;
   DEFAULT_PACKAGE_IDENTIFIER?: string;
   UPSELL_TRIGGER_COUNT?: number | string;
   POSTHOG_API_KEY?: string;
@@ -26,6 +27,11 @@ const upsellTriggerCount =
   typeof upsellTriggerRaw === 'number'
     ? upsellTriggerRaw
     : Number.parseInt(String(upsellTriggerRaw ?? ''), 10) || 6;
+const foundingMemberFlag = extra.FOUNDING_MEMBER_ENABLED;
+const foundingMemberEnabled =
+  typeof foundingMemberFlag === 'boolean'
+    ? foundingMemberFlag
+    : String(foundingMemberFlag ?? '').toLowerCase() === 'true';
 
 const normalizeUnfurlBaseUrl = (input?: string): string => {
   const raw = String(input ?? '').trim();
@@ -79,6 +85,9 @@ export const appConfig = {
     androidApiKey: (extra.REVENUECAT_ANDROID_API_KEY ?? '').trim(),
     offeringId: (extra.REVENUECAT_OFFERING_ID ?? 'default').trim() || 'default',
     entitlementId: (extra.REVENUECAT_PRO_ENTITLEMENT_ID ?? 'layette_out_pro').trim() || 'layette_out_pro',
+  },
+  foundingMember: {
+    enabled: foundingMemberEnabled,
   },
   posthog: {
     apiKey: (extra.POSTHOG_API_KEY ?? '').trim(),

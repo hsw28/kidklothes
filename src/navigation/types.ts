@@ -12,7 +12,8 @@ export type RootTabParamList = {
 
 export type ItemsStackParamList = {
   ProPaywall:
-    | {
+      | {
+        entryContext?: 'bst' | 'sibling_matching' | 'photo_expansion' | 'closet_power' | 'tag_power' | 'generic_pro';
         source?:
           | 'bst_card_limit'
           | 'bst_draft_limit'
@@ -20,7 +21,12 @@ export type ItemsStackParamList = {
           | 'bst_locked_card'
           | 'bst_save_all_cards'
           | 'bst_save_collage_locked'
-          | 'item_multi_photo';
+          | 'item_multi_photo'
+          | 'sibling_matching'
+          | 'settings'
+          | 'sell_bin'
+          | 'closet'
+          | 'explore_pro';
         draftId?: ID;
         totalItems?: number;
       }
@@ -57,6 +63,7 @@ export type ClosetStackParamList = {
   GuidedOrganizing: undefined;
   GuidedSnapshot: { childId: ID; currentSize: string; clothingType: ClothingType };
   ClosetHome: { showFirstKidAddedHint?: boolean; revealLatestAdd?: boolean } | undefined;
+  SiblingMatches: undefined;
   BeforeYouBuy: { childId?: ID } | undefined;
   BrandSnapshot: { childId?: ID } | undefined;
   DropPrep: { childId?: ID } | undefined;
@@ -83,7 +90,8 @@ export type ClosetStackParamList = {
     | undefined;
   SellBin: undefined;
   ProPaywall:
-    | {
+      | {
+        entryContext?: 'bst' | 'sibling_matching' | 'photo_expansion' | 'closet_power' | 'tag_power' | 'generic_pro';
         source?:
           | 'bst_card_limit'
           | 'bst_draft_limit'
@@ -91,14 +99,19 @@ export type ClosetStackParamList = {
           | 'bst_locked_card'
           | 'bst_save_all_cards'
           | 'bst_save_collage_locked'
-          | 'item_multi_photo';
+          | 'item_multi_photo'
+          | 'sibling_matching'
+          | 'settings'
+          | 'sell_bin'
+          | 'closet'
+          | 'explore_pro';
         draftId?: ID;
         totalItems?: number;
       }
     | undefined;
   BstSaleDraftList: undefined;
   BstSaleDraftCreate: { prefillItemIds?: ID[] } | undefined;
-  BstSaleDraftEditor: { draftId: ID; editDraftItemId?: ID };
+  BstSaleDraftEditor: { draftId: ID; editDraftItemId?: ID; returnToPreview?: boolean; cardTextOnly?: boolean };
   BstSaleDraftPreview: { draftId: ID; previewMode?: 'full' | 'teaser' };
   CategorySnapshot: { childId: ID; category: string; sizeMode?: ClosetSizeMode; brandId?: string; brandIds?: string[]; season?: string; query?: string; locationFilter?: string };
   OutfitsList: undefined;
@@ -115,6 +128,26 @@ export type KidsStackParamList = {
 
 export type SettingsStackParamList = {
   SettingsHome: undefined;
+  ProPaywall:
+    | {
+        source?:
+          | 'bst_card_limit'
+          | 'bst_draft_limit'
+          | 'bst_locked_export'
+          | 'bst_locked_card'
+          | 'bst_save_all_cards'
+          | 'bst_save_collage_locked'
+          | 'item_multi_photo'
+          | 'sibling_matching'
+          | 'settings'
+          | 'explore_pro'
+          | 'closet';
+        draftId?: ID;
+        totalItems?: number;
+        entryContext?: 'bst' | 'sibling_matching' | 'photo_expansion' | 'closet_power' | 'tag_power' | 'generic_pro';
+      }
+    | undefined;
+  ExplorePro: undefined;
   MissingPhotoRepair: undefined;
   PrivacySummary: undefined;
   TermsSummary: undefined;

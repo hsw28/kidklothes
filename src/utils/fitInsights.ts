@@ -1,5 +1,5 @@
 import { Child, ChildItem, Item } from '@/models';
-import { ClosetCategory, normalizeItemCategoryToClosetCategory } from './categories';
+import { ClosetCategory, isCustomCategoryId, normalizeItemCategoryToClosetCategory } from './categories';
 import { getChildCurrentSizeText, getChildNextSizeText } from './sizes';
 
 type ChildItemData = {
@@ -25,6 +25,7 @@ export const sizeToNumber = (size: string): number | undefined => {
 export const categoryForItem = (item: Item): string => {
   if (item.clothingType === 'top') return 'tops';
   if (item.clothingType === 'bottom') return 'pants';
+  if (item.clothingType === 'other') return 'other';
   return item.clothingType;
 };
 
@@ -117,9 +118,10 @@ const CATEGORY_FALLBACK_SAFE_BY_TYPE: Partial<Record<Item['clothingType'], Close
 
 const matchesWishlistAwarenessCategory = (
   item: Item,
-  input: { clothingType: Item['clothingType']; category?: ClosetCategory },
+  input: { clothingType: Item['clothingType']; category?: string },
 ) => {
   if (!input.category) return item.clothingType === input.clothingType;
+  if (isCustomCategoryId(input.category)) return item.category === input.category;
 
   const normalizedCategory = normalizeItemCategoryToClosetCategory(item.category);
   if (normalizedCategory) return normalizedCategory === input.category;
@@ -130,7 +132,7 @@ const matchesWishlistAwarenessCategory = (
 
 export const getWishlistAwareness = (
   items: Item[],
-  input: { childId: string; clothingType: Item['clothingType']; size: string; category?: ClosetCategory },
+  input: { childId: string; clothingType: Item['clothingType']; size: string; category?: string },
 ) => {
   const matching = items.filter(
     (item) =>

@@ -1,5 +1,5 @@
 import { Child, ChildItem, ID, Item, StorageLocation } from '@/models';
-import { ClosetCategory, closetCategories, closetLabel, closetCategoryToClothingType, normalizeItemCategoryToClosetCategory } from './categories';
+import { ClosetCategory, closetCategories, closetLabel, closetCategoryToClothingType, isCustomCategoryId, normalizeItemCategoryToClosetCategory } from './categories';
 import { sizeToNumber } from './fitInsights';
 import { normalizePrintName } from './printName';
 import { getChildCurrentSizeText, getChildNextSizeText } from './sizes';
@@ -26,11 +26,18 @@ export const closetCategoryForItem = (item: Item): ClosetCategory => {
       return 'shoes';
     case 'dress':
       return 'dresses-skirts';
+    case 'other':
+      return 'other';
     case 'accessory':
       return 'accessories';
     default:
       return 'other';
   }
+};
+
+export const itemCategoryKey = (item: Item): string => {
+  if (isCustomCategoryId(item.category)) return item.category;
+  return closetCategoryForItem(item);
 };
 
 export const getVisibleClosetCategories = (child?: Child): ClosetCategory[] => {
@@ -143,6 +150,7 @@ export const categoryCounts = (
     outerwear: 0,
     shoes: 0,
     accessories: 0,
+    'cloth-diapers': 0,
     other: 0,
   };
 

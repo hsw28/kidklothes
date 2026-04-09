@@ -1,7 +1,29 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
 const imageCacheDir = `${FileSystem.documentDirectory ?? ''}layetteout-images/`;
-const APP_IMAGE_DIR_MARKER = '/layetteout-images/';
+const MANAGED_MEDIA_DIR_NAMES = ['layetteout-images', 'outfit-previews', 'bst-exports'] as const;
+const LEGACY_MANAGED_MEDIA_DIR_NAMES = ['layetteout-photos'] as const;
+const MANAGED_MEDIA_DIR_MARKERS = [...MANAGED_MEDIA_DIR_NAMES, ...LEGACY_MANAGED_MEDIA_DIR_NAMES].map((name) => `/${name}/`);
+
+export const getAppImageCacheDirectoryUri = (): string | undefined => {
+  if (!FileSystem.documentDirectory) return undefined;
+  return imageCacheDir;
+};
+
+export const getManagedMediaDirectoryUris = (): string[] => {
+  const roots = [FileSystem.documentDirectory, FileSystem.cacheDirectory].filter(Boolean) as string[];
+  const seen = new Set<string>();
+  const uris: string[] = [];
+  for (const root of roots) {
+    for (const name of [...MANAGED_MEDIA_DIR_NAMES, ...LEGACY_MANAGED_MEDIA_DIR_NAMES]) {
+      const uri = `${root}${name}/`;
+      if (seen.has(uri)) continue;
+      seen.add(uri);
+      uris.push(uri);
+    }
+  }
+  return uris;
+};
 
 const ensureCacheDir = async () => {
   if (!FileSystem.documentDirectory) return;
@@ -31,7 +53,7 @@ export const cacheRemoteImage = async (itemId: string, url: string): Promise<str
 export const isAppOwnedImageUri = (uri?: string | null): boolean => {
   const value = (uri ?? '').trim();
   if (!value) return false;
-  return value.includes(APP_IMAGE_DIR_MARKER);
+  return MANAGED_MEDIA_DIR_MARKERS.some((marker) => value.includes(marker));
 };
 
 const basenameFromUri = (uri: string): string | undefined => {
@@ -45,13 +67,15 @@ const basenameFromUri = (uri: string): string | undefined => {
 
 export const findPersistedImageByFilename = async (uri: string): Promise<string | undefined> => {
   const fileName = basenameFromUri(uri);
-  if (!fileName || !FileSystem.documentDirectory) return undefined;
-  const candidate = `${imageCacheDir}${fileName}`;
-  try {
-    const info = await FileSystem.getInfoAsync(candidate);
-    if (info.exists) return candidate;
-  } catch {
-    return undefined;
+  if (!fileName) return undefined;
+  for (const directoryUri of getManagedMediaDirectoryUris()) {
+    const candidate = `${directoryUri}${fileName}`;
+    try {
+      const info = await FileSystem.getInfoAsync(candidate);
+      if (info.exists) return candidate;
+    } catch {
+      // continue scanning the remaining managed directories
+    }
   }
   return undefined;
 };

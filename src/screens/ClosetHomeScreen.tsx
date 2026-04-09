@@ -7,12 +7,12 @@ import ViewShot from 'react-native-view-shot';
 import { Card } from '@/components/Card';
 import { BetaKidLimitModal } from '@/components/BetaKidLimitModal';
 import { ChipSelector } from '@/components/ChipSelector';
+import { CustomCategoryModal } from '@/components/CustomCategoryModal';
 import { DraggableCategoryPrefsEditor } from '@/components/DraggableCategoryPrefsEditor';
 import { EmptyState } from '@/components/EmptyState';
 import { FirstRunOnboardingModal } from '@/components/FirstRunOnboardingModal';
 import { FloatingActionButton } from '@/components/FloatingActionButton';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { ProComingSoonModal } from '@/components/ProComingSoonModal';
 import { ProComingSoonTeaser } from '@/components/ProComingSoonTeaser';
 import { FormInput } from '@/components/FormInput';
 import { RemoteImage } from '@/components/RemoteImage';
@@ -27,12 +27,14 @@ import {
   getDuplicatePrintGroups,
   getNewThisWeek,
   getOwnedItemsForChild,
+  itemCategoryKey,
   getSizeAnchors,
   getSizeUpsStash,
+  getSpecialLocationIds,
   getVisibleClosetCategories,
   topBrands,
 } from '@/utils/closetViewInsights';
-import { ClosetCategory, categoryGlyph, closetCategories, closetCategoryToClothingType, closetLabel, getCategoryEmptyMicrocopy, getConfiguredClosetCategories, sanitizeCategoryOrder, sanitizeHiddenCategories } from '@/utils/categories';
+import { ClosetCategory, categoryGlyph, closetCategories, closetCategoryToClothingType, closetLabel, getCategoryGlyphForId, getCategoryLabel, getConfiguredClosetCategories, sanitizeCategoryOrder, sanitizeHiddenCategories } from '@/utils/categories';
 import { extractPrintWords, normalizePrintName } from '@/utils/printName';
 import { normalizeStyleName } from '@/utils/styleName';
 import { formatPieceCount } from '@/utils/formatCounts';
@@ -40,13 +42,16 @@ import { formatItemCategoryLabel, getBrandShortLabel } from '@/utils/itemLabels'
 import { getItemDisplayFallbackUri, getItemDisplayImageUri } from '@/utils/itemMedia';
 import { cacheRemoteImage } from '@/utils/imageCache';
 import { showActionMenu } from '@/utils/actionSheets';
-import { compareSizeLabels, getSizeChipTransitionOnTap, normalizeSizeLabel, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
+import { compareSizeLabels, formatSizeFilterDisplayLabel, getSizeChipTransitionOnTap, normalizeSizeLabel, partitionSizeEntriesForDisplay, uniqueSortedSizeEntries } from '@/utils/sizeOrder';
 import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 import { hasProAccess } from '@/services/proAccess';
+import { shouldSuppressFoundingOffer } from '@/services/foundingOffer';
+import { getFoundingMemberYearlyOffer } from '@/services/purchases';
 import { getChildCurrentSizeText, getChildCurrentSizeTexts, getChildNextSizeText } from '@/utils/sizes';
 import { buildEmptyCategoryLabel } from '@/utils/closetEmptyLabel';
 import { buildBstPostCaption } from '@/utils/bstPost';
 import { copyTextToClipboard, showCopyPostOptions } from '@/utils/copyPostUi';
+import { classifyItemTags, getItemTagSearchTokens } from '@/utils/tagSystem';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'ClosetHome'>;
 
@@ -279,7 +284,9 @@ const PrintWordCloud: React.FC<PrintWordCloudProps> = ({ entries, colors, onPres
 };
 
 type TileProps = {
-  category: ClosetCategory;
+  tileId: string;
+  label: string;
+  glyph: string;
   count: number;
   thumbs: string[];
   emptyLabel?: string;
@@ -304,7 +311,9 @@ type TileProps = {
 };
 
 const ClosetTileComponent: React.FC<TileProps> = ({
-  category,
+  tileId,
+  label,
+  glyph,
   count,
   thumbs,
   emptyLabel,
@@ -650,10 +659,10 @@ const ClosetTileComponent: React.FC<TileProps> = ({
         style={styles.tile}
         onLayout={(event) => {
           const { x, y, width, height } = event.nativeEvent.layout;
-          onTileLayout?.(category, x, y, width, height);
+          onTileLayout?.(tileId as ClosetCategory, x, y, width, height);
         }}
         accessibilityRole="button"
-        accessibilityLabel={`${closetLabel[category]} category, ${formatPieceCount(count)}`}
+        accessibilityLabel={`${label} category, ${formatPieceCount(count)}`}
       >
         {isReorderMode ? (
           <View style={styles.reorderBadge}>
@@ -667,7 +676,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               disabled={!canMoveUp}
               style={[styles.reorderCtrlBtn, !canMoveUp ? styles.reorderCtrlBtnDisabled : null]}
               accessibilityRole="button"
-              accessibilityLabel={`Move ${closetLabel[category]} up`}
+              accessibilityLabel={`Move ${label} up`}
             >
               <Text style={styles.reorderCtrlTxt}>↑</Text>
             </Pressable>
@@ -676,7 +685,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               disabled={!canMoveLeft}
               style={[styles.reorderCtrlBtn, !canMoveLeft ? styles.reorderCtrlBtnDisabled : null]}
               accessibilityRole="button"
-              accessibilityLabel={`Move ${closetLabel[category]} left`}
+              accessibilityLabel={`Move ${label} left`}
             >
               <Text style={styles.reorderCtrlTxt}>←</Text>
             </Pressable>
@@ -685,7 +694,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               disabled={!canMoveRight}
               style={[styles.reorderCtrlBtn, !canMoveRight ? styles.reorderCtrlBtnDisabled : null]}
               accessibilityRole="button"
-              accessibilityLabel={`Move ${closetLabel[category]} right`}
+              accessibilityLabel={`Move ${label} right`}
             >
               <Text style={styles.reorderCtrlTxt}>→</Text>
             </Pressable>
@@ -694,7 +703,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
               disabled={!canMoveDown}
               style={[styles.reorderCtrlBtn, !canMoveDown ? styles.reorderCtrlBtnDisabled : null]}
               accessibilityRole="button"
-              accessibilityLabel={`Move ${closetLabel[category]} down`}
+              accessibilityLabel={`Move ${label} down`}
             >
               <Text style={styles.reorderCtrlTxt}>↓</Text>
             </Pressable>
@@ -733,49 +742,49 @@ const ClosetTileComponent: React.FC<TileProps> = ({
                 <RemoteImage
                   uri={heroImages[0]}
                   style={[styles.heroImage, heroWidth ? { width: heroWidth } : { width: '100%' }]}
-                  fallbackLabel={closetLabel[category]}
+                  fallbackLabel={label}
                 />
               </View>
             ) : (
-            <FlatList
-              data={heroImages}
-              keyExtractor={(uri, index) => `${category}-${uri}-${index}`}
-              horizontal
-              pagingEnabled
-              initialNumToRender={1}
-              windowSize={3}
-              maxToRenderPerBatch={2}
-              removeClippedSubviews
-              nestedScrollEnabled
-              directionalLockEnabled
-              scrollEventThrottle={16}
-              showsHorizontalScrollIndicator={false}
-              style={styles.heroPager}
-              scrollEnabled={!isReorderMode && heroImages.length > 1}
-              onTouchStart={() => { heroDidDragRef.current = false; }}
-              onScrollBeginDrag={() => { heroDidDragRef.current = true; }}
-              onMomentumScrollEnd={(event) => {
-                const width = heroWidth || event.nativeEvent.layoutMeasurement.width || 1;
-                const nextIndex = Math.round(event.nativeEvent.contentOffset.x / width);
-                if (nextIndex !== heroIndex) setHeroIndex(nextIndex);
-              }}
-              renderItem={({ item }) => (
-                <View style={[styles.heroPage, heroWidth ? { width: heroWidth } : { width: '100%' }]}>
-                  <RemoteImage
-                    uri={item}
-                    style={[styles.heroImage, heroWidth ? { width: heroWidth } : { width: '100%' }]}
-                    fallbackLabel={closetLabel[category]}
-                  />
-                </View>
-              )}
-            />
+              <FlatList
+                data={heroImages}
+                keyExtractor={(uri, index) => `${tileId}-${uri}-${index}`}
+                horizontal
+                pagingEnabled
+                initialNumToRender={1}
+                windowSize={3}
+                maxToRenderPerBatch={2}
+                removeClippedSubviews
+                nestedScrollEnabled
+                directionalLockEnabled
+                scrollEventThrottle={16}
+                showsHorizontalScrollIndicator={false}
+                style={styles.heroPager}
+                scrollEnabled={!isReorderMode && heroImages.length > 1}
+                onTouchStart={() => { heroDidDragRef.current = false; }}
+                onScrollBeginDrag={() => { heroDidDragRef.current = true; }}
+                onMomentumScrollEnd={(event) => {
+                  const width = heroWidth || event.nativeEvent.layoutMeasurement.width || 1;
+                  const nextIndex = Math.round(event.nativeEvent.contentOffset.x / width);
+                  if (nextIndex !== heroIndex) setHeroIndex(nextIndex);
+                }}
+                renderItem={({ item }) => (
+                  <View style={[styles.heroPage, heroWidth ? { width: heroWidth } : { width: '100%' }]}>
+                    <RemoteImage
+                      uri={item}
+                      style={[styles.heroImage, heroWidth ? { width: heroWidth } : { width: '100%' }]}
+                      fallbackLabel={label}
+                    />
+                  </View>
+                )}
+              />
             )
           ) : (
             <>
               <View style={styles.heroPlaceholderStackBack} />
               <View style={styles.heroPlaceholderStackFront}>
-                <Text style={styles.heroPlaceholderGlyph}>{categoryGlyph[category]}</Text>
-                <Text numberOfLines={2} style={styles.heroPlaceholderCopy}>{emptyLabel || getCategoryEmptyMicrocopy(category, count)}</Text>
+                <Text style={styles.heroPlaceholderGlyph}>{glyph}</Text>
+                <Text numberOfLines={2} style={styles.heroPlaceholderCopy}>{emptyLabel}</Text>
               </View>
             </>
           )}
@@ -783,14 +792,14 @@ const ClosetTileComponent: React.FC<TileProps> = ({
             <>
               <View style={styles.heroDots} pointerEvents="none">
                 {heroImages.slice(0, 5).map((_, index) => (
-                  <View key={`${category}-dot-${index}`} style={[styles.heroDot, index === heroIndex ? styles.heroDotActive : null]} />
+                  <View key={`${tileId}-dot-${index}`} style={[styles.heroDot, index === heroIndex ? styles.heroDotActive : null]} />
                 ))}
               </View>
               <View style={styles.heroChevron} pointerEvents="none">
                 <Text style={styles.heroChevronText}>›</Text>
               </View>
             </>
-          ) : null}
+	      ) : null}
           {activeBrandLabel ? (
             <View
               style={styles.brandChip}
@@ -807,7 +816,7 @@ const ClosetTileComponent: React.FC<TileProps> = ({
             </View>
           ) : null}
         </View>
-        <Text style={styles.label}>{closetLabel[category]}</Text>
+        <Text style={styles.label}>{label}</Text>
         <Text style={styles.count}>{countLabel}</Text>
       </Pressable>
     </Animated.View>
@@ -818,7 +827,9 @@ const shallowEqualThumbs = (a: string[], b: string[]) =>
   a.length === b.length && a.every((value, index) => value === b[index]);
 
 const ClosetTile = React.memo(ClosetTileComponent, (prev, next) =>
-  prev.category === next.category
+  prev.tileId === next.tileId
+  && prev.label === next.label
+  && prev.glyph === next.glyph
   && prev.count === next.count
   && prev.emptyLabel === next.emptyLabel
   && prev.hasUps === next.hasUps
@@ -921,16 +932,18 @@ const RecentlyAddedItemCardComponent: React.FC<RecentlyAddedItemCardProps> = ({ 
 const RecentlyAddedItemCard = React.memo(RecentlyAddedItemCardComponent);
 
 export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { children, items, childItems, storageLocations, settings, purchaseState, loading, logEvent, updateChild, updateSettings, canCreateAnotherKid, updateItemCachedImage } = useData();
+  const { children, items, childItems, customTags, customCategories, storageLocations, settings, purchaseState, loading, logEvent, getEventCount, updateChild, updateSettings, canCreateAnotherKid, updateItemCachedImage, createCustomCategory, deleteCustomCategory } = useData();
   const [childId, setChildId] = useState(children[0]?.id ?? '');
   const [sizeMode, setSizeMode] = useState<ClosetSizeMode>('now');
   const [selectedSizeChip, setSelectedSizeChip] = useState<string | null>(null);
   const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>([]);
+  const [tagFilter, setTagFilter] = useState<string>('All');
   const [seasonFilter, setSeasonFilter] = useState<string>('All');
   const [locationFilter, setLocationFilter] = useState<string>('All');
   const [closetSearch, setClosetSearch] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showCategoryLayoutEditor, setShowCategoryLayoutEditor] = useState(false);
+  const [showCustomCategoryModal, setShowCustomCategoryModal] = useState(false);
   const [showTileGridReorderMode, setShowTileGridReorderMode] = useState(false);
   const [tileGridOrder, setTileGridOrder] = useState<ClosetCategory[]>([]);
   const [showNew, setShowNew] = useState(false);
@@ -940,7 +953,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const [showModesModal, setShowModesModal] = useState(false);
   const [showFirstKidAddedHint, setShowFirstKidAddedHint] = useState(false);
   const [showFirstRunOnboarding, setShowFirstRunOnboarding] = useState(false);
-  const [showProModal, setShowProModal] = useState(false);
+  const [devFirstTimePreviewDismissed, setDevFirstTimePreviewDismissed] = useState(false);
+  const [foundingOfferVisible, setFoundingOfferVisible] = useState(false);
   const [preparingClosetSnapshot, setPreparingClosetSnapshot] = useState(false);
   const [copiedPostToastVisible, setCopiedPostToastVisible] = useState(false);
   const [showClosetSnapshotRenderer, setShowClosetSnapshotRenderer] = useState(false);
@@ -949,6 +963,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const sizeModeOverridesRef = useRef<Record<string, ClosetSizeMode>>({});
   const lastDefaultedChildRef = useRef<string>('');
   const loggedBrandChangeRef = useRef(false);
+  const loggedTagChangeRef = useRef(false);
   const loggedSeasonChangeRef = useRef(false);
   const tileOrderRef = useRef<ClosetCategory[]>([]);
   const tileLayoutsRef = useRef<Record<string, { x: number; y: number; width: number; height: number }>>({});
@@ -975,6 +990,36 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
   const proAccessEnabled = hasProAccess(settings, purchaseState);
   const selectedChild = children.find((child) => child.id === childId) ?? children[0];
+  const siblingMatchingAvailable = useMemo(
+    () => children.filter((child) => !child.deletedAt).length >= 2,
+    [children],
+  );
+  const sellReadyCount = useMemo(() => {
+    const sellBinLocationIdsByChildId = new Map(children.map((child) => [child.id, getSpecialLocationIds(child.id, storageLocations).sellBinLocationId]));
+    const sellStatusByItemId = new Map<string, 'for-sale' | 'sold'>();
+    items.forEach((item) => {
+      const itemLinks = childItems.filter((link) => link.itemId === item.id);
+      if (itemLinks.length === 0) return;
+      let resolved: 'for-sale' | 'sold' | null = null;
+      itemLinks.forEach((link) => {
+        const effectiveStatus = link.statusForChild ?? item.status;
+        const sellBinLocationId = sellBinLocationIdsByChildId.get(link.childId);
+        if (sellBinLocationId && link.storageLocationId === sellBinLocationId) {
+          resolved = effectiveStatus === 'sold' ? 'sold' : 'for-sale';
+          return;
+        }
+        if (effectiveStatus === 'for-sale') {
+          resolved = 'for-sale';
+          return;
+        }
+        if (!resolved && effectiveStatus === 'sold') {
+          resolved = 'sold';
+        }
+      });
+      if (resolved) sellStatusByItemId.set(item.id, resolved);
+    });
+    return Array.from(sellStatusByItemId.values()).filter((status) => status === 'for-sale').length;
+  }, [childItems, children, items, storageLocations]);
 
   useEffect(() => {
     if (!__DEV__ || !settings.developerModeEnabled) return;
@@ -990,6 +1035,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         childId: selectedChild?.id ?? null,
         sizeMode,
         brandId: selectedBrandIds.join(','),
+        tagFilter,
         seasonFilter,
       });
     }
@@ -1024,6 +1070,37 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       fontSize: 13,
       color: theme.colors.textSecondary,
       marginTop: -4,
+    },
+    bstInlineRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceMuted,
+    },
+    bstInlineCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    bstInlineTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
+    },
+    bstInlineSubtitle: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      lineHeight: 18,
+    },
+    bstInlineChevron: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
     },
     grid: {
       flexDirection: 'row',
@@ -1188,6 +1265,19 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       color: theme.colors.accentPeriwinkle,
       fontWeight: '700',
     },
+    proBadge: {
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      backgroundColor: theme.colors.accentPeriwinkleSoft,
+    },
+    proBadgeText: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: theme.colors.accentPeriwinkle,
+      letterSpacing: 0.2,
+      textTransform: 'uppercase',
+    },
     wordCloudWrap: {
       marginTop: 18,
       position: 'relative',
@@ -1335,6 +1425,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       backgroundColor: theme.colors.chipBg,
       borderWidth: 1,
       borderColor: theme.colors.border,
+      minHeight: 40,
+      justifyContent: 'center',
+    },
+    sizeToggleChipCompact: {
+      maxWidth: 126,
     },
     sizeToggleChipActive: {
       backgroundColor: theme.colors.accentPrimarySoft,
@@ -1354,6 +1449,42 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       color: theme.colors.textSecondary,
       textTransform: 'uppercase',
       letterSpacing: 0.6,
+    },
+    customSizeSection: {
+      gap: 8,
+      marginTop: 4,
+    },
+    customSizeSectionTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    customSizeList: {
+      gap: 8,
+    },
+    customSizeCard: {
+      width: '100%',
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceMuted,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    customSizeCardActive: {
+      backgroundColor: theme.colors.accentPrimarySoft,
+      borderColor: theme.colors.accentPrimary,
+    },
+    customSizeCardText: {
+      fontSize: 13,
+      lineHeight: 18,
+      color: theme.colors.textSecondary,
+      fontWeight: '500',
+    },
+    customSizeCardTextActive: {
+      color: theme.colors.textPrimary,
     },
     topBrandModeText: {
       fontSize: 12,
@@ -1545,17 +1676,25 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   });
 
   useEffect(() => {
-    if (!settings.guidedOnboardingCompleted) return;
+    if (!settings.guidedOnboardingCompleted || settings.developerActLikeFirstTimeUser) return;
     hasAutoPromptedGuidedRef.current = true;
-  }, [settings.guidedOnboardingCompleted]);
+  }, [settings.developerActLikeFirstTimeUser, settings.guidedOnboardingCompleted]);
+  useEffect(() => {
+    if (settings.developerActLikeFirstTimeUser) return;
+    setDevFirstTimePreviewDismissed(false);
+  }, [settings.developerActLikeFirstTimeUser]);
   useEffect(() => {
     if (loading) return;
-    if (settings.guidedOnboardingCompleted) {
+    if (settings.developerActLikeFirstTimeUser) {
+      setShowFirstRunOnboarding(!devFirstTimePreviewDismissed);
+      return;
+    }
+    if ((!settings.guidedOnboarding || settings.guidedOnboardingCompleted) && !settings.developerActLikeFirstTimeUser) {
       setShowFirstRunOnboarding(false);
       return;
     }
     setShowFirstRunOnboarding(true);
-  }, [loading, settings.guidedOnboardingCompleted]);
+  }, [devFirstTimePreviewDismissed, loading, settings.developerActLikeFirstTimeUser, settings.guidedOnboarding, settings.guidedOnboardingCompleted]);
   useEffect(() => {
     closetSnapshotImageLoadedMapRef.current = closetSnapshotImageLoadedMap;
   }, [closetSnapshotImageLoadedMap]);
@@ -1577,6 +1716,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     setSizeMode((current) => (current === 'both' ? current : 'both'));
     setSelectedSizeChip((current) => (current ? null : current));
     setSelectedBrandIds((current) => (current.length > 0 ? [] : current));
+    setTagFilter((current) => (current === 'All' ? current : 'All'));
     setSeasonFilter((current) => (current === 'All' ? current : 'All'));
     setClosetSearch((current) => (current ? '' : current));
     navigation.setParams({ revealLatestAdd: undefined });
@@ -1613,6 +1753,10 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!selectedChild) return [];
     return getOwnedItemsForChild(selectedChild.id, items, childItems);
   }, [selectedChild, items, childItems]);
+  const allOwnedItems = useMemo(
+    () => items.filter((item) => item.status === 'owned' && !item.deletedAt),
+    [items],
+  );
   const sizeAnchors = useMemo(() => getSizeAnchors(ownedItems, selectedChild), [ownedItems, selectedChild]);
 
   const normalize = (value: string) => value.toLowerCase().trim();
@@ -1641,6 +1785,10 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     if (sizeMode === 'both') return presentSizeEntries;
     return activeSizeEntries.length > 0 ? activeSizeEntries : presentSizeEntries;
   }, [sizeMode, activeSizeEntries, presentSizeEntries]);
+  const groupedVisibleSizeEntries = useMemo(
+    () => partitionSizeEntriesForDisplay(visibleSizeChipEntries),
+    [visibleSizeChipEntries],
+  );
 
   const activeSizesNormalized = useMemo(() => activeSizeEntries.map((entry) => entry.normalized), [activeSizeEntries]);
   const activeSizesNormalizedSet = useMemo(() => new Set(activeSizesNormalized), [activeSizesNormalized]);
@@ -1694,6 +1842,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       const key = normalizeBrandFilterKey(selectedBrand);
       return itemBrand === key || itemBrandTags.has(key);
     });
+  };
+  const matchesTag = (item: (typeof ownedItems)[number], selectedTag: string) => {
+    if (selectedTag === 'All') return true;
+    const classified = classifyItemTags(item.tags ?? [], customTags);
+    return [...classified.presetTags, ...classified.customTags].some((tag) => tag.toLowerCase().trim() === selectedTag.toLowerCase().trim());
   };
   const matchesSeason = (item: (typeof ownedItems)[number], selectedSeason: string) => {
     if (selectedSeason === 'All') return true;
@@ -1761,6 +1914,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       item.brand,
       ...(item.brandTags ?? []),
       ...(item.tags ?? []),
+      ...getItemTagSearchTokens(item),
     ]
       .filter(Boolean)
       .join(' ')
@@ -1769,18 +1923,31 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   }, []);
 
   const sizeScopedItems = useMemo(() => ownedItems.filter(matchesSizeMode), [ownedItems, matchesSizeMode]);
+  const tagOptions = useMemo(() => {
+    const values = new Set<string>();
+    sizeScopedItems
+      .filter((item) => matchesBrand(item, selectedBrandIds))
+      .forEach((item) => {
+        const classified = classifyItemTags(item.tags ?? [], customTags);
+        [...classified.presetTags, ...classified.customTags].forEach((tag) => tag.trim() && values.add(tag.trim()));
+      });
+    return ['All', ...Array.from(values).sort((a, b) => a.localeCompare(b))];
+  }, [customTags, selectedBrandIds, sizeScopedItems]);
+
   const seasonOptions = useMemo(() => {
     const values = new Set<string>();
     sizeScopedItems
       .filter((item) => matchesBrand(item, selectedBrandIds))
+      .filter((item) => matchesTag(item, tagFilter))
       .forEach((item) => item.seasonTags.forEach((tag) => tag.trim() && values.add(tag.trim())));
     return ['All', ...Array.from(values).sort((a, b) => a.localeCompare(b))];
-  }, [sizeScopedItems, selectedBrandIds]);
+  }, [sizeScopedItems, selectedBrandIds, tagFilter]);
 
   const brandOptions = useMemo(() => {
     const values = new Map<string, { count: number; label: string }>();
     const normalizeBrandKey = (value: string) => value.trim().toLowerCase();
     sizeScopedItems
+      .filter((item) => matchesTag(item, tagFilter))
       .filter((item) => matchesSeason(item, seasonFilter))
       .forEach((item) => {
         const candidate = (item.brandTags[0] || item.brand || '').trim();
@@ -1803,15 +1970,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
         .map((entry) => entry.label),
     ];
-  }, [sizeScopedItems, seasonFilter]);
+  }, [sizeScopedItems, tagFilter, seasonFilter]);
 
   const filteredOwnedItems = useMemo(
     () => sizeScopedItems
       .filter((item) => matchesBrand(item, selectedBrandIds))
+      .filter((item) => matchesTag(item, tagFilter))
       .filter((item) => matchesSeason(item, seasonFilter))
       .filter((item) => matchesLocation(item, locationFilter))
       .filter((item) => matchesClosetSearch(item, closetSearch)),
-    [sizeScopedItems, selectedBrandIds, seasonFilter, locationFilter, matchesLocation, matchesClosetSearch, closetSearch],
+    [sizeScopedItems, selectedBrandIds, tagFilter, seasonFilter, locationFilter, matchesLocation, matchesClosetSearch, closetSearch],
   );
   useEffect(() => {
     let cancelled = false;
@@ -1847,6 +2015,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     });
   }, [brandOptions]);
   useEffect(() => {
+    if (tagFilter !== 'All' && !tagOptions.includes(tagFilter)) setTagFilter('All');
+  }, [tagFilter, tagOptions]);
+  useEffect(() => {
+    if (!loggedTagChangeRef.current) {
+      loggedTagChangeRef.current = true;
+      return;
+    }
+    void logEvent('closet_tag_filter_changed', { tag: tagFilter === 'All' ? 'all' : tagFilter });
+  }, [logEvent, tagFilter]);
+  useEffect(() => {
     if (seasonFilter !== 'All' && !seasonOptions.includes(seasonFilter)) setSeasonFilter('All');
   }, [seasonFilter, seasonOptions]);
   useEffect(() => {
@@ -1867,11 +2045,19 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     void logEvent('closet_season_filter_changed', { season: seasonFilter === 'All' ? 'all' : seasonFilter });
   }, [seasonFilter]);
-
   const counts = useMemo(() => {
     const base = Object.fromEntries(closetCategories.map((key) => [key, 0])) as Record<ClosetCategory, number>;
     filteredOwnedItems.forEach((item) => {
       base[closetCategoryForItem(item)] += 1;
+    });
+    return base;
+  }, [filteredOwnedItems]);
+  const customCategoryCounts = useMemo(() => {
+    const base = new Map<string, number>();
+    filteredOwnedItems.forEach((item) => {
+      const key = itemCategoryKey(item);
+      if (closetCategories.includes(key as ClosetCategory)) return;
+      base.set(key, (base.get(key) ?? 0) + 1);
     });
     return base;
   }, [filteredOwnedItems]);
@@ -1880,6 +2066,20 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     const map = new Map<ClosetCategory, string[]>();
     filteredOwnedItems.forEach((item) => {
       const key = closetCategoryForItem(item);
+      const prev = map.get(key) ?? [];
+      if (prev.length >= 3) return;
+      const uri = getItemDisplayImageUri(item) || '';
+      if (!uri) return;
+      prev.push(uri);
+      map.set(key, prev);
+    });
+    return map;
+  }, [filteredOwnedItems]);
+  const customThumbnailsByCategory = useMemo(() => {
+    const map = new Map<string, string[]>();
+    filteredOwnedItems.forEach((item) => {
+      const key = itemCategoryKey(item);
+      if (closetCategories.includes(key as ClosetCategory)) return;
       const prev = map.get(key) ?? [];
       if (prev.length >= 3) return;
       const uri = getItemDisplayImageUri(item) || '';
@@ -1903,7 +2103,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const tileSignals = useMemo(() => {
     const result = new Map<ClosetCategory, { hasUps: boolean; hasDupes: boolean; hasStyleDupes: boolean }>();
     visibleCategories.forEach((category) => {
-      const scoped = ownedItems.filter((item) => closetCategoryForItem(item) === category).filter((item) => matchesBrand(item, selectedBrandIds)).filter((item) => matchesSeason(item, seasonFilter));
+      const scoped = ownedItems
+        .filter((item) => closetCategoryForItem(item) === category)
+        .filter((item) => matchesBrand(item, selectedBrandIds))
+        .filter((item) => matchesTag(item, tagFilter))
+        .filter((item) => matchesSeason(item, seasonFilter));
       const next = sizeAnchors.nextByCategory.get(category);
       const hasUps = next ? scoped.some((item) => normalize(item.size) === normalize(next)) : false;
       const printGroups = new Map<string, number>();
@@ -1924,7 +2128,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       result.set(category, { hasUps, hasDupes, hasStyleDupes });
     });
     return result;
-  }, [visibleCategories, ownedItems, selectedBrandIds, seasonFilter, sizeAnchors]);
+  }, [visibleCategories, ownedItems, selectedBrandIds, tagFilter, seasonFilter, sizeAnchors]);
 
   const toggleBrandSelection = useCallback((option: string) => {
     if (option === 'All') {
@@ -1945,7 +2149,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       : `${selectedBrandIds.length} brands`;
   const activeBrandShortLabel = activeBrandName ? getBrandShortLabel(activeBrandName) : undefined;
   const primaryBrandId = selectedBrandIds.length === 1 ? selectedBrandIds[0] : undefined;
-  const totalFilteredCount = useMemo(() => visibleCategories.reduce((sum, category) => sum + (counts[category] ?? 0), 0), [visibleCategories, counts]);
+  const visibleCustomCategories = customCategories;
+  const totalFilteredCount = filteredOwnedItems.length;
   const selectedSizeChipLabel = useMemo(
     () =>
       (visibleSizeChipEntries.find((entry) => entry.normalized === selectedSizeChip)?.label
@@ -1972,15 +2177,33 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     });
     return labels;
   }, [visibleCategories, selectedBrandIds, sizeMode, selectedSizeChipLabel, closetSearch]);
+  const emptyLabelByCustomCategory = useMemo(() => {
+    const labels = new Map<string, string>();
+    const sizeScope = sizeMode === 'both' ? 'All' : sizeMode === 'now' ? 'Now' : 'Next';
+    visibleCustomCategories.forEach((category) => {
+      labels.set(
+        category.id,
+        buildEmptyCategoryLabel({
+          categoryName: getCategoryLabel(category.id, customCategories),
+          brandFilter: selectedBrandIds.length === 1 ? selectedBrandIds[0] : 'All',
+          sizeScope,
+          selectedSizes: selectedSizeChipLabel ? [selectedSizeChipLabel] : [],
+          query: closetSearch,
+        }),
+      );
+    });
+    return labels;
+  }, [visibleCustomCategories, customCategories, selectedBrandIds, sizeMode, selectedSizeChipLabel, closetSearch]);
   const duplicateScopeLabel = useMemo(() => {
     const sizePart = selectedSizeChipLabel || sizeModeLabels[sizeMode];
     const parts = [`Size: ${sizePart}`];
     if (selectedBrandIds.length === 1) parts.push(`Brand: ${selectedBrandIds[0]}`);
     else if (selectedBrandIds.length > 1) parts.push(`Brands: ${selectedBrandIds.length}`);
+    if (tagFilter !== 'All') parts.push(`Tag: ${tagFilter}`);
     if (seasonFilter !== 'All') parts.push(`Season: ${seasonFilter}`);
     if (closetSearch.trim()) parts.push(`Search: "${closetSearch.trim()}"`);
     return parts.join(' • ');
-  }, [selectedSizeChipLabel, sizeMode, selectedBrandIds, seasonFilter, closetSearch]);
+  }, [selectedSizeChipLabel, sizeMode, selectedBrandIds, tagFilter, seasonFilter, closetSearch]);
 
   const newThisWeek = useMemo(() => (selectedChild ? getNewThisWeek(selectedChild.id, items, childItems).slice(0, 12) : []), [selectedChild, items, childItems]);
   const sizeUpsStash = useMemo(
@@ -2077,10 +2300,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const closetShareFilterLine = useMemo(() => {
     const parts: string[] = [];
     if (selectedBrandIds.length > 1) parts.push(`Brands=${selectedBrandIds.length}`);
+    if (tagFilter !== 'All') parts.push(`Tag=${tagFilter}`);
     if (seasonFilter !== 'All') parts.push(`Season=${seasonFilter}`);
     if (closetSearch.trim()) parts.push(`Search=${closetSearch.trim()}`);
     return parts.length ? `Filters: ${parts.join(' • ')}` : '';
-  }, [selectedBrandIds.length, seasonFilter, closetSearch]);
+  }, [selectedBrandIds.length, tagFilter, seasonFilter, closetSearch]);
   const closetShareCategoryRows = useMemo(
     () => renderedCategories.map((category) => ({ category, count: counts[category] ?? 0 })),
     [renderedCategories, counts],
@@ -2139,6 +2363,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     const titleLine = `${selectedChild?.name ? `${selectedChild.name} – ` : ''}${shareSizeLabel} ${[brandToken, categoryToken].filter(Boolean).join(' ')} (${totalFilteredCount} items)`.replace(/\s+/g, ' ').trim();
     const filters: Array<{ key: string; value: string }> = [];
     if (selectedBrandIds.length > 1) filters.push({ key: 'Brands', value: `${selectedBrandIds.length}` });
+    if (tagFilter !== 'All') filters.push({ key: 'Tag', value: tagFilter });
     if (seasonFilter !== 'All') filters.push({ key: 'Season', value: seasonFilter });
     if (closetSearch.trim()) filters.push({ key: 'Search', value: closetSearch.trim() });
     const text = buildBstPostCaption({
@@ -2150,7 +2375,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!copyTextToClipboard(text)) return;
     setCopiedPostToastVisible(true);
     setTimeout(() => setCopiedPostToastVisible(false), 1400);
-  }, [activeBrandName, selectedChild?.name, shareSizeLabel, totalFilteredCount, selectedBrandIds.length, seasonFilter, closetSearch, filteredOwnedItems]);
+  }, [activeBrandName, selectedChild?.name, shareSizeLabel, totalFilteredCount, selectedBrandIds.length, tagFilter, seasonFilter, closetSearch, filteredOwnedItems]);
   const onPressCopyPost = useCallback(() => {
     showCopyPostOptions(() => {
       copyClosetPostToClipboard();
@@ -2159,6 +2384,56 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const openItemDetail = useCallback((itemId: string) => {
     navigation.navigate('ItemDetail', { itemId });
   }, [navigation]);
+  const openSiblingMatchesScreen = useCallback(async () => {
+    await logEvent('sibling_matches_view_opened', { isPro: proAccessEnabled });
+    navigation.navigate('SiblingMatches');
+  }, [logEvent, navigation, proAccessEnabled]);
+  const openSiblingMatchesPaywall = useCallback(async (source: 'dedicated_screen_entry') => {
+    await logEvent('pro_gate_viewed_from_matches', { source });
+    navigation.navigate('ProPaywall', { source: 'sibling_matching', entryContext: 'sibling_matching' });
+  }, [logEvent, navigation]);
+  const openClosetPowerPaywall = useCallback(() => {
+    navigation.navigate('ProPaywall', { entryContext: 'closet_power' });
+  }, [navigation]);
+  const openAddCategory = useCallback(async (source: 'grid' | 'other_nudge') => {
+    await logEvent('custom_category_add_tapped', { source, isPro: proAccessEnabled });
+    if (!proAccessEnabled) {
+      openClosetPowerPaywall();
+      return;
+    }
+    setShowCustomCategoryModal(true);
+  }, [logEvent, openClosetPowerPaywall, proAccessEnabled]);
+  const handleCreateCustomCategory = useCallback(async (input: { name: string; icon?: string }) => {
+    try {
+      const created = await createCustomCategory(input);
+      if (!created) return;
+      setShowCustomCategoryModal(false);
+      await logEvent('custom_category_created', { source: 'closet_grid', categoryId: created.id });
+    } catch (error) {
+      Alert.alert('Could not create category', error instanceof Error ? error.message : 'Please try again.');
+    }
+  }, [createCustomCategory, logEvent]);
+  const handleDeleteCustomCategory = useCallback((categoryId: string, label: string) => {
+    showActionMenu({
+      title: label,
+      message: 'Delete this custom category? Items in it will move to Other.',
+      actions: [
+        {
+          label: 'Delete category',
+          onPress: () => {
+            void (async () => {
+              try {
+                await deleteCustomCategory(categoryId);
+                await logEvent('custom_category_deleted', { source: 'closet_grid', categoryId });
+              } catch (error) {
+                Alert.alert('Could not delete category', error instanceof Error ? error.message : 'Please try again.');
+              }
+            })();
+          },
+        },
+      ],
+    });
+  }, [deleteCustomCategory, logEvent]);
   const openClosetSearchResults = useCallback(() => {
     const q = closetSearch.trim();
     if (!q) return;
@@ -2296,12 +2571,43 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   );
   const dismissFirstRunOnboarding = useCallback(async () => {
     setShowFirstRunOnboarding(false);
+    if (settings.developerActLikeFirstTimeUser) {
+      setDevFirstTimePreviewDismissed(true);
+      return;
+    }
     await updateSettings({ guidedOnboardingCompleted: true });
-  }, [updateSettings]);
+  }, [settings.developerActLikeFirstTimeUser, updateSettings]);
+  const startFirstRunAddItem = useCallback(async () => {
+    await dismissFirstRunOnboarding();
+    navigation.navigate('AddItem', { quick: true, prefillStatus: 'owned' });
+  }, [dismissFirstRunOnboarding, navigation]);
   const dismissProTeaserBanner = useCallback(async () => {
     if (settings.proTeaserBannerDismissed) return;
     await updateSettings({ proTeaserBannerDismissed: true });
   }, [settings.proTeaserBannerDismissed, updateSettings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const foundingSummary = await getFoundingMemberYearlyOffer();
+      if (cancelled) return;
+      setFoundingOfferVisible(
+        foundingSummary.status === 'available'
+        && !proAccessEnabled
+        && !shouldSuppressFoundingOffer(settings, purchaseState),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    proAccessEnabled,
+    purchaseState?.isEntitled,
+    settings.guidedOnboarding,
+    settings.guidedOnboardingCompleted,
+    settings.developerModeEnabled,
+    settings.developerForceProAccessEnabled,
+  ]);
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
@@ -2311,13 +2617,13 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
               <Pressable onPress={() => void shareClosetSnapshot()}>
                 <Text style={styles.headerAction}>{preparingClosetSnapshot ? 'Preparing...' : 'Share'}</Text>
               </Pressable>
-              {settings.developerModeEnabled ? (
-                <Pressable onPress={() => navigation.navigate('SellBin')}>
-                  <Text style={styles.headerAction}>Sell Bin</Text>
-                </Pressable>
-              ) : null}
-            </>
-          ) : null}
+	              {settings.developerModeEnabled ? (
+	                <Pressable onPress={() => navigation.navigate('SellBin')}>
+	                  <Text style={styles.headerAction}>Sell items</Text>
+	                </Pressable>
+	              ) : null}
+	            </>
+	          ) : null}
           <Pressable onPress={() => selectedChild && navigation.navigate('DropPrep', { childId: selectedChild.id })}>
             <Text style={styles.headerAction}>Drop Prep</Text>
           </Pressable>
@@ -2393,7 +2699,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   };
 
-  const filtersSummary = `${activeBrandSummaryLabel} • ${seasonFilter === 'All' ? 'All seasons' : seasonFilter}`;
+  const filtersSummary = `${activeBrandSummaryLabel} • ${tagFilter === 'All' ? 'All tags' : tagFilter} • ${seasonFilter === 'All' ? 'All seasons' : seasonFilter}`;
   const handleActionClick = async (action: 'before_you_buy' | 'drop_prep' | 'quick_add' | 'drawer_scan' | 'brands') => {
     await logEvent('closet_action_clicked', { action, childId: selectedChild.id });
   };
@@ -2500,7 +2806,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                 </Text>
               </View>
             </View>
-          ) : null}
+	      ) : null}
           <FloatingActionButton
             onPress={() =>
               navigation.navigate('AddItem', {
@@ -2516,7 +2822,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         </>
       )}
     >
-      <FirstRunOnboardingModal visible={showFirstRunOnboarding} onDismiss={() => void dismissFirstRunOnboarding()} />
+      <FirstRunOnboardingModal
+        visible={showFirstRunOnboarding}
+        onDismiss={() => void dismissFirstRunOnboarding()}
+        onAddFirstItem={() => void startFirstRunAddItem()}
+      />
       {copiedPostToastVisible ? (
         <Card>
           <View style={styles.snapshotPreparingRow}>
@@ -2535,9 +2845,23 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
       {!settings.proTeaserBannerDismissed && !proAccessEnabled ? (
         <ProComingSoonTeaser
           variant="banner"
-          onPress={() => setShowProModal(true)}
+          onPress={() => (navigation.getParent() as any)?.navigate('Settings', { screen: 'ExplorePro' })}
           onDismiss={() => { void dismissProTeaserBanner(); }}
         />
+      ) : null}
+      {settings.proTeaserBannerDismissed && foundingOfferVisible ? (
+        <Pressable
+          style={styles.bstInlineRow}
+          onPress={() => navigation.navigate('ProPaywall', { entryContext: 'generic_pro', source: 'closet' })}
+          accessibilityRole="button"
+          accessibilityLabel="You're eligible for Founding Member pricing"
+        >
+          <View style={styles.bstInlineCopy}>
+            <Text style={styles.bstInlineTitle}>You’re eligible for Founding Member pricing</Text>
+            <Text style={styles.bstInlineSubtitle}>Early supporters get special pricing while we build.</Text>
+          </View>
+          <Text style={styles.bstInlineChevron}>›</Text>
+        </Pressable>
       ) : null}
       <Card>
         <Text style={styles.headerTitle}>What Fits Now</Text>
@@ -2583,20 +2907,51 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
             );
           })()}
-          {visibleSizeChipEntries.length > 0 ? (
+          {groupedVisibleSizeEntries.standard.length > 0 ? (
             <View style={styles.sizeToggleRow}>
-              {visibleSizeChipEntries.slice(0, 16).map((entry) => {
+              {groupedVisibleSizeEntries.standard.map((entry) => {
                 const active = selectedSizeChip === entry.normalized;
                 return (
                   <Pressable
                     key={`closet-size-${entry.normalized}`}
-                    style={[styles.sizeToggleChip, active ? styles.sizeToggleChipActive : null]}
+                    style={[styles.sizeToggleChip, styles.sizeToggleChipCompact, active ? styles.sizeToggleChipActive : null]}
                     onPress={() => selectClosetSizeChip(entry.label)}
+                    accessibilityRole="button"
+                    accessibilityLabel={entry.label}
                   >
-                    <Text style={[styles.sizeToggleChipText, active ? styles.sizeToggleChipTextActive : null]}>{entry.label}</Text>
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      style={[styles.sizeToggleChipText, active ? styles.sizeToggleChipTextActive : null]}
+                    >
+                      {formatSizeFilterDisplayLabel(entry.label)}
+                    </Text>
                   </Pressable>
                 );
               })}
+            </View>
+          ) : null}
+          {groupedVisibleSizeEntries.custom.length > 0 ? (
+            <View style={styles.customSizeSection}>
+              <Text style={styles.customSizeSectionTitle}>Custom Fit Notes</Text>
+              <View style={styles.customSizeList}>
+                {groupedVisibleSizeEntries.custom.map((entry) => {
+                  const active = selectedSizeChip === entry.normalized;
+                  return (
+                    <Pressable
+                      key={`closet-size-note-${entry.normalized}`}
+                      style={[styles.customSizeCard, active ? styles.customSizeCardActive : null]}
+                      onPress={() => selectClosetSizeChip(entry.label)}
+                      accessibilityRole="button"
+                      accessibilityLabel={entry.label}
+                    >
+                      <Text style={[styles.customSizeCardText, active ? styles.customSizeCardTextActive : null]}>
+                        {formatSizeFilterDisplayLabel(entry.label, { sentenceCase: true })}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
           ) : null}
         </View>
@@ -2613,6 +2968,27 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           <PrimaryButton label="See Matches" variant="secondary" onPress={openClosetSearchResults} />
         ) : null}
         <ChipSelector label="Location" options={locationOptions} value={locationFilter} onChange={setLocationFilter} accent="sage" />
+        {siblingMatchingAvailable ? (
+          <View style={styles.topBrandRowWrap}>
+            <Text style={styles.topBrandLabel}>Sibling Matching</Text>
+            <Pressable
+              style={styles.duplicateLinkRow}
+              onPress={() => void (proAccessEnabled ? openSiblingMatchesScreen() : openSiblingMatchesPaywall('dedicated_screen_entry'))}
+              accessibilityRole="button"
+              accessibilityLabel={proAccessEnabled ? 'View sibling matches' : 'Unlock sibling matches'}
+            >
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.duplicateLinkText}>{proAccessEnabled ? 'View matches' : 'Sibling matches'}</Text>
+                {!proAccessEnabled ? (
+                  <View style={styles.proBadge}>
+                    <Text style={styles.proBadgeText}>Pro</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.duplicateLinkChevron}>›</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {advancedUnlocked ? (
           <View style={styles.topBrandRowWrap}>
             <View style={styles.topBrandHeader}>
@@ -2649,6 +3025,25 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         ) : null}
       </Card>
+
+      <Pressable
+        style={styles.bstInlineRow}
+        onPress={() => navigation.navigate('SellBin')}
+        accessibilityRole="button"
+        accessibilityLabel={sellReadyCount > 0 ? `Sell items. ${sellReadyCount} items ready to sell.` : 'Sell items. Create a BST post.'}
+      >
+        <View style={styles.bstInlineCopy}>
+          <Text style={styles.bstInlineTitle}>Sell items</Text>
+          <Text style={styles.bstInlineSubtitle}>
+            {sellReadyCount > 1
+              ? `You have ${sellReadyCount} items ready to sell`
+              : sellReadyCount === 1
+                ? '1 item ready to sell'
+                : 'Create a BST post'}
+          </Text>
+        </View>
+        <Text style={styles.bstInlineChevron}>›</Text>
+      </Pressable>
 
       {totalFilteredCount === 0 ? (
         <EmptyState
@@ -2692,7 +3087,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             </View>
           </View>
         </Card>
-      ) : null}
+	      ) : null}
 
       <View style={styles.grid}>
         {renderedCategories.map((category) => {
@@ -2710,7 +3105,9 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           return (
             <ClosetTile
               key={category}
-              category={category}
+              tileId={category}
+              label={closetLabel[category]}
+              glyph={categoryGlyph[category]}
               count={count}
               thumbs={thumbs}
               emptyLabel={emptyLabelByCategory.get(category)}
@@ -2757,7 +3154,74 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             />
           );
         })}
+        {visibleCustomCategories.map((category) => {
+          const count = customCategoryCounts.get(category.id) ?? 0;
+          const label = getCategoryLabel(category.id, customCategories);
+          return (
+            <ClosetTile
+              key={category.id}
+              tileId={category.id}
+              label={label}
+              glyph={getCategoryGlyphForId(category.id, customCategories)}
+              count={count}
+              thumbs={customThumbnailsByCategory.get(category.id) ?? []}
+              emptyLabel={emptyLabelByCustomCategory.get(category.id)}
+              hasUps={false}
+              hasDupes={false}
+              hasStyleDupes={false}
+              onLongPress={showTileGridReorderMode ? undefined : () => handleDeleteCustomCategory(category.id, label)}
+              isReorderMode={false}
+              onPress={() => {
+                if (count === 0) {
+                  navigation.navigate('AddItem', {
+                    shoppingMode: true,
+                    prefillStatus: 'owned',
+                    prefillChildId: selectedChild.id,
+                    prefillCategory: category.id,
+                    prefillType: closetCategoryToClothingType(category.id),
+                  });
+                  return;
+                }
+                navigation.navigate('CategorySnapshot', {
+                  childId: selectedChild.id,
+                  category: category.id,
+                  sizeMode,
+                  brandId: primaryBrandId,
+                  brandIds: selectedBrandIds.length ? selectedBrandIds : undefined,
+                  season: seasonFilter === 'All' ? undefined : seasonFilter,
+                  query: closetSearch.trim() || undefined,
+                  locationFilter: locationFilter === 'All' ? undefined : locationFilter,
+                });
+              }}
+            />
+          );
+        })}
+        <View style={{ width: '48%' }}>
+          <Pressable
+            style={styles.duplicateLinkRow}
+            onPress={() => { void openAddCategory('grid'); }}
+            accessibilityRole="button"
+            accessibilityLabel="Add category"
+          >
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={styles.duplicateLinkText}>+ Add Category</Text>
+              {!proAccessEnabled ? (
+                <View style={styles.proBadge}>
+                  <Text style={styles.proBadgeText}>Pro</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.duplicateLinkChevron}>›</Text>
+          </Pressable>
+        </View>
       </View>
+
+      {!proAccessEnabled && (counts.other ?? 0) > 0 ? (
+        <Card>
+          <Text style={styles.meta}>Need a better fit? Create a custom category with Pro.</Text>
+          <PrimaryButton label="Add Category" variant="secondary" onPress={() => { void openAddCategory('other_nudge'); }} />
+        </Card>
+      ) : null}
 
       {showRecentStrip ? (
         <Card>
@@ -2836,6 +3300,10 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             <Pressable
               onPress={(event) => {
                 event.stopPropagation();
+                if (!proAccessEnabled) {
+                  openClosetPowerPaywall();
+                  return;
+                }
                 setShowCategoryLayoutEditor((prev) => !prev);
               }}
               hitSlop={8}
@@ -2868,6 +3336,22 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             })}
           </ScrollView>
 
+          <Text style={styles.meta}>Tag</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroller} contentContainerStyle={styles.chipRow}>
+            {tagOptions.map((option) => {
+              const active = tagFilter === option;
+              return (
+                <Pressable
+                  key={`tag-${option}`}
+                  style={[styles.filterChip, active ? styles.filterChipActive : null]}
+                  onPress={() => setTagFilter(option)}
+                >
+                  <Text style={[styles.filterChipText, active ? styles.filterChipTextActiveCoral : null]}>{option}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
           <Text style={styles.meta}>Season</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroller} contentContainerStyle={styles.chipRow}>
             {seasonOptions.map((option) => {
@@ -2884,7 +3368,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             })}
           </ScrollView>
         </Card>
-      ) : null}
+	      ) : null}
 
       {showCategoryLayoutEditor ? (
         <Card>
@@ -3008,8 +3492,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             <Pressable onPress={() => setShowNew((prev) => !prev)}>
               <Text style={styles.sectionToggle}>New this week {showNew ? '▾' : '▸'}</Text>
             </Pressable>
-            {showNew ? (
-              newThisWeek.length ? (
+	            {showNew ? (
+	              newThisWeek.length ? (
                 <View style={styles.horizontalWrap}>
                   {newThisWeek.map((item) => (
                     <View key={item.id} style={styles.horizontalCard}>
@@ -3020,16 +3504,16 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               ) : (
                 <Text style={styles.meta}>No new items this week.</Text>
-              )
-            ) : null}
+	              )
+	            ) : null}
           </Card>
 
           <Card>
             <Pressable onPress={() => setShowStash((prev) => !prev)}>
               <Text style={styles.sectionToggle}>Size-ups stash {showStash ? '▾' : '▸'}</Text>
             </Pressable>
-            {showStash ? (
-              sizeUpsStash.length ? (
+	            {showStash ? (
+	              sizeUpsStash.length ? (
                 <View style={styles.horizontalWrap}>
                   {sizeUpsStash.map((item) => (
                     <View key={item.id} style={styles.horizontalCard}>
@@ -3040,8 +3524,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               ) : (
                 <Text style={styles.meta}>No size-up stash items yet.</Text>
-              )
-            ) : null}
+	              )
+	            ) : null}
           </Card>
         </>
       ) : null}
@@ -3051,8 +3535,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.sectionToggle}>Duplicate prints across sizes {showDupes ? '▾' : '▸'}</Text>
         </Pressable>
         <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
-        {showDupes ? (
-          duplicatePrints.length ? (
+	        {showDupes ? (
+	          duplicatePrints.length ? (
             duplicatePrints.map((group) => (
               <Pressable
                 key={`${group.printName}-${group.sizes.join('|')}`}
@@ -3088,8 +3572,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             ))
           ) : (
             <Text style={styles.meta}>No duplicate print groups yet.</Text>
-          )
-        ) : null}
+	          )
+	        ) : null}
       </Card>
 
       <Card>
@@ -3097,8 +3581,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.sectionToggle}>Duplicate styles across sizes {showStyleDupesList ? '▾' : '▸'}</Text>
         </Pressable>
         <Text style={styles.meta}>Reflects current filters: {duplicateScopeLabel}</Text>
-        {showStyleDupesList ? (
-          duplicateStyles.length ? (
+	        {showStyleDupesList ? (
+	          duplicateStyles.length ? (
             duplicateStyles.map((group) => (
               <Pressable
                 key={`${group.brand ?? ''}|${group.label}|${group.sizes.join('|')}`}
@@ -3136,8 +3620,8 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
             ))
           ) : (
             <Text style={styles.meta}>No duplicate style groups yet.</Text>
-          )
-        ) : null}
+	          )
+	        ) : null}
       </Card>
 
       <Card>
@@ -3188,11 +3672,11 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
                         <Text numberOfLines={1} style={styles.snapshotCategoryText}>{closetLabel[row.category]} ({row.count})</Text>
                       </View>
                     ))}
-                    {closetShareVisibleCategories.length > 0 && closetShareHiddenCategoryCount > 0 ? (
-                      <View style={[styles.snapshotCategoryPill, styles.snapshotCategoryPillMuted]}>
-                        <Text style={styles.snapshotCategoryTextMuted}>+{closetShareHiddenCategoryCount} more categories</Text>
-                      </View>
-                    ) : null}
+	                    {closetShareVisibleCategories.length > 0 && closetShareHiddenCategoryCount > 0 ? (
+	                      <View style={[styles.snapshotCategoryPill, styles.snapshotCategoryPillMuted]}>
+	                        <Text style={styles.snapshotCategoryTextMuted}>+{closetShareHiddenCategoryCount} more categories</Text>
+	                      </View>
+	                    ) : null}
                   </View>
 
                   <View style={styles.snapshotPreviewGrid}>
@@ -3240,10 +3724,10 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
         onClose={() => setShowKidLimitModal(false)}
         onSendFeedback={() => { void openKidLimitFeedbackEmail(kidLimitCurrentCount); }}
       />
-      <ProComingSoonModal
-        visible={showProModal}
-        onClose={() => setShowProModal(false)}
-        onFeedback={() => { void openKidLimitFeedbackEmail(children.length); }}
+      <CustomCategoryModal
+        visible={showCustomCategoryModal}
+        onDismiss={() => setShowCustomCategoryModal(false)}
+        onSubmit={handleCreateCustomCategory}
       />
     </Screen>
   );

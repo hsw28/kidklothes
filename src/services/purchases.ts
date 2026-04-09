@@ -13,6 +13,16 @@ type NormalizedPackage = {
   packageType?: string;
 };
 
+const normalizePackage = (pkg: any): NormalizedPackage => ({
+  identifier: String(pkg?.identifier ?? ''),
+  productId: String(pkg?.product?.identifier ?? ''),
+  title: String(pkg?.product?.title ?? ''),
+  priceString: String(pkg?.product?.priceString ?? ''),
+  period: pkg?.product?.subscriptionPeriod ? String(pkg.product.subscriptionPeriod) : undefined,
+  type: pkg?.packageType ? String(pkg.packageType) : undefined,
+  packageType: pkg?.packageType ? String(pkg.packageType) : undefined,
+});
+
 export type OfferingsSummary = {
   offerings: Array<{
     offeringId: string;
@@ -61,7 +71,18 @@ export type ProPaywallOption = {
   available: boolean;
 };
 
+export type FoundingMemberOfferSummary = {
+  status: 'inactive' | 'available' | 'unavailable';
+  discountedPriceString?: string;
+  isEligible?: boolean;
+};
+
 let initialized = false;
+const OFFERINGS_CACHE_TTL_MS = 15_000;
+let bstProPaywallOptionsCache: { value: ProPaywallOption[]; expiresAt: number } | null = null;
+let bstProPaywallOptionsPromise: Promise<ProPaywallOption[]> | null = null;
+let foundingMemberYearlyOfferCache: { value: FoundingMemberOfferSummary; expiresAt: number } | null = null;
+let foundingMemberYearlyOfferPromise: Promise<FoundingMemberOfferSummary> | null = null;
 
 type PurchasesModule = typeof import('react-native-purchases').default;
 
@@ -135,15 +156,7 @@ const normalizeOfferings = (offerings: any): OfferingsSummary => {
       const packages = Array.isArray(offering?.availablePackages) ? offering.availablePackages : [];
       return {
         offeringId,
-        packages: packages.map((pkg: any) => ({
-          identifier: String(pkg?.identifier ?? ''),
-          productId: String(pkg?.product?.identifier ?? ''),
-          title: String(pkg?.product?.title ?? ''),
-          priceString: String(pkg?.product?.priceString ?? ''),
-          period: pkg?.product?.subscriptionPeriod ? String(pkg.product.subscriptionPeriod) : undefined,
-          type: pkg?.packageType ? String(pkg.packageType) : undefined,
-          packageType: pkg?.packageType ? String(pkg.packageType) : undefined,
-        })),
+        packages: packages.map(normalizePackage),
       };
     }),
   };
@@ -204,48 +217,200 @@ export const getBstProPaywallOptions = async (): Promise<ProPaywallOption[]> => 
       kind: 'monthly',
       title: 'Monthly subscription',
       subtitle: 'Monthly subscription',
-      priceString: '$2.99 / month',
+      priceString: 'Price shown at checkout',
       available: false,
     },
     {
       kind: 'yearly',
       title: 'Yearly subscription',
-      subtitle: 'Best value for families using BST all year',
-      priceString: '$19.99 / year',
+      subtitle: 'Best value',
+      priceString: 'Price shown at checkout',
       badge: 'Best value',
       available: false,
     },
     {
       kind: 'lifetime',
-      title: '$9.99 lifetime',
-      subtitle: 'Early access lifetime',
-      priceString: '$9.99 one-time',
-      badge: 'Early access',
+      title: 'Lifetime access',
+      subtitle: 'One-time unlock',
+      priceString: 'Price shown at checkout',
       available: false,
     },
   ];
 
   if (!shouldRun()) return defaults;
-
-  try {
-    await initPurchases();
-    const Purchases = getPurchasesModule();
-    if (!Purchases) return defaults;
-    const offerings = await Purchases.getOfferings();
-    return defaults.map((entry) => {
-      const pkg = findPackageByKind(offerings, entry.kind);
-      if (!pkg) return entry;
-      return {
-        ...entry,
-        packageIdentifier: pkg.identifier,
-        productId: pkg.productId,
-        priceString: pkg.priceString || entry.priceString,
-        available: Boolean(pkg.identifier),
-      };
-    });
-  } catch {
-    return defaults;
+  if (bstProPaywallOptionsCache && bstProPaywallOptionsCache.expiresAt > Date.now()) {
+    return bstProPaywallOptionsCache.value;
   }
+  if (bstProPaywallOptionsPromise) return bstProPaywallOptionsPromise;
+
+  bstProPaywallOptionsPromise = (async () => {
+    try {
+      await initPurchases();
+      const Purchases = getPurchasesModule();
+      if (!Purchases) return defaults;
+      const offerings = await Purchases.getOfferings();
+      const resolved = defaults.map((entry) => {
+        const pkg = findPackageByKind(offerings, entry.kind);
+        if (!pkg) return entry;
+        const normalized = normalizePackage(pkg);
+        return {
+          ...entry,
+          packageIdentifier: normalized.identifier || entry.packageIdentifier,
+          productId: normalized.productId || entry.productId,
+          title: normalized.title || entry.title,
+          priceString: normalized.priceString || entry.priceString,
+          available: Boolean(normalized.identifier),
+        };
+      });
+      bstProPaywallOptionsCache = {
+        value: resolved,
+        expiresAt: Date.now() + OFFERINGS_CACHE_TTL_MS,
+      };
+      return resolved;
+    } catch {
+      return defaults;
+    } finally {
+      bstProPaywallOptionsPromise = null;
+    }
+  })();
+
+  return bstProPaywallOptionsPromise;
+};
+
+export const getFoundingMemberYearlyOffer = async (): Promise<FoundingMemberOfferSummary> => {
+  const inactive: FoundingMemberOfferSummary = { status: 'inactive' };
+
+  if (foundingMemberYearlyOfferCache && foundingMemberYearlyOfferCache.expiresAt > Date.now()) {
+    return foundingMemberYearlyOfferCache.value;
+  }
+  if (foundingMemberYearlyOfferPromise) return foundingMemberYearlyOfferPromise;
+
+  if (__DEV__) {
+    console.info('[founding-intro] config gate', {
+      monetizationEnabled: shouldRun(),
+      foundingMemberEnabled: appConfig.foundingMember.enabled,
+      platform: Platform.OS,
+    });
+  }
+
+  if (!appConfig.foundingMember.enabled || !shouldRun()) return inactive;
+
+  foundingMemberYearlyOfferPromise = (async () => {
+    try {
+      await initPurchases();
+      const Purchases = getPurchasesModule();
+      if (!Purchases) return inactive;
+      const offerings = await Purchases.getOfferings();
+      const current = offerings?.current;
+      const packages = Array.isArray(current?.availablePackages) ? current.availablePackages : [];
+      const yearlyPackage = packages.find((pkg: any) => String(pkg?.packageType ?? '').toUpperCase() === 'ANNUAL')
+        ?? findPackageByKind(offerings, 'yearly');
+      const product = yearlyPackage?.product;
+      const introPrice = product?.introPrice;
+      const yearlyDebugPayload = {
+        packageIdentifier: String(yearlyPackage?.identifier ?? ''),
+        productIdentifier: String(product?.identifier ?? ''),
+        priceString: String(product?.priceString ?? ''),
+        introPrice: introPrice ? String(introPrice?.price ?? introPrice?.priceString ?? '') : '',
+        introPriceString: String(introPrice?.priceString ?? ''),
+        hasIntroPriceMetadata: Boolean(introPrice?.priceString),
+      };
+
+      if (__DEV__) {
+        console.info('[founding-intro] yearly package', yearlyDebugPayload);
+      }
+      await safeLogEvent('intro_offer_yearly_package_debug', yearlyDebugPayload);
+
+      if (!yearlyPackage || !product || !introPrice?.priceString) {
+        if (__DEV__) {
+          console.info('[founding-intro] unavailable: missing intro metadata', yearlyDebugPayload);
+        }
+        await safeLogEvent('intro_offer_metadata_missing', yearlyDebugPayload);
+        return { status: 'unavailable' };
+      }
+
+      if (Platform.OS !== 'ios' || typeof Purchases.checkTrialOrIntroductoryPriceEligibility !== 'function') {
+        if (__DEV__) {
+          console.info('[founding-intro] unavailable: eligibility check unsupported', {
+            ...yearlyDebugPayload,
+            platform: Platform.OS,
+          });
+        }
+        await safeLogEvent('intro_offer_check_unsupported', {
+          ...yearlyDebugPayload,
+          platform: Platform.OS,
+        });
+        return { status: 'unavailable' };
+      }
+
+      await safeLogEvent('intro_offer_check_started', {
+        productId: String(product.identifier ?? ''),
+        packageIdentifier: String(yearlyPackage.identifier ?? ''),
+      });
+
+      try {
+        const eligibility = await Purchases.checkTrialOrIntroductoryPriceEligibility([product.identifier]);
+        const status = eligibility?.[product.identifier]?.status;
+        const eligibleStatus = Purchases?.INTRO_ELIGIBILITY_STATUS?.INTRO_ELIGIBILITY_STATUS_ELIGIBLE ?? 2;
+        const eligibilityPayload = {
+          ...yearlyDebugPayload,
+          eligibilityStatus: status ?? 'missing',
+          eligibleStatus,
+          explicitlyEligible: status === eligibleStatus,
+        };
+
+        if (__DEV__) {
+          console.info('[founding-intro] eligibility result', eligibilityPayload);
+        }
+        await safeLogEvent('intro_offer_eligibility_debug', eligibilityPayload);
+
+        if (status !== eligibleStatus) {
+          await safeLogEvent('intro_offer_ineligible_or_unknown', {
+            productId: String(product.identifier ?? ''),
+            packageIdentifier: String(yearlyPackage.identifier ?? ''),
+            status: status ?? 'missing',
+          });
+          return { status: 'unavailable', isEligible: false };
+        }
+
+        await safeLogEvent('intro_offer_eligible', {
+          productId: String(product.identifier ?? ''),
+          packageIdentifier: String(yearlyPackage.identifier ?? ''),
+        });
+        return {
+          status: 'available',
+          discountedPriceString: String(introPrice.priceString ?? ''),
+          isEligible: true,
+        };
+      } catch (error: any) {
+        if (__DEV__) {
+          console.info('[founding-intro] eligibility check failed', {
+            ...yearlyDebugPayload,
+            errorCode: String(error?.code ?? ''),
+            message: String(error?.message ?? 'intro_offer_check_failed'),
+          });
+        }
+        await safeLogEvent('intro_offer_check_failed', {
+          productId: String(product.identifier ?? ''),
+          packageIdentifier: String(yearlyPackage.identifier ?? ''),
+          errorCode: String(error?.code ?? ''),
+          message: String(error?.message ?? 'intro_offer_check_failed'),
+        });
+        return { status: 'unavailable', isEligible: false };
+      }
+    } catch {
+      return { status: 'unavailable' };
+    } finally {
+      foundingMemberYearlyOfferPromise = null;
+    }
+  })();
+
+  const resolved = await foundingMemberYearlyOfferPromise;
+  foundingMemberYearlyOfferCache = {
+    value: resolved,
+    expiresAt: Date.now() + OFFERINGS_CACHE_TTL_MS,
+  };
+  return resolved;
 };
 
 export const initPurchases = async (): Promise<void> => {
@@ -336,6 +501,8 @@ export const purchasePackage = async (packageIdentifier: string): Promise<Purcha
       status: 'success',
       entitlementActive: summary.activeEntitlements.includes(appConfig.revenueCat.entitlementId),
       customerInfoSummary: summary,
+      errorCode: summary.activeEntitlements.includes(appConfig.revenueCat.entitlementId) ? undefined : 'no_active_entitlement_restored',
+      errorMessage: summary.activeEntitlements.includes(appConfig.revenueCat.entitlementId) ? undefined : 'No previous Pro purchase was found for this Apple account.',
     };
   } catch (error: any) {
     const Purchases = getPurchasesModule();

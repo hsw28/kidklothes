@@ -4,16 +4,19 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
 import { ChipSelector } from '@/components/ChipSelector';
 import { EmptyState } from '@/components/EmptyState';
+import { FeatureOnboardingModal } from '@/components/FeatureOnboardingModal';
 import { FormInput } from '@/components/FormInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
+import { useBstEntryOnboarding } from '@/hooks/useBstEntryOnboarding';
 import { ClosetStackParamList } from '@/navigation/types';
 import { trackBstCreateStarted } from '@/services/bst/bstAnalytics';
 import { FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/bstLimits';
 import { hasProAccess } from '@/services/proAccess';
 import { getSpecialLocationIds } from '@/utils/closetViewInsights';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
+import { formatConditionLabel } from '@/utils/itemLabels';
 import { useAppTheme } from '@/theme';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'BstSaleDraftCreate'>;
@@ -31,6 +34,7 @@ export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route })
     const prefilled = route.params?.prefillItemIds ?? [];
     return Array.from(new Set(prefilled));
   });
+  const bstEntryOnboarding = useBstEntryOnboarding(true);
 
   const childOptions = useMemo(() => ['All', ...children.map((child) => child.name)], [children]);
   const brandOptions = useMemo(() => ['All', ...brands], [brands]);
@@ -63,6 +67,7 @@ export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route })
       return true;
     });
   }, [brandFilter, childFilter, childItems, childNameById, children, items, query, storageLocations]);
+  const allVisibleSelected = sellItems.length > 0 && sellItems.every((item) => selectedIds.includes(item.id));
 
   const styles = StyleSheet.create({
     title: {
@@ -158,9 +163,27 @@ export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route })
     }
     setSelectedIds((current) => [...current, itemId]);
   };
+  const startFreePreview = () => {
+    setSelectedIds(Array.from(new Set(sellItems.slice(0, FREE_BST_ITEM_CARD_LIMIT).map((item) => item.id))));
+    bstEntryOnboarding.dismiss();
+  };
 
   return (
     <Screen>
+      <FeatureOnboardingModal
+        visible={bstEntryOnboarding.visible}
+        title="Sell in minutes, not hours"
+        body="Turn your closet into ready-to-post listings"
+        bullets={[
+          'Create BST-ready collages',
+          'Generate comment cards automatically',
+          'Copy your full post in one tap',
+        ]}
+        primaryLabel="Create your first post"
+        note={`Free preview includes up to ${FREE_BST_ITEM_CARD_LIMIT} items`}
+        onPrimaryPress={startFreePreview}
+        onSecondaryPress={bstEntryOnboarding.dismiss}
+      />
       <Card>
         <Text style={styles.title}>New BST Sale Draft</Text>
         <Text style={styles.body}>{`Pick items to create your sale post\nWe’ll format everything for you — 2 cards free`}</Text>
@@ -182,7 +205,7 @@ export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route })
                 style={styles.bulkAction}
                 onPress={() => setSelectedIds(Array.from(new Set([...selectedIds, ...sellItems.map((item) => item.id)])))}
               >
-                <Text style={styles.bulkActionText}>Select All</Text>
+                <Text style={styles.bulkActionText}>{allVisibleSelected ? 'Selected' : 'Select All'}</Text>
               </Pressable>
               <Pressable
                 style={styles.bulkAction}
@@ -211,7 +234,7 @@ export const BstSaleDraftCreateScreen: React.FC<Props> = ({ navigation, route })
                     )}
                     <View style={{ flex: 1, gap: 2 }}>
                       <Text style={styles.itemTitle}>{item.title}</Text>
-                      <Text style={styles.meta}>{[item.brand, item.size, item.condition].filter(Boolean).join(' • ')}</Text>
+                      <Text style={styles.meta}>{[item.brand, item.size, item.condition ? formatConditionLabel(item.condition) : undefined].filter(Boolean).join(' • ')}</Text>
                       {item.targetResalePrice !== undefined ? <Text style={styles.meta}>Target resale ${item.targetResalePrice.toFixed(2)}</Text> : null}
                     </View>
                     <View style={styles.check}>

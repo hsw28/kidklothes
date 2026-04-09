@@ -1,4 +1,5 @@
-import { Item } from '@/models';
+import { Condition, Item } from '@/models';
+import { getCustomCategoryFallbackLabel, isCustomCategoryId } from './categories';
 
 export const formatClothingTypeLabel = (type?: Item['clothingType']): string => {
   switch (type) {
@@ -16,6 +17,8 @@ export const formatClothingTypeLabel = (type?: Item['clothingType']): string => 
       return 'Outerwear';
     case 'shoes':
       return 'Shoes';
+    case 'other':
+      return 'Other';
     case 'accessory':
       return 'Accessories';
     default:
@@ -54,6 +57,7 @@ export const formatItemCategoryLabel = (item: Pick<Item, 'category' | 'clothingT
     case 'other':
       return 'Other';
     default:
+      if (item.category && isCustomCategoryId(item.category)) return getCustomCategoryFallbackLabel(item.category);
       return formatClothingTypeLabel(item.clothingType);
   }
 };
@@ -80,4 +84,21 @@ export const getBrandShortLabel = (brandName: string, domain?: string): string =
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('')
     .slice(0, 3);
+};
+
+export const formatConditionLabel = (condition?: Condition): string => {
+  switch (condition) {
+    case 'new-with-tags':
+      return 'New with tags';
+    case 'new-without-tags':
+      return 'New without tags';
+    case 'like-new':
+      return 'Like new';
+    case 'good':
+      return 'Good';
+    case 'play':
+      return 'Play';
+    default:
+      return condition ?? '';
+  }
 };

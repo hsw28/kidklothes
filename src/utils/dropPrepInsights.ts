@@ -1,5 +1,5 @@
-import { Child, ChildItem, ID, Item } from '@/models';
-import { closetCategoryForItem, getOwnedItemsForChild, getSizeAnchors } from './closetViewInsights';
+import { Child, ChildItem, ID, Item, StorageLocation } from '@/models';
+import { closetCategoryForItem, getOwnedItemsForChild, getSizeAnchors, getSpecialLocationIds } from './closetViewInsights';
 import { ClosetCategory, closetCategories } from './categories';
 import { normalizePrintName } from './printName';
 
@@ -25,6 +25,7 @@ const initCategoryCounts = (): Record<ClosetCategory, number> => ({
   outerwear: 0,
   shoes: 0,
   accessories: 0,
+  'cloth-diapers': 0,
   other: 0,
 });
 
@@ -35,7 +36,14 @@ const matchesBrand = (item: Item, brandId?: string) => {
   return item.brandTags.some((tag) => normalize(tag) === target);
 };
 
-export const getDropPrepSummary = (childId: ID, items: Item[], childItems: ChildItem[], brandId?: string, child?: Child): DropPrepSummary => {
+export const getDropPrepSummary = (
+  childId: ID,
+  items: Item[],
+  childItems: ChildItem[],
+  storageLocations: StorageLocation[],
+  brandId?: string,
+  child?: Child,
+): DropPrepSummary => {
   const owned = getOwnedItemsForChild(childId, items, childItems).filter((item) => matchesBrand(item, brandId));
   const anchors = getSizeAnchors(owned, child);
   const typeCountsNow = initCategoryCounts();
@@ -66,11 +74,16 @@ export const getDropPrepSummary = (childId: ID, items: Item[], childItems: Child
     }
   });
 
-  const linked = new Map(childItems.filter((link) => link.childId === childId).map((link) => [link.itemId, link.statusForChild]));
+  const sellBinLocationId = getSpecialLocationIds(childId, storageLocations).sellBinLocationId;
+  const linkedByItemId = new Map(childItems.filter((link) => link.childId === childId).map((link) => [link.itemId, link]));
   const forSaleCount = items.filter((item) => {
-    if (!linked.has(item.id)) return false;
+    const link = linkedByItemId.get(item.id);
+    if (!link) return false;
     if (!matchesBrand(item, brandId)) return false;
-    const effectiveStatus = linked.get(item.id) ?? item.status;
+    const effectiveStatus = link.statusForChild ?? item.status;
+    if (sellBinLocationId && link.storageLocationId === sellBinLocationId) {
+      return effectiveStatus !== 'sold';
+    }
     return effectiveStatus === 'for-sale';
   }).length;
 

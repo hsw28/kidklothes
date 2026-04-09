@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
@@ -9,22 +9,172 @@ import { useData } from '@/db/DataContext';
 import { ClosetStackParamList } from '@/navigation/types';
 import { resolvePaywallTrigger, trackProPaywallViewed, trackProPurchaseCompleted, trackProPurchaseFailed, trackProPurchaseRestored, trackProPurchaseStarted } from '@/services/bst/bstAnalytics';
 import { FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/bstLimits';
-import { ProPaywallOption, getBstProPaywallOptions, purchasePackage, restorePurchases } from '@/services/purchases';
+import { FoundingOfferSurface, getFoundingOfferEligibility, isEligibleForFoundingOffer } from '@/services/foundingOffer';
+import { FoundingMemberOfferSummary, ProPaywallOption, getBstProPaywallOptions, getFoundingMemberYearlyOffer, purchasePackage, restorePurchases } from '@/services/purchases';
 import { hasProAccess } from '@/services/proAccess';
 import { useAppTheme } from '@/theme';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'ProPaywall'>;
 
+type PaywallEntryContext = 'bst' | 'sibling_matching' | 'photo_expansion' | 'closet_power' | 'tag_power' | 'generic_pro';
+
+type PaywallContent = {
+  badge?: string;
+  title: string;
+  subtitle: string;
+  primaryBullets: string[];
+  secondaryHeader?: string;
+  secondaryBullets: string[];
+  optionalComingSoon?: {
+    header: string;
+    bullets: string[];
+  };
+  ctaSubtext?: string;
+};
+
+const paywallContent: Record<PaywallEntryContext, PaywallContent> = {
+  bst: {
+    title: 'Unlock Pro',
+    subtitle: 'Generate cards for all items, create unlimited drafts, and add multiple photos per item.',
+    primaryBullets: [
+      'Cards for every item',
+      'Unlimited sale drafts',
+      'Add multiple photos per item',
+    ],
+    secondaryBullets: [],
+    ctaSubtext: 'Unlock selling tools and more',
+  },
+  sibling_matching: {
+    title: 'See matching outfits across kids',
+    subtitle: 'See shared prints and styles in one place.',
+    primaryBullets: [
+      'See matching outfits across siblings',
+      'Spot shared prints and styles in one place',
+      'Add missing items straight to wishlist',
+    ],
+    secondaryHeader: 'Everything you unlock with Pro',
+    secondaryBullets: [
+      'Create your own categories',
+      'Sell items with ready-to-post BST listings',
+      'See matching outfits across kids',
+      'Add multiple photos per item',
+      'Keep preset tags and unlock custom ones',
+    ],
+    ctaSubtext: 'Unlock matching and more',
+  },
+  photo_expansion: {
+    title: 'Add more photos to every item',
+    subtitle: 'Show more detail and improve your listings',
+    primaryBullets: [
+      'Multiple photos per item',
+      'More item detail',
+      'Stronger sale posts',
+    ],
+    secondaryHeader: 'Everything you unlock with Pro',
+    secondaryBullets: [
+      'Create your own categories',
+      'Sell items with ready-to-post BST listings',
+      'See matching outfits across kids',
+      'Add multiple photos per item',
+      'Keep preset tags and unlock custom ones',
+    ],
+  },
+  closet_power: {
+    title: 'Create your own categories',
+    subtitle: 'Organize your closet with categories like Sports, Uniforms, Dance, Holiday, or Hand-me-downs.',
+    primaryBullets: [
+      'Custom categories',
+      'Advanced tags and filters',
+      'Faster item search',
+    ],
+    secondaryHeader: 'Everything you unlock with Pro',
+    secondaryBullets: [
+      'Create your own categories',
+      'Sell items with ready-to-post BST listings',
+      'See matching outfits across kids',
+      'Add multiple photos per item',
+      'Keep preset tags and unlock custom ones',
+    ],
+  },
+  generic_pro: {
+    title: 'Unlock Pro',
+    subtitle: 'Get more out of your closet with tools that help you organize faster and sell with less work.',
+    primaryBullets: [
+      'Create your own categories',
+      'Sell items with ready-to-post BST listings',
+      'See matching outfits across kids',
+    ],
+    secondaryHeader: 'Everything you unlock with Pro',
+    secondaryBullets: [
+      'Create your own categories',
+      'Sell items with ready-to-post BST listings',
+      'See matching outfits across kids',
+      'Add multiple photos per item',
+      'Keep preset tags and unlock custom ones',
+    ],
+  },
+  tag_power: {
+    title: 'Find anything in seconds',
+    subtitle: 'Create your own tags so you can instantly pull up outfits for school, travel, photos, and more.',
+    primaryBullets: [
+      'Create custom tags that fit your family',
+      'Reuse tags across items',
+      'Keep special-use outfits easy to find',
+    ],
+    secondaryHeader: 'Everything you unlock with Pro',
+    secondaryBullets: [
+      'Create your own categories',
+      'Sell items with ready-to-post BST listings',
+      'See matching outfits across kids',
+      'Add multiple photos per item',
+      'Keep preset tags and unlock custom ones',
+    ],
+  },
+};
+
+const foundingPaywallContent: PaywallContent = {
+  badge: 'Founding Member pricing',
+  title: 'Become a Founding Member',
+  subtitle: 'Get early access to Pro at a special rate while Layette Out is still growing.',
+  primaryBullets: [
+    'Create your own categories',
+    'Sell items with ready-to-post BST listings',
+    'See matching outfits across kids',
+    'Add multiple photos per item',
+    'Unlock custom tags and stronger filters',
+  ],
+  ctaSubtext: 'Yearly includes special first-year pricing for eligible new subscribers',
+  secondaryHeader: 'Everything you unlock with Pro',
+  secondaryBullets: [
+    'Create your own categories',
+    'Sell items with ready-to-post BST listings',
+    'See matching outfits across kids',
+    'Add multiple photos per item',
+    'Keep preset tags and unlock custom ones',
+  ],
+};
+
 export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   const theme = useAppTheme();
-  const { refreshPurchaseState, logEvent, settings, purchaseState, saleDrafts, saleDraftItems, items } = useData();
+  const { refreshPurchaseState, logEvent, getEventCount, updateSettings, settings, purchaseState, saleDrafts, saleDraftItems, items } = useData();
   const [options, setOptions] = useState<ProPaywallOption[]>([]);
+  const [foundingOffer, setFoundingOffer] = useState<FoundingMemberOfferSummary>({ status: 'inactive' });
+  const [foundingEligible, setFoundingEligible] = useState(false);
   const [selectedKind, setSelectedKind] = useState<ProPaywallOption['kind']>('yearly');
   const [loading, setLoading] = useState(false);
   const isPro = hasProAccess(settings, purchaseState);
   const didLogViewRef = React.useRef(false);
+  const didLogFoundingViewRef = React.useRef(false);
+  const didLogFoundingCheckedRef = React.useRef(false);
   const trigger = resolvePaywallTrigger(route.params?.source);
+  const entryContext: PaywallEntryContext = useMemo(() => {
+    if (route.params?.entryContext) return route.params.entryContext;
+    if (route.params?.source === 'sibling_matching') return 'sibling_matching';
+    if (route.params?.source === 'item_multi_photo') return 'photo_expansion';
+    if ((route.params?.source ?? '').startsWith('bst_')) return 'bst';
+    return 'closet_power';
+  }, [route.params?.entryContext, route.params?.source]);
   const paywallDraft = saleDrafts.find((entry) => entry.id === route.params?.draftId);
   const paywallDraftItems = useMemo(
     () => (paywallDraft ? saleDraftItems.filter((entry) => entry.saleDraftId === paywallDraft.id && entry.included).sort((a, b) => a.listingOrder - b.listingOrder) : []),
@@ -47,11 +197,62 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   );
 
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
-      const next = await getBstProPaywallOptions();
+      const [next, foundingSummary, foundingEligibility] = await Promise.all([
+        getBstProPaywallOptions(),
+        getFoundingMemberYearlyOffer(),
+        getFoundingOfferEligibility({
+          settings,
+          purchaseState,
+          itemCount: items.length,
+          getEventCount,
+        }),
+      ]);
+      if (cancelled) return;
       setOptions(next);
+      setFoundingOffer(foundingSummary);
+      const eligible = isEligibleForFoundingOffer(foundingEligibility);
+      setFoundingEligible(eligible);
+      if (eligible) {
+        void logEvent('founding_offer_eligible', {
+          source: (route.params?.source ?? 'paywall') as FoundingOfferSurface | string,
+          reasons: foundingEligibility.reasons,
+        });
+      }
+      if (!didLogFoundingCheckedRef.current) {
+        didLogFoundingCheckedRef.current = true;
+        void logEvent('founding_offer_checked', {
+          source: route.params?.source ?? 'paywall',
+          eligible,
+          introOfferPresent: foundingSummary.status === 'available',
+        });
+        void logEvent(
+          foundingSummary.status === 'available' && eligible
+            ? 'founding_offer_available'
+            : 'founding_offer_unavailable',
+          {
+            source: route.params?.source ?? 'paywall',
+            eligible,
+            introOfferPresent: foundingSummary.status === 'available',
+          },
+        );
+      }
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    getEventCount,
+    items.length,
+    logEvent,
+    route.params?.source,
+    purchaseState?.isEntitled,
+    settings.guidedOnboarding,
+    settings.guidedOnboardingCompleted,
+    settings.developerModeEnabled,
+    settings.developerForceProAccessEnabled,
+  ]);
 
   useEffect(() => {
     if (didLogViewRef.current) return;
@@ -62,10 +263,63 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       source: route.params?.source,
       trigger,
     });
-  }, [isPro, logEvent, route.params?.source, trigger]);
+    void logEvent('paywall_viewed', { entryContext, source: route.params?.source });
+  }, [entryContext, isPro, logEvent, route.params?.source, trigger]);
 
+  const isPhotoPaywall = route.params?.source === 'item_multi_photo';
+  const isBstCardUnlockPaywall = route.params?.source === 'bst_locked_card' || route.params?.source === 'bst_save_all_cards' || route.params?.source === 'bst_save_collage_locked';
+  const foundingVisible = !isBstCardUnlockPaywall && foundingEligible && foundingOffer.status === 'available' && !isPro;
+
+  useEffect(() => {
+    const yearlyOption = options.find((entry) => entry.kind === 'yearly');
+    const payload = {
+      source: route.params?.source ?? 'paywall',
+      yearlyPackageIdentifier: yearlyOption?.packageIdentifier ?? '',
+      yearlyProductId: yearlyOption?.productId ?? '',
+      yearlyPriceString: yearlyOption?.priceString ?? '',
+      foundingOfferStatus: foundingOffer.status,
+      foundingOfferPriceString: foundingOffer.discountedPriceString ?? '',
+      foundingEligible,
+      isPro,
+      isBstCardUnlockPaywall,
+      foundingVisible,
+    };
+    if (__DEV__) {
+      console.info('[founding-intro] paywall display gate', payload);
+    }
+    void logEvent('intro_offer_display_gate_debug', payload);
+  }, [
+    foundingEligible,
+    foundingOffer.discountedPriceString,
+    foundingOffer.status,
+    foundingVisible,
+    isBstCardUnlockPaywall,
+    isPro,
+    logEvent,
+    options,
+    route.params?.source,
+  ]);
+
+  useEffect(() => {
+    if (didLogFoundingViewRef.current || !foundingVisible) return;
+    didLogFoundingViewRef.current = true;
+    void logEvent('founding_offer_displayed', { source: route.params?.source ?? 'paywall' });
+  }, [foundingVisible, logEvent, route.params?.source]);
+
+  const displayOptions = useMemo(() => {
+    if (!foundingVisible || foundingOffer.status !== 'available') return options;
+    return options.map((entry) => {
+      if (entry.kind !== 'yearly') return entry;
+      return {
+        ...entry,
+        priceString: foundingOffer.discountedPriceString || entry.priceString,
+        badge: 'Founding pricing',
+        subtitle: 'Special first-year pricing',
+      };
+    });
+  }, [foundingOffer, foundingVisible, options]);
   const selectedOption = useMemo(
-    () => options.find((entry) => entry.kind === selectedKind) ?? {
+    () => displayOptions.find((entry) => entry.kind === selectedKind) ?? {
       kind: 'yearly' as const,
       title: 'Yearly',
       subtitle: '$1.67/month • Save ~45%',
@@ -73,24 +327,21 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       badge: 'Most popular',
       available: false,
     },
-    [options, selectedKind],
+    [displayOptions, selectedKind],
   );
-  const isPhotoPaywall = route.params?.source === 'item_multi_photo';
-  const isBstCardUnlockPaywall = route.params?.source === 'bst_locked_card' || route.params?.source === 'bst_save_all_cards' || route.params?.source === 'bst_save_collage_locked';
+  const bstSelectedOption = useMemo(
+    () => options.find((entry) => entry.kind === 'yearly')
+      ?? options.find((entry) => entry.kind === 'monthly')
+      ?? options[0]
+      ?? selectedOption,
+    [options, selectedOption],
+  );
   const totalItems = route.params?.totalItems ?? paywallDraftItems.length ?? 0;
-  const headline = 'Unlock Pro';
-  const subtext = isPhotoPaywall
-    ? 'Free includes 1 photo per item.\nPro features coming soon'
-    : isBstCardUnlockPaywall
-      ? `Get all ${totalItems} items and export clean images`
-      : 'Generate cards for all items, create unlimited drafts, and add multiple photos per item.';
-  const selectedCtaLabel = loading
-    ? 'Please wait…'
-    : selectedKind === 'monthly'
-      ? 'Start monthly plan'
-      : selectedKind === 'yearly'
-        ? 'Get yearly plan'
-        : 'Unlock forever';
+  const contextualCopy = foundingVisible ? foundingPaywallContent : paywallContent[entryContext];
+  const headline = contextualCopy.title;
+  const subtext = !foundingVisible && entryContext === 'bst' && isPhotoPaywall
+    ? 'Free includes 1 photo per item. Unlock more with Pro.'
+    : contextualCopy.subtitle;
   const bstDisplayCopyByKind: Record<ProPaywallOption['kind'], { title: string; price: string; subtitle: string; badge?: string }> = {
     monthly: {
       title: 'Monthly',
@@ -110,6 +361,14 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       badge: 'Limited time',
     },
   };
+  const isPlaceholderPrice = (value?: string) => {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return !normalized || normalized === 'price shown at checkout';
+  };
+  const foundingYearlyBasePrice = useMemo(() => {
+    const yearlyOption = options.find((entry) => entry.kind === 'yearly');
+    return isPlaceholderPrice(yearlyOption?.priceString) ? '$19.99 / year' : String(yearlyOption?.priceString ?? '$19.99 / year');
+  }, [options]);
 
   const styles = StyleSheet.create({
     title: {
@@ -134,6 +393,18 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       lineHeight: 22,
       fontWeight: '700',
       color: theme.colors.textPrimary,
+    },
+    sectionLabel: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: theme.colors.textPrimary,
+    },
+    foundingEyebrow: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: theme.colors.accentPeriwinkle,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
     },
     dynamicLine: {
       fontSize: 16,
@@ -225,6 +496,30 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       fontWeight: '800',
       color: theme.colors.textPrimary,
     },
+    foundingPriceStack: {
+      gap: 4,
+    },
+    foundingPriceRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 8,
+      flexWrap: 'wrap',
+    },
+    foundingOriginalPrice: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textDecorationLine: 'line-through',
+    },
+    foundingIntroPrice: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: theme.colors.textPrimary,
+    },
+    foundingSavings: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: theme.colors.accentPeriwinkle,
+    },
     optionMeta: {
       fontSize: 13,
       color: theme.colors.textSecondary,
@@ -247,16 +542,39 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       color: theme.colors.textSecondary,
       fontWeight: '600',
     },
-    comingSoonTitle: {
-      fontSize: 14,
-      fontWeight: '700',
+    ctaContext: {
+      fontSize: 13,
+      textAlign: 'center',
       color: theme.colors.textSecondary,
+      fontWeight: '600',
     },
-    comingSoonText: {
+    secondarySection: {
+      gap: 8,
+    },
+    secondaryBullet: {
       fontSize: 14,
       lineHeight: 20,
       color: theme.colors.textSecondary,
-      opacity: 0.9,
+    },
+    pricingSummaryCard: {
+      gap: 8,
+    },
+    pricingSummaryPrimary: {
+      fontSize: 19,
+      fontWeight: '800',
+      color: theme.colors.textPrimary,
+      textAlign: 'center',
+    },
+    pricingSummaryValue: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.textPrimary,
+      textAlign: 'center',
+    },
+    pricingSummaryAlt: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
     },
     restoreButton: {
       alignItems: 'center',
@@ -265,16 +583,29 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   });
 
   const handleUnlock = async () => {
-    await logEvent('bst_paywall_unlock_tapped', { source: route.params?.source, selectedKind: selectedOption.kind });
+    const purchaseOption = isBstCardUnlockPaywall ? bstSelectedOption : selectedOption;
+    await logEvent('bst_paywall_unlock_tapped', { source: route.params?.source, selectedKind: purchaseOption.kind });
+    await logEvent('paywall_cta_clicked', { entryContext, source: route.params?.source, selectedKind: purchaseOption.kind });
+    const foundingYearlySelected = foundingVisible && purchaseOption.kind === 'yearly' && foundingOffer.status === 'available';
+    if (foundingYearlySelected) {
+      await logEvent('founding_offer_cta_tapped', {
+        source: route.params?.source ?? 'paywall',
+        selectedKind: purchaseOption.kind,
+      });
+      await logEvent('founding_offer_purchase_started', {
+        source: route.params?.source ?? 'paywall',
+        selectedKind: purchaseOption.kind,
+      });
+    }
     await trackProPurchaseStarted(logEvent, {
       isPro,
       triggeredFrom: route.params?.source ?? 'paywall',
       source: route.params?.source,
       trigger,
-      productId: selectedOption.productId,
-      packageIdentifier: selectedOption.packageIdentifier,
+      productId: purchaseOption.productId,
+      packageIdentifier: purchaseOption.packageIdentifier,
     });
-    if (!selectedOption.available || !selectedOption.packageIdentifier || !appConfig.monetizationEnabled) {
+    if (!purchaseOption.available || !purchaseOption.packageIdentifier || !appConfig.monetizationEnabled) {
       await trackProPurchaseFailed(logEvent, {
         isPro,
         triggeredFrom: route.params?.source ?? 'paywall',
@@ -286,8 +617,15 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     setLoading(true);
-    const result = await purchasePackage(selectedOption.packageIdentifier);
+    const result = await purchasePackage(purchaseOption.packageIdentifier);
     await refreshPurchaseState();
+    if (foundingYearlySelected && result.status === 'success' && result.entitlementActive) {
+      await updateSettings({ foundingMemberJoined: true });
+      await logEvent('founding_offer_purchase_completed', {
+        source: route.params?.source ?? 'paywall',
+        selectedKind: purchaseOption.kind,
+      });
+    }
     setLoading(false);
     if (result.status === 'success') {
       await trackProPurchaseCompleted(logEvent, {
@@ -295,10 +633,10 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
         triggeredFrom: route.params?.source ?? 'paywall',
         source: route.params?.source,
         trigger,
-        productId: selectedOption.productId,
-        packageIdentifier: selectedOption.packageIdentifier,
+        productId: purchaseOption.productId,
+        packageIdentifier: purchaseOption.packageIdentifier,
       });
-      Alert.alert('Pro unlocked', 'BST Pro is now available on this device.');
+      Alert.alert('Pro unlocked', 'Pro is now available on this device.');
       navigation.goBack();
       return;
     }
@@ -308,8 +646,8 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       triggeredFrom: route.params?.source ?? 'paywall',
       source: route.params?.source,
       trigger,
-      productId: selectedOption.productId,
-      packageIdentifier: selectedOption.packageIdentifier,
+      productId: purchaseOption.productId,
+      packageIdentifier: purchaseOption.packageIdentifier,
       reason: result.errorCode || result.errorMessage || 'purchase_failed',
     });
     Alert.alert('Purchase failed', result.errorMessage || 'Please try again.');
@@ -320,7 +658,7 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     const result = await restorePurchases();
     await refreshPurchaseState();
     setLoading(false);
-    if (result.status === 'success') {
+    if (result.status === 'success' && result.entitlementActive) {
       await trackProPurchaseRestored(logEvent, {
         isPro: result.entitlementActive,
         triggeredFrom: route.params?.source ?? 'paywall',
@@ -329,6 +667,10 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
       });
       Alert.alert('Restore complete', 'Purchases restored.');
       navigation.goBack();
+      return;
+    }
+    if (result.status === 'success' && !result.entitlementActive) {
+      Alert.alert('No purchases found', result.errorMessage || 'No previous Pro purchase was found for this Apple account.');
       return;
     }
     await trackProPurchaseFailed(logEvent, {
@@ -341,25 +683,38 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     Alert.alert('Restore failed', result.errorMessage || 'Please try again.');
   };
 
+  const handleDismiss = useCallback(async () => {
+    await logEvent('paywall_dismissed', { entryContext, source: route.params?.source });
+    if (foundingVisible && selectedKind === 'yearly') {
+      await logEvent('founding_offer_declined', { source: route.params?.source ?? 'paywall' });
+    }
+    navigation.goBack();
+  }, [entryContext, foundingVisible, logEvent, navigation, route.params?.source, selectedKind]);
+
   return (
     <Screen>
       <Card>
+        {contextualCopy.badge ? <Text style={styles.foundingEyebrow}>{contextualCopy.badge}</Text> : null}
         <Text style={styles.title}>{headline}</Text>
         {!isBstCardUnlockPaywall ? <Text style={styles.body}>{subtext}</Text> : null}
       </Card>
 
       {isBstCardUnlockPaywall ? (
         <Card>
-          <Text style={styles.heroTitle}>Finish your post</Text>
-          <Text style={styles.heroSubheading}>{`Get all ${totalItems} items and export clean images`}</Text>
-          <Text style={styles.body}>You’ve already built your post — unlock the rest to finish it</Text>
-        </Card>
-      ) : null}
-
-      {!isBstCardUnlockPaywall ? (
-        <Card>
-          <Text style={styles.dynamicLine}>Finish your BST post in seconds</Text>
-          <Text style={styles.body}>{subtext}</Text>
+          <Text style={styles.heroTitle}>Finish your BST post</Text>
+          <Text style={styles.body}>{`You're viewing ${FREE_BST_ITEM_CARD_LIMIT} of ${totalItems} items`}</Text>
+          <Text style={styles.sectionLabel}>Unlock:</Text>
+          <Text style={styles.bullet}>• All item cards (not just 2)</Text>
+          <Text style={styles.bullet}>• Clean collage images</Text>
+          <Text style={styles.bullet}>• Copy-ready comments</Text>
+          <View style={styles.secondarySection}>
+            <Text style={styles.sectionLabel}>Everything you unlock with Pro</Text>
+            <Text style={styles.secondaryBullet}>• Create your own categories</Text>
+            <Text style={styles.secondaryBullet}>• Sell items with ready-to-post BST listings</Text>
+            <Text style={styles.secondaryBullet}>• See matching outfits across kids</Text>
+            <Text style={styles.secondaryBullet}>• Add multiple photos per item</Text>
+            <Text style={styles.secondaryBullet}>• Keep preset tags and unlock custom ones</Text>
+          </View>
         </Card>
       ) : null}
 
@@ -387,63 +742,95 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
         </Card>
       ) : null}
 
-      <Card>
-        {isBstCardUnlockPaywall ? (
-          <>
-            <Text style={styles.bullet}>• All item cards</Text>
-            <Text style={styles.bullet}>• Clean, watermark-free images</Text>
-            <Text style={styles.bullet}>• Post-ready in seconds</Text>
-          </>
-        ) : (
-          <>
-            <Text style={styles.bullet}>• Cards for every item</Text>
-            <Text style={styles.bullet}>• Unlimited sale drafts</Text>
-            <Text style={styles.bullet}>• Add multiple photos per item</Text>
-          </>
-        )}
-      </Card>
-
       {!isBstCardUnlockPaywall ? (
         <Card>
-          <Text style={styles.comingSoonTitle}>Coming soon</Text>
-          <Text style={styles.comingSoonText}>• Match outfits across siblings</Text>
-          <Text style={styles.comingSoonText}>• Find wardrobe gaps automatically</Text>
+          {contextualCopy.primaryBullets.map((bullet) => (
+            <Text key={bullet} style={styles.bullet}>• {bullet}</Text>
+          ))}
         </Card>
       ) : null}
 
-      <View style={styles.options}>
-        {options.map((option) => {
-          const active = option.kind === selectedKind;
-          const featured = option.kind === 'yearly';
-          const display = isBstCardUnlockPaywall
-            ? bstDisplayCopyByKind[option.kind]
-            : {
-                title: option.title,
-                price: option.priceString,
-                subtitle: option.subtitle ?? '',
-                badge: option.badge,
-              };
-          return (
-            <Pressable key={option.kind} onPress={() => setSelectedKind(option.kind)}>
-              <Card style={[styles.optionCard, featured ? styles.optionCardFeatured : undefined, active ? styles.optionCardActive : undefined]}>
-                {display.badge ? (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{display.badge}</Text>
-                  </View>
-                ) : null}
-                <Text style={styles.optionTitle}>{display.title}</Text>
-                <Text style={styles.optionPrice}>{display.price}</Text>
-                <Text style={styles.optionMeta}>{display.subtitle}</Text>
-              </Card>
-            </Pressable>
-          );
-        })}
-      </View>
+      {!isBstCardUnlockPaywall && contextualCopy.secondaryBullets.length ? (
+        <Card>
+          {contextualCopy.secondaryHeader ? <Text style={styles.sectionLabel}>{contextualCopy.secondaryHeader}</Text> : null}
+          {contextualCopy.secondaryBullets.map((bullet) => (
+            <Text key={bullet} style={styles.secondaryBullet}>• {bullet}</Text>
+          ))}
+        </Card>
+      ) : null}
+
+      {isBstCardUnlockPaywall ? (
+        <Card style={styles.pricingSummaryCard}>
+          <Text style={styles.pricingSummaryPrimary}>Unlock all items in this post • $19.99</Text>
+          <Text style={styles.pricingSummaryValue}>Include all items + remove watermark overlay</Text>
+          <Text style={styles.pricingSummaryAlt}>or $2.99/month</Text>
+        </Card>
+      ) : (
+        <View style={styles.options}>
+          {displayOptions.map((option) => {
+            const active = option.kind === selectedKind;
+            const featured = option.kind === 'yearly';
+            const fallbackDisplay = bstDisplayCopyByKind[option.kind];
+            const isFoundingYearlyCard = foundingVisible && option.kind === 'yearly';
+            const display = {
+              title: option.title?.trim() || fallbackDisplay.title,
+              price: isPlaceholderPrice(option.priceString) ? fallbackDisplay.price : option.priceString,
+              subtitle: option.subtitle?.trim() || fallbackDisplay.subtitle,
+              badge: option.badge ?? fallbackDisplay.badge,
+            };
+            return (
+              <Pressable key={option.kind} onPress={() => setSelectedKind(option.kind)}>
+                <Card style={[styles.optionCard, featured ? styles.optionCardFeatured : undefined, active ? styles.optionCardActive : undefined]}>
+                  {display.badge ? (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{display.badge}</Text>
+                    </View>
+                  ) : null}
+                  <Text style={styles.optionTitle}>{display.title}</Text>
+                  {isFoundingYearlyCard ? (
+                    <View style={styles.foundingPriceStack}>
+                      <View style={styles.foundingPriceRow}>
+                        <Text style={styles.foundingOriginalPrice}>{foundingYearlyBasePrice}</Text>
+                        <Text style={styles.foundingIntroPrice}>{display.price}</Text>
+                      </View>
+                      <Text style={styles.foundingSavings}>Special first-year price</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.optionPrice}>{display.price}</Text>
+                  )}
+                  <Text style={styles.optionMeta}>{display.subtitle}</Text>
+                </Card>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
 
       <Card>
-        <PrimaryButton label={isBstCardUnlockPaywall ? selectedCtaLabel : loading ? 'Please wait…' : 'Unlock Pro'} onPress={() => void handleUnlock()} disabled={loading} />
+        <PrimaryButton
+          label={
+            isBstCardUnlockPaywall
+              ? (loading ? 'Please wait…' : 'Unlock all items in this post')
+              : foundingVisible
+                ? selectedKind === 'yearly'
+                  ? (loading ? 'Please wait…' : 'Get founding price')
+                  : loading
+                    ? 'Please wait…'
+                    : 'Unlock Pro'
+                : loading
+                  ? 'Please wait…'
+                  : 'Unlock Pro'
+          }
+          onPress={() => void handleUnlock()}
+          disabled={loading}
+        />
         {isBstCardUnlockPaywall ? <Text style={styles.ctaNote}>Unlock instantly</Text> : null}
-        <PrimaryButton label="Not now" variant="secondary" onPress={() => navigation.goBack()} disabled={loading} />
+        {!isBstCardUnlockPaywall && foundingVisible && selectedKind === 'yearly' ? (
+          <Text style={styles.ctaContext}>Then $19.99/year after</Text>
+        ) : !isBstCardUnlockPaywall && contextualCopy.ctaSubtext ? (
+          <Text style={styles.ctaContext}>{contextualCopy.ctaSubtext}</Text>
+        ) : null}
+        <PrimaryButton label="Not now" variant="secondary" onPress={() => void handleDismiss()} disabled={loading} />
         <Pressable style={styles.restoreButton} onPress={() => void handleRestore()} disabled={loading}>
           <Text style={styles.optionMeta}>Restore purchases</Text>
         </Pressable>

@@ -2,17 +2,46 @@ import * as SQLite from 'expo-sqlite';
 import { inferSizeScheme, isShoeCategory, normalizeSize } from '@/lib/sizing';
 
 const DB_NAME = 'layetteout.db';
-const LATEST_DB_VERSION = 43;
+const LATEST_DB_VERSION = 55;
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let initPromise: Promise<void> | null = null;
 const LEGACY_SAMPLE_CHILD_IDS = ['child-ava', 'child-noah'] as const;
 const LEGACY_SAMPLE_ITEM_IDS = ['item-1', 'item-2', 'item-3', 'item-4', 'item-5', 'item-6'] as const;
+const LEGACY_TAG_PRESET_KEYS = new Set([
+  'holiday',
+  'christmas',
+  'halloween',
+  'birthday',
+  'party',
+  'travel',
+  'vacation',
+  'daycare',
+  'school',
+  'sleep',
+  'pajamas',
+  'pjs',
+  'outdoor',
+  'hand me down',
+  'handmedown',
+  'hand me downs',
+  'handmedowns',
+  'special occasion',
+]);
+
+const normalizeLegacyTagKey = (value: string) =>
+  String(value)
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const createTablesSql = `
 CREATE TABLE IF NOT EXISTS children (
   id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL,
+  sortOrder INTEGER NOT NULL DEFAULT 0,
   photoUri TEXT,
   notes TEXT,
   hiddenClosetCategories TEXT,
@@ -170,6 +199,7 @@ CREATE TABLE IF NOT EXISTS settings (
   lastShoppingType TEXT,
   lastShoppingChildId TEXT,
   lastPromptedAt INTEGER,
+  lastBackupAt INTEGER,
   lastUpsellShownAt INTEGER,
   closetCategoryOrder TEXT,
   hiddenClosetCategoriesGlobal TEXT,
@@ -180,11 +210,15 @@ CREATE TABLE IF NOT EXISTS settings (
   developerModeEnabled INTEGER NOT NULL DEFAULT 0,
   devProUnlocked INTEGER NOT NULL DEFAULT 0,
   developerForceProAccessEnabled INTEGER NOT NULL DEFAULT 0,
+  developerActLikeFirstTimeUser INTEGER NOT NULL DEFAULT 0,
   betaKidLimitBannerDismissed INTEGER NOT NULL DEFAULT 0,
   proTeaserBannerDismissed INTEGER NOT NULL DEFAULT 0,
   missingPhotoRestoreNudgeShown INTEGER NOT NULL DEFAULT 1,
   hasSeenBstPostingGuide INTEGER NOT NULL DEFAULT 0,
-  proEarlyAccessJoined INTEGER NOT NULL DEFAULT 0
+  hasSeenBstEntryOnboarding INTEGER NOT NULL DEFAULT 0,
+  hasSeenStructuredTagsEducation INTEGER NOT NULL DEFAULT 0,
+  proEarlyAccessJoined INTEGER NOT NULL DEFAULT 0,
+  foundingMemberJoined INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sale_drafts (
@@ -202,6 +236,7 @@ CREATE TABLE IF NOT EXISTS sale_drafts (
   defaultPaymentNote TEXT,
   collageGridSize TEXT NOT NULL DEFAULT 'Auto',
   collageOrderMode TEXT NOT NULL DEFAULT 'highest-price',
+  showPricesOnCollage INTEGER NOT NULL DEFAULT 1,
   customHeaderImageUri TEXT,
   freeGeneratedCardItemIdsJson TEXT,
   freeGenerationConsumedAt INTEGER,
@@ -293,6 +328,26 @@ CREATE TABLE IF NOT EXISTS print_aliases (
   deletedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS custom_categories (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  icon TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  deletedAt INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS custom_tags (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  normalizedName TEXT NOT NULL UNIQUE,
+  source TEXT NOT NULL DEFAULT 'user',
+  childIdsJson TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  deletedAt INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deletedAt);
 CREATE INDEX IF NOT EXISTS idx_child_items_child ON child_items(childId, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_child_items_item ON child_items(itemId, deletedAt);
@@ -306,6 +361,8 @@ CREATE INDEX IF NOT EXISTS idx_items_bundle ON items(bundleId, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_storage_locations_child ON storage_locations(childId, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_print_aliases_canonical ON print_aliases(canonical, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_print_aliases_alias ON print_aliases(alias, deletedAt);
+CREATE INDEX IF NOT EXISTS idx_custom_categories_deleted ON custom_categories(deletedAt, updatedAt);
+CREATE INDEX IF NOT EXISTS idx_custom_tags_deleted ON custom_tags(deletedAt, updatedAt);
 CREATE INDEX IF NOT EXISTS idx_sale_drafts_updated ON sale_drafts(updatedAt DESC);
 CREATE INDEX IF NOT EXISTS idx_sale_draft_items_draft ON sale_draft_items(saleDraftId, listingOrder);
 CREATE INDEX IF NOT EXISTS idx_sale_draft_items_item ON sale_draft_items(itemId);
@@ -316,8 +373,8 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
   if ((row?.count ?? 0) > 0) return;
 
   await db.runAsync(
-    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, developerForceProAccessEnabled, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown, hasSeenBstPostingGuide, proEarlyAccessJoined)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO settings (id, detailPromptMode, closetAddDefaultView, notificationsEnabled, notifyWeeklyTidy, notifyOutgrow, monetizationEnabled, guidedOnboarding, guidedOnboardingCompleted, advancedFeaturesUnlocked, lastShoppingType, lastShoppingChildId, lastPromptedAt, lastBackupAt, lastUpsellShownAt, closetCategoryOrder, hiddenClosetCategoriesGlobal, wishlistCategoryOrder, hiddenWishlistCategories, kidsPreviewCategories, inventoryRealityCheckOwnedThreshold, developerModeEnabled, devProUnlocked, developerForceProAccessEnabled, developerActLikeFirstTimeUser, betaKidLimitBannerDismissed, proTeaserBannerDismissed, missingPhotoRestoreNudgeShown, hasSeenBstPostingGuide, hasSeenBstEntryOnboarding, hasSeenStructuredTagsEducation, proEarlyAccessJoined, foundingMemberJoined)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     'app',
     'sometimes',
     'detailed',
@@ -334,6 +391,7 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
     null,
     null,
     null,
+    null,
     '[]',
     null,
     '[]',
@@ -344,7 +402,11 @@ const ensureDefaultSettings = async (db: SQLite.SQLiteDatabase) => {
     0,
     0,
     0,
+    0,
     1,
+    0,
+    0,
+    0,
     0,
     0,
   );
@@ -1026,6 +1088,7 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
         defaultPaymentNote TEXT,
         collageGridSize TEXT NOT NULL DEFAULT 'Auto',
         collageOrderMode TEXT NOT NULL DEFAULT 'highest-price',
+        showPricesOnCollage INTEGER NOT NULL DEFAULT 1,
         customHeaderImageUri TEXT,
         freeGenerationConsumedAt INTEGER,
         createdAt INTEGER NOT NULL,
@@ -1167,6 +1230,158 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
     currentVersion = 45;
   }
 
+  if (currentVersion < 46) {
+    const saleDraftColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('sale_drafts');`);
+    if (!saleDraftColumns.some((column) => column.name === 'showPricesOnCollage')) {
+      await db.execAsync('ALTER TABLE sale_drafts ADD COLUMN showPricesOnCollage INTEGER NOT NULL DEFAULT 1;');
+    }
+    await db.execAsync(`UPDATE sale_drafts SET showPricesOnCollage = COALESCE(showPricesOnCollage, 1);`);
+    await db.execAsync('PRAGMA user_version = 46;');
+    currentVersion = 46;
+  }
+
+  if (currentVersion < 47) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'hasSeenBstEntryOnboarding')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN hasSeenBstEntryOnboarding INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync(`UPDATE settings SET hasSeenBstEntryOnboarding = COALESCE(hasSeenBstEntryOnboarding, 0);`);
+    await db.execAsync('PRAGMA user_version = 47;');
+    currentVersion = 47;
+  }
+
+  if (currentVersion < 48) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'developerActLikeFirstTimeUser')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN developerActLikeFirstTimeUser INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync(`UPDATE settings SET developerActLikeFirstTimeUser = COALESCE(developerActLikeFirstTimeUser, 0);`);
+    await db.execAsync('PRAGMA user_version = 48;');
+    currentVersion = 48;
+  }
+
+  if (currentVersion < 49) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS custom_categories (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        icon TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        deletedAt INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_custom_categories_deleted ON custom_categories(deletedAt, updatedAt);
+    `);
+    await db.execAsync('PRAGMA user_version = 49;');
+    currentVersion = 49;
+  }
+
+  if (currentVersion < 50) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'hasSeenStructuredTagsEducation')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN hasSeenStructuredTagsEducation INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS custom_tags (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        normalizedName TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL DEFAULT 'user',
+        childIdsJson TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        deletedAt INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_custom_tags_deleted ON custom_tags(deletedAt, updatedAt);
+      UPDATE settings SET hasSeenStructuredTagsEducation = COALESCE(hasSeenStructuredTagsEducation, 0);
+    `);
+
+    const itemRows = await db.getAllAsync<{ tags: string | null }>('SELECT tags FROM items WHERE deletedAt IS NULL;');
+    const now = Date.now();
+    const customTagNames = new Map<string, string>();
+    itemRows.forEach((row) => {
+      if (!row.tags) return;
+      try {
+        const parsed = JSON.parse(row.tags) as string[];
+        parsed.forEach((tag) => {
+          const display = String(tag ?? '').trim().replace(/\s+/g, ' ');
+          if (!display) return;
+          const normalizedName = normalizeLegacyTagKey(display);
+          if (!normalizedName || LEGACY_TAG_PRESET_KEYS.has(normalizedName)) return;
+          if (!customTagNames.has(normalizedName)) customTagNames.set(normalizedName, display);
+        });
+      } catch {
+        // ignore malformed legacy tag payloads
+      }
+    });
+
+    for (const [normalizedName, name] of customTagNames.entries()) {
+      await db.runAsync(
+        `INSERT OR IGNORE INTO custom_tags (id, name, normalizedName, source, createdAt, updatedAt, deletedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?);`,
+        `legacy-tag-${normalizedName.replace(/\s+/g, '-')}`,
+        name,
+        normalizedName,
+        'legacy',
+        now,
+        now,
+        null,
+      );
+    }
+
+    await db.execAsync('PRAGMA user_version = 50;');
+    currentVersion = 50;
+  }
+
+  if (currentVersion < 51) {
+    const customTagColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('custom_tags');`);
+    if (!customTagColumns.some((column) => column.name === 'childIdsJson')) {
+      await db.execAsync('ALTER TABLE custom_tags ADD COLUMN childIdsJson TEXT;');
+    }
+    await db.execAsync('PRAGMA user_version = 51;');
+    currentVersion = 51;
+  }
+
+  if (currentVersion < 52) {
+    await db.execAsync('UPDATE custom_tags SET childIdsJson = NULL WHERE deletedAt IS NULL;');
+    await db.execAsync('PRAGMA user_version = 52;');
+    currentVersion = 52;
+  }
+
+  if (currentVersion < 53) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'foundingMemberJoined')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN foundingMemberJoined INTEGER NOT NULL DEFAULT 0;');
+    }
+    await db.execAsync('UPDATE settings SET foundingMemberJoined = COALESCE(foundingMemberJoined, 0);');
+    await db.execAsync('PRAGMA user_version = 53;');
+    currentVersion = 53;
+  }
+
+  if (currentVersion < 54) {
+    const settingsColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('settings');`);
+    if (!settingsColumns.some((column) => column.name === 'lastBackupAt')) {
+      await db.execAsync('ALTER TABLE settings ADD COLUMN lastBackupAt INTEGER;');
+    }
+    await db.execAsync('PRAGMA user_version = 54;');
+    currentVersion = 54;
+  }
+
+  if (currentVersion < 55) {
+    const childColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info('children');`);
+    if (!childColumns.some((column) => column.name === 'sortOrder')) {
+      await db.execAsync('ALTER TABLE children ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0;');
+    }
+    const orderedChildren = await db.getAllAsync<{ id: string }>(
+      'SELECT id FROM children ORDER BY deletedAt IS NOT NULL ASC, createdAt DESC, id ASC;',
+    );
+    for (const [index, child] of orderedChildren.entries()) {
+      await db.runAsync('UPDATE children SET sortOrder = ? WHERE id = ?;', index, child.id);
+    }
+    await db.execAsync('PRAGMA user_version = 55;');
+    currentVersion = 55;
+  }
+
   const finalVersionRow = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');
   const finalVersion = finalVersionRow?.user_version ?? currentVersion;
   await syncSchemaMigrations(db, finalVersion);
@@ -1179,6 +1394,29 @@ const migrate = async (db: SQLite.SQLiteDatabase) => {
 export const getDb = async () => {
   if (!dbPromise) dbPromise = SQLite.openDatabaseAsync(DB_NAME);
   return dbPromise;
+};
+
+export const getDatabaseName = () => DB_NAME;
+export const getLatestSchemaVersion = () => LATEST_DB_VERSION;
+
+export const getCurrentSchemaVersion = async (): Promise<number> => {
+  await initDatabase();
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');
+  return row?.user_version ?? 0;
+};
+
+export const resetDatabaseConnection = async () => {
+  if (dbPromise) {
+    try {
+      const db = await dbPromise;
+      await db.closeAsync();
+    } catch {
+      // Best-effort close before reopening.
+    }
+  }
+  dbPromise = null;
+  initPromise = null;
 };
 
 export const initDatabase = async () => {

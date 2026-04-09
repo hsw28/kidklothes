@@ -25,6 +25,7 @@ import { formatItemCategoryLabel } from '@/utils/itemLabels';
 import { getItemDisplayFallbackUri, getItemDisplayImageUri } from '@/utils/itemMedia';
 import { validateQuickLinkSaveInput } from '@/utils/itemValidation';
 import { getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
+import { getItemTagSearchTokens } from '@/utils/tagSystem';
 import { showActionMenu } from '@/utils/actionSheets';
 import { fetchLinkItemDraft } from '@/utils/linkItemDraft';
 
@@ -46,7 +47,7 @@ const tokenMatch = (item: Item, query: string) => {
     .filter(Boolean);
   if (tokens.length === 0) return true;
 
-  const haystack = [item.title, item.printName ?? '', item.brand ?? '', item.brandTags.join(' '), item.tags.join(' ')].join(' ').toLowerCase();
+  const haystack = [item.title, item.printName ?? '', item.brand ?? '', item.brandTags.join(' '), item.tags.join(' '), getItemTagSearchTokens(item).join(' ')].join(' ').toLowerCase();
   return tokens.every((token) => haystack.includes(token));
 };
 
@@ -219,6 +220,7 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
   const [filtersExpanded, setFiltersExpanded] = useState(!hideInbox);
   const [showCategoryLayoutEditor, setShowCategoryLayoutEditor] = useState(false);
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
+  const hasClosetPowerAccess = advancedUnlocked;
   const openItemDetail = useCallback((itemId: string) => {
     navigation.navigate('ItemDetail', { itemId });
   }, [navigation]);
@@ -818,6 +820,10 @@ export const ItemsListScreen: React.FC<Props> = ({ navigation, route }) => {
               <Pressable
                 onPress={(event) => {
                   event.stopPropagation();
+                  if (!hasClosetPowerAccess) {
+                    navigation.navigate('ProPaywall', { entryContext: 'closet_power' });
+                    return;
+                  }
                   setShowCategoryLayoutEditor((prev) => !prev);
                 }}
                 hitSlop={8}

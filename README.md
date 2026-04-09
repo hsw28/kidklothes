@@ -37,6 +37,7 @@ Notes:
 - Use a `test_...` RevenueCat key only for sandbox/testing.
 - Replace the test key with your public Apple SDK key before launch.
 - The expected RevenueCat setup is one entitlement (`layette_out_pro`) and one offering (`default`) with package types `monthly`, `annual`, and `lifetime`.
+- In App Store Connect, the current lifetime product ID is `com.anonymous.layetteout.pro.lifetimes`, and it should be attached to the RevenueCat `lifetime` package.
 - Rebuild the app after changing Expo config env values so native builds pick them up.
 
 ## Unfurl Service

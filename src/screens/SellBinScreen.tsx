@@ -5,17 +5,22 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
 import { ChipSelector } from '@/components/ChipSelector';
 import { EmptyState } from '@/components/EmptyState';
+import { FeatureOnboardingModal } from '@/components/FeatureOnboardingModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { useData } from '@/db/DataContext';
+import { useBstEntryOnboarding } from '@/hooks/useBstEntryOnboarding';
 import { Item } from '@/models';
 import { ClosetStackParamList } from '@/navigation/types';
 import { FREE_BST_DRAFT_LIMIT, FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/bstLimits';
 import { trackSellBinOpened } from '@/services/bst/bstAnalytics';
+import { shouldSuppressFoundingOffer } from '@/services/foundingOffer';
+import { getFoundingMemberYearlyOffer } from '@/services/purchases';
 import { hasProAccess } from '@/services/proAccess';
 import { useAppTheme } from '@/theme';
 import { getSpecialLocationIds } from '@/utils/closetViewInsights';
 import { makeId } from '@/utils/id';
+import { formatConditionLabel } from '@/utils/itemLabels';
 
 type Props = NativeStackScreenProps<ClosetStackParamList, 'SellBin'>;
 type ListedFilter = 'All' | 'Unlisted' | 'Listed';
@@ -31,7 +36,7 @@ const buildBstExportText = (rows: Item[], title: string) => {
     if (item.printName) parts.push(item.printName);
     if (item.brand) parts.push(item.brand);
     parts.push(item.size || 'N/A');
-    if (item.condition) parts.push(item.condition);
+    if (item.condition) parts.push(formatConditionLabel(item.condition));
     if (item.targetResalePrice !== undefined) parts.push(asCurrency(item.targetResalePrice));
     const link = item.outboundUrl || item.url || '';
     lines.push(`${idx + 1}. ${parts.join(' • ')}`);
@@ -44,15 +49,14 @@ const buildBstExportText = (rows: Item[], title: string) => {
 };
 
 export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
-  const { children, items, childItems, storageLocations, brands, updateItem, logEvent, settings, purchaseState } = useData();
+  const { children, items, childItems, storageLocations, brands, updateItem, logEvent, getEventCount, settings, purchaseState } = useData();
   const theme = useAppTheme();
   const didLogOpenRef = useRef(false);
   const lastFocusLoggedAtRef = useRef(0);
   const [childFilter, setChildFilter] = useState<string>('All');
   const [brandFilter, setBrandFilter] = useState<string>('All');
   const [listedFilter, setListedFilter] = useState<ListedFilter>('All');
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [selectionMode, setSelectionMode] = useState(false);
+  const [foundingOfferVisible, setFoundingOfferVisible] = useState(false);
 
   const childOptions = useMemo(() => ['All', ...children.map((child) => child.name)], [children]);
   const brandOptions = useMemo(() => ['All', ...brands], [brands]);
@@ -112,7 +116,6 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
   const purchaseTotal = forSale.reduce((sum, item) => sum + (item.purchasePrice ?? 0), 0);
   const estimatedResaleTotal = forSale.reduce((sum, item) => sum + (item.targetResalePrice ?? 0), 0);
   const soldTotal = sold.reduce((sum, item) => sum + (item.soldPrice ?? 0), 0);
-  const selectedItems = filtered.filter((item) => selectedIds.includes(item.id));
   const bundleSummaries = useMemo(() => {
     const grouped = new Map<string, { count: number; estimatedTotal: number }>();
     forSale.forEach((item) => {
@@ -125,6 +128,7 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
     return Array.from(grouped.entries()).map(([bundleId, summary]) => ({ bundleId, ...summary }));
   }, [forSale]);
   const isPro = hasProAccess(settings, purchaseState);
+  const bstEntryOnboarding = useBstEntryOnboarding(Boolean(settings.developerModeEnabled));
 
   useFocusEffect(
     React.useCallback(() => {
@@ -154,20 +158,36 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
     lastFocusLoggedAtRef.current = Date.now();
   }, [forSale.length, isPro, logEvent]);
 
-  const toggleSelected = (itemId: string) => {
-    setSelectedIds((prev) => (prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]));
-  };
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const foundingSummary = await getFoundingMemberYearlyOffer();
+      if (cancelled) return;
+      setFoundingOfferVisible(
+        foundingSummary.status === 'available'
+        && !isPro
+        && !shouldSuppressFoundingOffer(settings, purchaseState),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isPro,
+    purchaseState?.isEntitled,
+    settings.guidedOnboarding,
+    settings.guidedOnboardingCompleted,
+    settings.developerModeEnabled,
+    settings.developerForceProAccessEnabled,
+  ]);
 
   const openBstDraftCreate = () => {
-    navigation.navigate('BstSaleDraftCreate', selectedItems.length ? { prefillItemIds: selectedItems.map((item) => item.id) } : undefined);
+    navigation.navigate('BstSaleDraftCreate');
   };
-
-  const toggleSelectionMode = () => {
-    setSelectionMode((prev) => {
-      const next = !prev;
-      if (!next) setSelectedIds([]);
-      return next;
-    });
+  const startBstWithFreePreview = () => {
+    const prefillItemIds = forSale.slice(0, FREE_BST_ITEM_CARD_LIMIT).map((item) => item.id);
+    bstEntryOnboarding.dismiss();
+    navigation.navigate('BstSaleDraftCreate', prefillItemIds.length ? { prefillItemIds } : undefined);
   };
 
   const markListed = async (item: Item) => {
@@ -175,21 +195,6 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
     const nowIso = new Date().toISOString();
     await updateItem(item.id, { listedAt: nowIso });
     await logEvent('sell_bin_mark_listed', { itemId: item.id });
-  };
-
-  const createBundleFromSelected = async () => {
-    if (selectedItems.length === 0) return;
-    const bundleId = `bundle-${makeId().slice(0, 8)}`;
-    await Promise.all(selectedItems.map((item) => updateItem(item.id, { bundleId })));
-    await logEvent('sell_bin_bundle_created', { bundleId, count: selectedItems.length });
-    setSelectedIds([]);
-  };
-
-  const shareSelected = async () => {
-    if (selectedItems.length === 0) return;
-    const message = buildBstExportText(selectedItems, 'Kidklothes BST Draft');
-    await Share.share({ title: 'BST Draft', message });
-    await logEvent('sell_bin_export_shared', { count: selectedItems.length });
   };
 
   const shareBundle = async (bundleId: string) => {
@@ -210,6 +215,11 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
       fontSize: 18,
       fontWeight: '500',
       color: theme.colors.textPrimary,
+    },
+    sectionHeadingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
     },
     itemTitle: {
       fontSize: 16,
@@ -309,33 +319,64 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
       fontSize: 13,
       color: theme.colors.textSecondary,
     },
+    ctaSubtext: {
+      marginTop: 8,
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+    },
     summaryCard: {
       backgroundColor: theme.colors.accentPeriwinkleSoft,
     },
+    readyBanner: {
+      backgroundColor: theme.colors.surfaceMuted,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
     bstActions: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
-      alignItems: 'center',
+      gap: 12,
+      marginTop: 12,
     },
   });
 
   return (
     <Screen>
+      <FeatureOnboardingModal
+        visible={bstEntryOnboarding.visible}
+        title="Sell in minutes, not hours"
+        body="Turn your closet into ready-to-post listings"
+        bullets={[
+          'Create BST-ready collages',
+          'Generate comment cards automatically',
+          'Copy your full post in one tap',
+        ]}
+        primaryLabel="Create your first post"
+        note={`Free preview includes up to ${FREE_BST_ITEM_CARD_LIMIT} items`}
+        onPrimaryPress={startBstWithFreePreview}
+        onSecondaryPress={bstEntryOnboarding.dismiss}
+      />
+      {foundingOfferVisible ? (
+        <Card>
+          <Text style={styles.summary}>Founding Member pricing available</Text>
+          <Text style={styles.meta}>Unlock unlimited BST posts and clean exports.</Text>
+          <PrimaryButton
+            label="Get 50% off Pro"
+            variant="secondary"
+            onPress={() => navigation.navigate('ProPaywall', { entryContext: 'bst', source: 'sell_bin' })}
+          />
+          <Text style={styles.ctaSubtext}>Then $19.99/year after</Text>
+        </Card>
+      ) : null}
       {settings.developerModeEnabled ? (
         <Card>
           <Text style={styles.summary}>Create BST post</Text>
-          <Text style={styles.meta}>Select items to create a BST post</Text>
-          <PrimaryButton
-            label="Create BST post"
-            onPress={openBstDraftCreate}
-          />
+          <Text style={styles.meta}>Generate your listing, images, and captions in one tap.</Text>
           <View style={styles.bstActions}>
             <PrimaryButton
-              label={selectionMode ? (selectedItems.length ? `${selectedItems.length} selected` : 'Selecting items') : 'Select items'}
-              variant="secondary"
-              onPress={toggleSelectionMode}
+              label="Create BST post"
+              onPress={openBstDraftCreate}
             />
+            {!isPro ? <Text style={styles.ctaSubtext}>Start free • unlock full post with Pro</Text> : null}
             <PrimaryButton
               label="View drafts"
               variant="secondary"
@@ -352,6 +393,13 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
         {brandOptions.length > 1 ? <ChipSelector label="Brand" options={brandOptions} value={brandFilter} onChange={setBrandFilter} accent="sage" /> : null}
         <ChipSelector label="Listed" options={listedOptions} value={listedFilter} onChange={(value) => setListedFilter(value as ListedFilter)} />
       </Card>
+
+      {forSale.length > 1 ? (
+        <Card style={styles.readyBanner}>
+          <Text style={styles.summary}>You have {forSale.length} items ready to sell</Text>
+          <Text style={styles.meta}>Ready to post these? Create a BST post.</Text>
+        </Card>
+      ) : null}
 
       <Card style={styles.summaryCard}>
         <Text style={styles.summary}>For sale items: {forSale.length}</Text>
@@ -389,11 +437,6 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
               )}
               <View style={{ flex: 1, gap: 2 }}>
                 <View style={styles.itemHeader}>
-                  {selectionMode ? (
-                    <Pressable onPress={() => toggleSelected(item.id)} style={[styles.selectBox, selectedIds.includes(item.id) ? styles.selectBoxActive : undefined]}>
-                      <Text style={styles.selectText}>{selectedIds.includes(item.id) ? '✓' : ''}</Text>
-                    </Pressable>
-                  ) : null}
                   <Text style={styles.itemTitle}>{item.title}</Text>
                   {sellStatusByItemId.get(item.id) === 'sold' ? (
                     <Text style={styles.soldBadge}>Sold</Text>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
 import { BetaKidLimitModal } from '@/components/BetaKidLimitModal';
@@ -11,8 +11,8 @@ import { BETA_MAX_KIDS } from '@/config/betaLimits';
 import { useData } from '@/db/DataContext';
 import { usePromoteChildSize, canPromoteChildSize } from '@/hooks/usePromoteChildSize';
 import { KidsStackParamList } from '@/navigation/types';
-import { closetCategoryForItem } from '@/utils/closetViewInsights';
-import { ClosetCategory, categoryGlyph, closetCategoryToClothingType, closetLabel, getConfiguredKidsPreviewCategories } from '@/utils/categories';
+import { closetCategoryForItem, itemCategoryKey } from '@/utils/closetViewInsights';
+import { closetCategoryToClothingType, getCategoryGlyphForId, getCategoryLabel, getConfiguredKidsPreviewCategories } from '@/utils/categories';
 import { getChildItems } from '@/utils/fitInsights';
 import { isSampleChildId } from '@/utils/sampleData';
 import { formatSizeDisplay, getChildCurrentSizeText, getChildNextSizeText } from '@/utils/sizes';
@@ -22,7 +22,7 @@ import { openKidLimitFeedbackEmail } from '@/utils/betaKidLimitFeedback';
 type Props = NativeStackScreenProps<KidsStackParamList, 'KidsList'>;
 
 type KidMiniTileData = {
-  category: ClosetCategory;
+  category: string;
   uri?: string;
   count: number;
 };
@@ -30,6 +30,7 @@ type KidMiniTileData = {
 type KidCardData = {
   id: string;
   name: string;
+  sortOrder: number;
   photoUri?: string;
   initial: string;
   nowLabel: string;
@@ -45,25 +46,26 @@ type KidMiniTileProps = {
   childName: string;
   childId: string;
   tile: KidMiniTileData;
-  onOpenCategory: (childId: string, category: ClosetCategory) => void;
-  onOpenAddCategory: (childId: string, category: ClosetCategory) => void;
+  customCategories: Array<{ id: string; name: string; icon?: string }>;
+  onOpenCategory: (childId: string, category: string) => void;
+  onOpenAddCategory: (childId: string, category: string) => void;
 };
 
-const KidMiniTileComponent: React.FC<KidMiniTileProps> = ({ childName, childId, tile, onOpenCategory, onOpenAddCategory }) => (
+const KidMiniTileComponent: React.FC<KidMiniTileProps> = ({ childName, childId, tile, customCategories, onOpenCategory, onOpenAddCategory }) => (
   <Pressable
     style={({ pressed }) => [styles.miniTile, pressed ? styles.miniTilePressed : null]}
     onPress={() => (tile.count > 0 ? onOpenCategory(childId, tile.category) : onOpenAddCategory(childId, tile.category))}
     accessibilityRole="button"
-    accessibilityLabel={tile.count > 0 ? `${childName} ${closetLabel[tile.category]}, ${tile.count}` : `Add ${closetLabel[tile.category]} for ${childName}`}
+    accessibilityLabel={tile.count > 0 ? `${childName} ${getCategoryLabel(tile.category, customCategories)}, ${tile.count}` : `Add ${getCategoryLabel(tile.category, customCategories)} for ${childName}`}
   >
     {tile.uri ? (
       <Image source={{ uri: tile.uri }} style={styles.miniTileImage} />
     ) : (
       <View style={styles.miniTilePlaceholder}>
-        <Text style={styles.miniTilePlaceholderText}>{categoryGlyph[tile.category]}</Text>
+        <Text style={styles.miniTilePlaceholderText}>{getCategoryGlyphForId(tile.category, customCategories)}</Text>
       </View>
     )}
-    <Text numberOfLines={1} style={styles.miniTileLabel}>{closetLabel[tile.category]}</Text>
+    <Text numberOfLines={1} style={styles.miniTileLabel}>{getCategoryLabel(tile.category, customCategories)}</Text>
     <Text style={styles.miniTileCount}>{tile.count}</Text>
     {!tile.uri || tile.count === 0 ? <Text numberOfLines={1} style={styles.miniTileHint}>{tile.count === 0 ? 'Add first item' : 'Add photo'}</Text> : null}
   </Pressable>
@@ -73,13 +75,18 @@ const KidMiniTile = React.memo(KidMiniTileComponent);
 
 type KidDashboardCardProps = {
   child: KidCardData;
+  customCategories: Array<{ id: string; name: string; icon?: string }>;
+  isDefaultCloset: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
   onOpenChild: (childId: string) => void;
-  onOpenCategory: (childId: string, category: ClosetCategory) => void;
-  onOpenAddCategory: (childId: string, category: ClosetCategory) => void;
+  onOpenCategory: (childId: string, category: string) => void;
+  onOpenAddCategory: (childId: string, category: string) => void;
   onPromote: (childId: string) => void;
+  onMove: (childId: string, direction: 'up' | 'down') => void;
 };
 
-const KidDashboardCardComponent: React.FC<KidDashboardCardProps> = ({ child, onOpenChild, onOpenCategory, onOpenAddCategory, onPromote }) => (
+const KidDashboardCardComponent: React.FC<KidDashboardCardProps> = ({ child, customCategories, isDefaultCloset, canMoveUp, canMoveDown, onOpenChild, onOpenCategory, onOpenAddCategory, onPromote, onMove }) => (
   <Card>
     <Pressable onPress={() => onOpenChild(child.id)} style={({ pressed }) => [styles.cardPressable, pressed ? styles.cardPressablePressed : null]}>
       <View style={styles.headerRow}>
@@ -91,11 +98,44 @@ const KidDashboardCardComponent: React.FC<KidDashboardCardProps> = ({ child, onO
           </View>
         )}
         <View style={{ flex: 1 }}>
-          <Text style={styles.name}>
-            {child.name}
-            {child.isSample ? ' (Sample)' : ''}
-          </Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.name}>
+              {child.name}
+              {child.isSample ? ' (Sample)' : ''}
+            </Text>
+            {isDefaultCloset ? (
+              <View style={styles.defaultClosetBadge}>
+                <Text style={styles.defaultClosetBadgeText}>Default closet</Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={styles.sizeLine}>Now: {child.nowLabel} {' • '} Next: {child.nextLabel}</Text>
+          <View style={styles.reorderRow}>
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation();
+                onMove(child.id, 'up');
+              }}
+              disabled={!canMoveUp}
+              style={({ pressed }) => [styles.reorderButton, !canMoveUp ? styles.reorderButtonDisabled : null, pressed && canMoveUp ? styles.reorderButtonPressed : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Move ${child.name} up`}
+            >
+              <Text style={[styles.reorderButtonText, !canMoveUp ? styles.reorderButtonTextDisabled : null]}>Move up</Text>
+            </Pressable>
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation();
+                onMove(child.id, 'down');
+              }}
+              disabled={!canMoveDown}
+              style={({ pressed }) => [styles.reorderButton, !canMoveDown ? styles.reorderButtonDisabled : null, pressed && canMoveDown ? styles.reorderButtonPressed : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Move ${child.name} down`}
+            >
+              <Text style={[styles.reorderButtonText, !canMoveDown ? styles.reorderButtonTextDisabled : null]}>Move down</Text>
+            </Pressable>
+          </View>
           {child.usesMixedSizes ? (
             <View style={styles.mixedSizesBadge}>
               <Text style={styles.mixedSizesBadgeText}>Mixed sizes</Text>
@@ -123,6 +163,7 @@ const KidDashboardCardComponent: React.FC<KidDashboardCardProps> = ({ child, onO
             childName={child.name}
             childId={child.id}
             tile={tile}
+            customCategories={customCategories}
             onOpenCategory={onOpenCategory}
             onOpenAddCategory={onOpenAddCategory}
           />
@@ -135,10 +176,10 @@ const KidDashboardCardComponent: React.FC<KidDashboardCardProps> = ({ child, onO
 const KidDashboardCard = React.memo(KidDashboardCardComponent);
 
 export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
-  const { children, childItems, items, logEvent, settings, updateSettings, canCreateAnotherKid } = useData();
+  const { children, childItems, items, customCategories, logEvent, settings, updateSettings, canCreateAnotherKid, reorderChildren } = useData();
   const { openPromote, promoteModal } = usePromoteChildSize();
   const hasOnlySampleKids = children.length > 0 && children.every((child) => isSampleChildId(child.id));
-  const previewCategories: ClosetCategory[] = useMemo(() => getConfiguredKidsPreviewCategories(settings), [settings]);
+  const previewCategories = useMemo(() => getConfiguredKidsPreviewCategories(settings, customCategories), [settings, customCategories]);
   const [showKidLimitModal, setShowKidLimitModal] = useState(false);
   const [kidLimitCurrentCount, setKidLimitCurrentCount] = useState(children.length);
   const showKidLimit = useCallback((current: number) => {
@@ -150,7 +191,7 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
     void logEvent('kids_dashboard_opened');
   }, [logEvent]);
 
-  const openCategoryFromKids = useCallback((childId: string, category: ClosetCategory) => {
+  const openCategoryFromKids = useCallback((childId: string, category: string) => {
     void logEvent('kid_category_tile_clicked', { childId, category });
     (navigation.getParent() as any)?.navigate('Closet', {
       screen: 'CategorySnapshot',
@@ -158,7 +199,7 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
     });
   }, [logEvent, navigation]);
 
-  const openAddCategoryFromKids = useCallback((childId: string, category: ClosetCategory) => {
+  const openAddCategoryFromKids = useCallback((childId: string, category: string) => {
     (navigation.getParent() as any)?.navigate('Closet', {
       screen: 'AddItem',
       params: {
@@ -190,28 +231,48 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
     navigation.navigate('KidForm');
   }, [canCreateAnotherKid, navigation, showKidLimit]);
 
+  const moveChild = useCallback(async (childId: string, direction: 'up' | 'down') => {
+    const currentIndex = children.findIndex((child) => child.id === childId);
+    if (currentIndex < 0) return;
+    const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (nextIndex < 0 || nextIndex >= children.length) return;
+
+    const nextChildren = [...children];
+    const [movedChild] = nextChildren.splice(currentIndex, 1);
+    nextChildren.splice(nextIndex, 0, movedChild);
+
+    await reorderChildren(nextChildren.map((child) => child.id));
+    await logEvent('kids_reordered', {
+      childId,
+      direction,
+      newIndex: nextIndex,
+      defaultClosetChildId: nextChildren[0]?.id ?? null,
+    });
+  }, [children, logEvent, reorderChildren]);
+
   const childCards = useMemo<KidCardData[]>(() => (
     children.map((child) => {
       const childData = getChildItems(child, items, childItems);
       const owned = childData.items.filter((item) => item.status === 'owned');
       const categoryCounts = owned.reduce((acc, item) => {
-        const key = closetCategoryForItem(item);
+        const key = itemCategoryKey(item);
         acc.set(key, (acc.get(key) ?? 0) + 1);
         return acc;
-      }, new Map<ClosetCategory, number>());
+      }, new Map<string, number>());
       const categoryHero = owned.reduce((acc, item) => {
-        const key = closetCategoryForItem(item);
+        const key = itemCategoryKey(item);
         if (acc.has(key)) return acc;
         const uri = getItemDisplayImageUri(item) || '';
         if (uri) acc.set(key, uri);
         return acc;
-      }, new Map<ClosetCategory, string>());
+      }, new Map<string, string>());
       const nowLabel = child.currentSize.code ? formatSizeDisplay(child.currentSize.code, child.currentSize.otherText ?? null) : (getChildCurrentSizeText(child) ?? 'Not set');
       const nextLabel = child.nextSize.code ? formatSizeDisplay(child.nextSize.code, child.nextSize.otherText ?? null) : (getChildNextSizeText(child) ?? 'Not set');
       const promoteLabel = child.nextSize.code ? formatSizeDisplay(child.nextSize.code, child.nextSize.otherText ?? null) : undefined;
       return {
         id: child.id,
         name: child.name,
+        sortOrder: child.sortOrder,
         photoUri: child.photoUri,
         initial: (child.name.trim()[0] || '?').toUpperCase(),
         nowLabel,
@@ -250,6 +311,7 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
               <PrimaryButton label="Got it" variant="secondary" onPress={() => void updateSettings({ betaKidLimitBannerDismissed: true })} />
             </Card>
           ) : null}
+          <Text style={styles.reorderHint}>Kid order sets your default closet. The top kid is used anywhere the app needs a default.</Text>
           {hasOnlySampleKids ? (
             <Card>
               <Text style={styles.sampleBannerTitle}>Sample kids</Text>
@@ -260,10 +322,15 @@ export const KidsListScreen: React.FC<Props> = ({ navigation }) => {
             <KidDashboardCard
               key={child.id}
               child={child}
+              customCategories={customCategories}
+              isDefaultCloset={child.id === childCards[0]?.id}
+              canMoveUp={child.id !== childCards[0]?.id}
+              canMoveDown={child.id !== childCards[childCards.length - 1]?.id}
               onOpenChild={openChildDashboard}
               onOpenCategory={openCategoryFromKids}
               onOpenAddCategory={openAddCategoryFromKids}
               onPromote={openPromoteForChild}
+              onMove={moveChild}
             />
           ))}
         </ScrollView>
@@ -299,10 +366,56 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1F1A17',
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  defaultClosetBadge: {
+    backgroundColor: '#E7F1EA',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  defaultClosetBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#355642',
+  },
   sizeLine: {
     fontSize: 13,
     color: '#716A63',
     fontWeight: '600',
+  },
+  reorderRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  reorderButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#D8CCC0',
+    backgroundColor: '#FFF8F2',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  reorderButtonDisabled: {
+    backgroundColor: '#F5F1EC',
+    borderColor: '#E7DED5',
+  },
+  reorderButtonPressed: {
+    opacity: 0.9,
+  },
+  reorderButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4A4039',
+  },
+  reorderButtonTextDisabled: {
+    color: '#A79A8F',
   },
   mixedSizesBadge: {
     alignSelf: 'flex-start',
@@ -413,6 +526,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4A4039',
     marginBottom: 8,
+  },
+  reorderHint: {
+    fontSize: 13,
+    color: '#716A63',
+    paddingHorizontal: 4,
   },
   sampleBannerTitle: {
     fontSize: 15,

@@ -41,6 +41,7 @@ export const buildCollageViewModels = (input: BstImageGeneratorInput): BstCollag
     pageSize: resolvedItems.length,
     brandingMode: input.brandingMode ?? 'free',
     previewMode: input.collagePreviewMode ?? 'export',
+    showPricesOnCollage: draft.showPricesOnCollage,
   }];
 };
 

@@ -6,38 +6,39 @@ import { useAppTheme } from '@/theme';
 type Props = {
   visible: boolean;
   onClose: () => void;
+  onUnlock?: () => void;
   onFeedback?: () => void;
   title?: string;
   bodyLines?: string[];
   bulletLines?: string[];
-  footerText?: string;
+  sectionTitle?: string;
   buttonLabel?: string;
 };
 
 export const ProComingSoonModal: React.FC<Props> = ({
   visible,
   onClose,
+  onUnlock,
   onFeedback,
   title,
   bodyLines,
   bulletLines,
-  footerText,
+  sectionTitle,
   buttonLabel,
 }) => {
   const theme = useAppTheme();
-  const resolvedTitle = title ?? 'Layette Out Pro is coming soon';
+  const resolvedTitle = title ?? 'Get more out of your closet';
   const resolvedBodyLines = bodyLines ?? [
-    'We\'re working on optional premium features for families who want more advanced closet organization tools.',
-    'Thanks for being an early user — you\'ll receive special perks when Pro launches.',
+    'Create your own categories, sell items faster, and see what matches across your kids.',
   ];
   const resolvedBulletLines = bulletLines ?? [
-    'BST listings with photo grids',
-    'Multiple photos per item',
-    'Sibling print matching',
-    'Custom categories and advanced tags',
+    'Turn your closet into ready-to-post BST listings',
+    'Create categories that fit your family',
+    'See matching prints across kids',
+    'Add multiple photos to each item',
   ];
-  const resolvedFooterText = footerText ?? 'Early feedback from users like you helps shape what features come next.';
-  const resolvedButtonLabel = buttonLabel ?? 'Got it';
+  const resolvedSectionTitle = sectionTitle ?? 'With Pro you can:';
+  const resolvedButtonLabel = buttonLabel ?? 'Unlock Pro';
   const styles = StyleSheet.create({
     backdrop: {
       flex: 1,
@@ -75,22 +76,15 @@ export const ProComingSoonModal: React.FC<Props> = ({
       color: theme.colors.textSecondary,
       lineHeight: 20,
     },
-    footer: {
-      marginTop: 4,
-      fontSize: 12,
-      color: theme.colors.textMuted,
-      lineHeight: 18,
-    },
-    feedbackButton: {
-      marginTop: 2,
-      alignSelf: 'flex-start',
+    secondaryButton: {
+      alignSelf: 'center',
       paddingVertical: 6,
-      paddingHorizontal: 2,
+      paddingHorizontal: 8,
     },
-    feedbackText: {
+    secondaryText: {
       fontSize: 14,
-      fontWeight: '700',
-      color: theme.colors.accentPeriwinkle,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
     },
   });
 
@@ -105,19 +99,15 @@ export const ProComingSoonModal: React.FC<Props> = ({
             </Text>
           ))}
 
-          {resolvedBulletLines.length ? <Text style={styles.sectionTitle}>Planned Pro features may include:</Text> : null}
+          {resolvedBulletLines.length ? <Text style={styles.sectionTitle}>{resolvedSectionTitle}</Text> : null}
           {resolvedBulletLines.map((line, index) => (
             <Text key={`bullet-${index}`} style={styles.bullet}>• {line}</Text>
           ))}
 
-          <Text style={styles.footer}>{resolvedFooterText}</Text>
-
-          {onFeedback ? (
-            <Pressable style={styles.feedbackButton} onPress={onFeedback} accessibilityRole="button">
-              <Text style={styles.feedbackText}>Send Feedback</Text>
-            </Pressable>
-          ) : null}
-          <PrimaryButton label={resolvedButtonLabel} onPress={onClose} />
+          <PrimaryButton label={resolvedButtonLabel} onPress={onUnlock ?? onClose} />
+          <Pressable style={styles.secondaryButton} onPress={onClose} accessibilityRole="button">
+            <Text style={styles.secondaryText}>Not now</Text>
+          </Pressable>
         </Pressable>
       </Pressable>
     </Modal>

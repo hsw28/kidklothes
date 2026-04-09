@@ -27,6 +27,7 @@ export type ClothingType =
   | 'dress'
   | 'outerwear'
   | 'shoes'
+  | 'other'
   | 'accessory';
 
 export type ItemCategory =
@@ -39,19 +40,21 @@ export type ItemCategory =
   | 'shoes'
   | 'dresses-skirts'
   | 'accessories'
+  | 'cloth-diapers'
   | 'sets'
   | 'other'
   // legacy saved values (kept for backward compatibility)
   | 'bottoms'
   | 'one-piece'
-  | 'dresses';
+  | 'dresses'
+  | (string & {});
 
 export type ItemStatus = 'wishlist' | 'owned' | 'for-sale' | 'sold';
 export type FitRating = 'small' | 'true' | 'large';
 export type FitException = 'fits-small' | 'fits-big' | 'runs-true' | 'bamboo-stretch';
 export type BrandFit = 'tts' | 'small' | 'big';
 export type KidFit = 'fits' | 'big' | 'small' | 'unknown';
-export type Condition = 'new-with-tags' | 'like-new' | 'good' | 'play' | 'donate';
+export type Condition = 'new-with-tags' | 'new-without-tags' | 'like-new' | 'good' | 'play';
 export type BstSaleDraftStatus = 'draft' | 'exported' | 'archived';
 export type BstCondition = 'NWT' | 'NWOT' | 'Like New' | 'Good' | 'Play';
 export type BstFlawTag = 'wash wear' | 'pilling' | 'stain' | 'hole' | 'fade' | 'cracking' | 'loose snap' | 'seam issue' | 'other';
@@ -66,7 +69,7 @@ export type ItemSizeType = 'apparel' | 'shoe';
 export type ItemSizeSystem = 'APPAREL' | 'US_SHOE';
 export type ItemSizeScheme = 'AGE' | 'ALPHA' | 'CUSTOM' | 'SHOE';
 export const ITEM_STATUSES = ['wishlist', 'owned', 'for-sale', 'sold'] as const;
-export const CLOTHING_TYPES = ['sleeper', 'romper', 'top', 'bottom', 'dress', 'outerwear', 'shoes', 'accessory'] as const;
+export const CLOTHING_TYPES = ['sleeper', 'romper', 'top', 'bottom', 'dress', 'outerwear', 'shoes', 'other', 'accessory'] as const;
 export const BST_CONDITIONS = ['NWT', 'NWOT', 'Like New', 'Good', 'Play'] as const;
 export const BST_FLAW_TAGS = ['wash wear', 'pilling', 'stain', 'hole', 'fade', 'cracking', 'loose snap', 'seam issue', 'other'] as const;
 export const BST_DRYING_METHODS = ['line dried', 'machine dried'] as const;
@@ -97,6 +100,7 @@ export interface BaseItem {
 export interface Child {
   id: ID;
   name: string;
+  sortOrder: number;
   photoUri?: string;
   notes?: string;
   usesMixedSizes: boolean;
@@ -228,6 +232,7 @@ export interface SaleDraft {
   defaultPaymentNote?: string;
   collageGridSize: BstCollageGridSize;
   collageOrderMode: BstCollageOrderMode;
+  showPricesOnCollage: boolean;
   customHeaderImageUri?: string;
   freeGeneratedCardItemIds: ID[];
   freeGenerationConsumedAt?: number;
@@ -267,6 +272,16 @@ export interface Tag {
   createdAt: number;
 }
 
+export interface CustomTag {
+  id: ID;
+  name: string;
+  normalizedName: string;
+  source: 'legacy' | 'user';
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number;
+}
+
 export interface FilterPreset {
   id: ID;
   name: string;
@@ -276,6 +291,15 @@ export interface FilterPreset {
   includeUnsorted?: boolean;
   query?: string;
   createdAt: number;
+}
+
+export interface CustomCategory {
+  id: ID;
+  name: string;
+  icon?: string;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number;
 }
 
 export interface AppSettings {
@@ -290,6 +314,7 @@ export interface AppSettings {
   lastShoppingType?: ClothingType;
   lastShoppingChildId?: ID;
   lastPromptedAt?: number;
+  lastBackupAt?: number;
   lastUpsellShownAt?: number;
   closetCategoryOrder?: string[];
   hiddenClosetCategoriesGlobal?: string[];
@@ -299,11 +324,15 @@ export interface AppSettings {
   inventoryRealityCheckOwnedThreshold?: number;
   developerModeEnabled?: boolean;
   developerForceProAccessEnabled?: boolean;
+  developerActLikeFirstTimeUser?: boolean;
   betaKidLimitBannerDismissed?: boolean;
   proTeaserBannerDismissed?: boolean;
   missingPhotoRestoreNudgeShown?: boolean;
   hasSeenBstPostingGuide?: boolean;
+  hasSeenBstEntryOnboarding?: boolean;
+  hasSeenStructuredTagsEducation?: boolean;
   proEarlyAccessJoined?: boolean;
+  foundingMemberJoined?: boolean;
 }
 
 export interface ActivityEvent {
@@ -328,6 +357,8 @@ export interface BackupPayload {
   children: Child[];
   items: Item[];
   childItems: ChildItem[];
+  customTags?: CustomTag[];
+  customCategories?: CustomCategory[];
   storageLocations?: StorageLocation[];
   printAliases?: PrintAlias[];
   purchaseState?: PurchaseStateSnapshot;
@@ -336,4 +367,22 @@ export interface BackupPayload {
   saleDrafts?: SaleDraft[];
   saleDraftItems?: SaleDraftItem[];
   settings: AppSettings;
+}
+
+export interface BackupManifest {
+  appVersion: string;
+  schemaVersion: number;
+  exportedAt: string;
+  itemCount: number;
+  imageCount: number;
+}
+
+export interface BackupExportResult {
+  archiveUri: string;
+  manifest: BackupManifest;
+}
+
+export interface BackupRestorePreview {
+  manifest: BackupManifest;
+  workingDirectoryUri: string;
 }

@@ -1,4 +1,4 @@
-import { AppSettings, ClothingType, ItemCategory } from '@/models';
+import { AppSettings, ClothingType, CustomCategory, ItemCategory } from '@/models';
 
 export type ClosetCategory =
   | 'tops'
@@ -11,6 +11,7 @@ export type ClosetCategory =
   | 'outerwear'
   | 'shoes'
   | 'accessories'
+  | 'cloth-diapers'
   | 'other';
 
 export type ClosetCategoryDef = {
@@ -27,6 +28,8 @@ export type DrawerScanCategoryDef = {
   clothingType: ClothingType;
 };
 
+export const CUSTOM_CATEGORY_PREFIX = 'custom:';
+
 export const CLOSET_CATEGORY_DEFS: ClosetCategoryDef[] = [
   { id: 'tops', label: 'Tops', icon: 'top', sortOrder: 10 },
   { id: 'pants', label: 'Pants & Shorts', icon: 'pants', sortOrder: 20 },
@@ -38,6 +41,7 @@ export const CLOSET_CATEGORY_DEFS: ClosetCategoryDef[] = [
   { id: 'outerwear', label: 'Outerwear', icon: 'outerwear', sortOrder: 80 },
   { id: 'shoes', label: 'Shoes', icon: 'shoes', sortOrder: 85 },
   { id: 'accessories', label: 'Accessories', icon: 'accessory', sortOrder: 90 },
+  { id: 'cloth-diapers', label: 'Cloth Diapers', icon: 'cloth-diaper', sortOrder: 95 },
   { id: 'other', label: 'Other', icon: 'other', sortOrder: 100 },
 ];
 
@@ -64,6 +68,7 @@ export const categoryIconName: Record<ClosetCategory, string> = {
   outerwear: 'cloud-outline',
   shoes: 'footsteps-outline',
   accessories: 'sparkles-outline',
+  'cloth-diapers': 'layers-outline',
   other: 'apps-outline',
 };
 
@@ -78,6 +83,7 @@ export const categoryGlyph: Record<ClosetCategory, string> = {
   outerwear: 'OW',
   shoes: 'S',
   accessories: 'A',
+  'cloth-diapers': 'CD',
   other: 'O',
 };
 
@@ -130,8 +136,10 @@ export const clothingTypeDisplayLabel = (type: ClothingType): string => {
       return closetLabel['dresses-skirts'];
     case 'romper':
       return 'One Pieces';
-    case 'accessory':
+    case 'other':
       return 'Other';
+    case 'accessory':
+      return 'Accessories';
     default:
       return 'Other';
   }
@@ -149,9 +157,52 @@ const legacyItemCategoryToClosetCategory: Record<string, ClosetCategory> = {
   dresses: 'dresses-skirts',
   'dresses-skirts': 'dresses-skirts',
   accessories: 'accessories',
+  'cloth-diapers': 'cloth-diapers',
   sets: 'sets',
   swim: 'swim',
   other: 'other',
+};
+
+export const isCustomCategoryId = (value?: string | null): value is string =>
+  Boolean(value && String(value).startsWith(CUSTOM_CATEGORY_PREFIX));
+
+export const getCustomCategoryFallbackLabel = (categoryId: string): string => {
+  const raw = categoryId.replace(CUSTOM_CATEGORY_PREFIX, '').trim();
+  if (!raw) return 'Custom Category';
+  return raw
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
+export const getCategoryLabel = (
+  category: string,
+  customCategories?: Array<Pick<CustomCategory, 'id' | 'name'>>,
+): string => {
+  if (isClosetCategory(category)) return closetLabel[category];
+  if (isCustomCategoryId(category)) {
+    return customCategories?.find((entry) => entry.id === category)?.name ?? getCustomCategoryFallbackLabel(category);
+  }
+  return getCustomCategoryFallbackLabel(category);
+};
+
+export const getCategoryGlyphForId = (
+  category: string,
+  customCategories?: Array<Pick<CustomCategory, 'id' | 'name' | 'icon'>>,
+): string => {
+  if (isClosetCategory(category)) return categoryGlyph[category];
+  const custom = customCategories?.find((entry) => entry.id === category);
+  const icon = (custom?.icon ?? '').trim();
+  if (icon) return icon;
+  const label = getCategoryLabel(category, customCategories);
+  const initials = label
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('');
+  return initials || '+';
 };
 
 export const normalizeItemCategoryToClosetCategory = (category?: ItemCategory | string | null): ClosetCategory | undefined => {
@@ -159,7 +210,8 @@ export const normalizeItemCategoryToClosetCategory = (category?: ItemCategory | 
   return legacyItemCategoryToClosetCategory[String(category).trim()] ?? undefined;
 };
 
-export const closetCategoryToClothingType = (category?: ClosetCategory): ClothingType => {
+export const closetCategoryToClothingType = (category?: ClosetCategory | string): ClothingType => {
+  if (category && isCustomCategoryId(category)) return closetCategoryToClothingType('other');
   switch (category) {
     case 'pants':
       return 'bottom';
@@ -179,14 +231,18 @@ export const closetCategoryToClothingType = (category?: ClosetCategory): Clothin
       return 'dress';
     case 'accessories':
       return 'accessory';
+    case 'cloth-diapers':
+      return 'accessory';
     case 'sets':
       return 'top';
+    case 'other':
+      return 'other';
     default:
       return 'top';
   }
 };
 
-const isClosetCategory = (value: string): value is ClosetCategory => closetCategories.includes(value as ClosetCategory);
+export const isClosetCategory = (value: string): value is ClosetCategory => closetCategories.includes(value as ClosetCategory);
 
 export const sanitizeCategoryOrder = (
   order?: readonly string[] | null,
@@ -211,6 +267,14 @@ export const sanitizeCategoryOrder = (
     seen.add(entry);
     next.push(entry);
   });
+
+  if (includeOther) {
+    const otherIndex = next.indexOf('other');
+    if (otherIndex >= 0 && otherIndex !== next.length - 1) {
+      next.splice(otherIndex, 1);
+      next.push('other');
+    }
+  }
 
   return next;
 };
@@ -274,11 +338,32 @@ export const getConfiguredWishlistCategories = (settings?: Pick<AppSettings, 'wi
     includeOther: false,
   });
 
-export const getConfiguredKidsPreviewCategories = (settings?: Pick<AppSettings, 'kidsPreviewCategories'>) => {
-  const raw = (settings?.kidsPreviewCategories ?? []).filter((entry): entry is ClosetCategory => isClosetCategory(entry));
-  if (raw.length === 0) return [...KIDS_PREVIEW_CATEGORIES];
-  return sanitizeCategoryOrder(raw, {
-    includeOther: true,
-    fallback: raw,
+export const getConfiguredKidsPreviewCategories = (
+  settings?: Pick<AppSettings, 'kidsPreviewCategories'>,
+  customCategories?: Array<Pick<CustomCategory, 'id'>>,
+) => {
+  const allowed = [...KIDS_PREVIEW_CATEGORIES, ...((customCategories ?? []).map((entry) => entry.id))];
+  const seen = new Set<string>();
+  const normalized = (settings?.kidsPreviewCategories ?? []).filter((entry) => {
+    if (!allowed.includes(entry)) return false;
+    if (seen.has(entry)) return false;
+    seen.add(entry);
+    return true;
   });
+
+  if (normalized.length === 0) return [...allowed];
+
+  allowed.forEach((entry) => {
+    if (seen.has(entry)) return;
+    seen.add(entry);
+    normalized.push(entry);
+  });
+
+  const otherIndex = normalized.indexOf('other');
+  if (otherIndex >= 0 && otherIndex !== normalized.length - 1) {
+    normalized.splice(otherIndex, 1);
+    normalized.push('other');
+  }
+
+  return normalized;
 };

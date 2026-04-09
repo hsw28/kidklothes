@@ -3,6 +3,8 @@ import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } fr
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Card } from '@/components/Card';
 import { ChipSelector } from '@/components/ChipSelector';
+import { CustomCategoryModal } from '@/components/CustomCategoryModal';
+import { CustomTagModal } from '@/components/CustomTagModal';
 import { FormInput } from '@/components/FormInput';
 import { ItemPhotoGallery } from '@/components/ItemPhotoGallery';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -14,10 +16,11 @@ import { BrandFit, ClothingType, Condition, FitBin, Item, ItemSizeScheme, ItemSi
 import { ItemsStackParamList } from '@/navigation/types';
 import { trackItemPhotoAdded, trackItemPhotoRemoved, trackItemPhotoReordered, trackSecondPhotoLimitHit } from '@/services/bst/bstAnalytics';
 import { canUseMultipleItemPhotos } from '@/services/proAccess';
-import { ADD_ITEM_CATEGORY_OPTIONS, ClosetCategory, closetCategoryToClothingType, closetLabel, normalizeItemCategoryToClosetCategory } from '@/utils/categories';
+import { hasProAccess } from '@/services/proAccess';
+import { ADD_ITEM_CATEGORY_OPTIONS, closetCategoryToClothingType, getCategoryLabel, isCustomCategoryId, normalizeItemCategoryToClosetCategory } from '@/utils/categories';
 import { getWishlistAwareness } from '@/utils/fitInsights';
 import { canonicalizeBrand, prettyBrandFallback } from '@/utils/brandNormalize';
-import { formatItemCategoryLabel } from '@/utils/itemLabels';
+import { formatConditionLabel, formatItemCategoryLabel } from '@/utils/itemLabels';
 import { normalizeItemPayload } from '@/utils/itemPayload';
 import { jaccardTokenOverlap, normalizePrintName, resolvePrintName } from '@/utils/printName';
 import { getChildCurrentSizeText, getChildNextSizeText, SIZE_OPTIONS } from '@/utils/sizes';
@@ -26,11 +29,12 @@ import { pickPhotoFromLibrary, takePhotoWithCamera } from '@/utils/photoPicker';
 import { validateNewItemInput } from '@/utils/itemValidation';
 import { cacheRemoteImage, persistLocalImage } from '@/utils/imageCache';
 import { normalizeInventoryRealityThreshold } from '@/utils/inventoryReality';
+import { PRESET_TAGS, SEASON_OPTIONS, classifyItemSeasons, classifyItemTags, mergeStructuredSeasonsForSave, mergeStructuredTagsForSave, normalizeCustomTagKey, resolvePresetTag } from '@/utils/tagSystem';
+import { showActionMenu } from '@/utils/actionSheets';
 import { APPAREL_AGE_SIZES, APPAREL_ALPHA_SIZES, US_SHOE_SIZES, computeDefaultFitBin, getSizeUIModel, inferSizeScheme, normalizeSize as normalizeStructuredSize } from '@/lib/sizing';
 
 const statusOptions: ItemStatus[] = ['wishlist', 'owned', 'sold'];
-const conditionOptions: Condition[] = ['new-with-tags', 'like-new', 'good', 'play'];
-const categoryOptions: ClosetCategory[] = ADD_ITEM_CATEGORY_OPTIONS;
+const conditionOptions: Condition[] = ['new-with-tags', 'new-without-tags', 'like-new', 'good', 'play'];
 const storagePresetOptions = ['None', 'Sell', 'Size Up', 'Current', 'Out Grew'] as const;
 type StoragePresetOption = (typeof storagePresetOptions)[number];
 const brandFitOptions: Array<{ value: BrandFit; label: string }> = [
@@ -53,6 +57,13 @@ const fitBinLabels: Record<FitBin, string> = {
   next: 'Next',
   later: 'Later',
   unsure: 'Unsure',
+};
+const conditionOptionLabels: Record<Condition, string> = {
+  'new-with-tags': formatConditionLabel('new-with-tags'),
+  'new-without-tags': formatConditionLabel('new-without-tags'),
+  'like-new': formatConditionLabel('like-new'),
+  good: formatConditionLabel('good'),
+  play: formatConditionLabel('play'),
 };
 
 type Props = NativeStackScreenProps<ItemsStackParamList, 'AddItem'>;
@@ -270,7 +281,7 @@ const getStorageConfigForPreset = (preset: Exclude<StoragePresetOption, 'None'>)
 };
 
 export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { children, items, childItems, storageLocations, printAliases, settings, purchaseState, logEvent, addItem, updateItem, updateItemCachedImage, updateSettings, createStorageLocation } = useData();
+  const { children, items, childItems, customTags, customCategories, storageLocations, printAliases, settings, purchaseState, logEvent, addItem, updateItem, updateItemCachedImage, updateSettings, createStorageLocation, createCustomCategory, createCustomTag, updateCustomTag, deleteCustomTag } = useData();
   const { recordMeaningfulActionAndMaybePrompt } = useReviewPrompt();
   const editing = route.params?.itemId;
   const duplicateFromItemId = route.params?.duplicateFromItemId;
@@ -311,8 +322,13 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [soldPrice, setSoldPrice] = useState(sourceItem?.soldPrice?.toString() ?? '');
   const [soldDate, setSoldDate] = useState(sourceItem?.soldDate ?? '');
   const [notes, setNotes] = useState(sourceItem?.notes ?? '');
-  const [tags, setTags] = useState(sourceItem?.tags.join(', ') ?? '');
-  const [seasonTags, setSeasonTags] = useState(sourceItem?.seasonTags.join(', ') ?? '');
+  const classifiedSourceTags = useMemo(() => classifyItemTags(sourceItem?.tags ?? [], customTags), [sourceItem?.tags, customTags]);
+  const classifiedSourceSeasons = useMemo(() => classifyItemSeasons(sourceItem?.seasonTags ?? []), [sourceItem?.seasonTags]);
+  const [selectedPresetTags, setSelectedPresetTags] = useState<string[]>(classifiedSourceTags.presetTags);
+  const [selectedCustomTags, setSelectedCustomTags] = useState<string[]>(classifiedSourceTags.customTags.filter((tag) => customTags.some((entry) => entry.normalizedName === normalizeCustomTagKey(tag))));
+  const [lockedLegacyCustomTags, setLockedLegacyCustomTags] = useState<string[]>(classifiedSourceTags.customTags.filter((tag) => !customTags.some((entry) => entry.normalizedName === normalizeCustomTagKey(tag))));
+  const [selectedSeasons, setSelectedSeasons] = useState<string[]>(classifiedSourceSeasons.selectedSeasons);
+  const [legacySeasonTags, setLegacySeasonTags] = useState<string[]>(classifiedSourceSeasons.legacySeasons);
   const [selectedChildIds, setSelectedChildIds] = useState<string[]>(
     sourceItem?.childIds.length
       ? sourceItem.childIds
@@ -333,10 +349,17 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [storagePresetTouched, setStoragePresetTouched] = useState(false);
   const [quantity, setQuantity] = useState(Math.max(1, sourceItem?.quantity ?? 1));
   const [condition, setCondition] = useState<Condition | undefined>(sourceItem?.condition);
-  const [category, setCategory] = useState<ClosetCategory | undefined>(
-    normalizeItemCategoryToClosetCategory(sourceItem?.category)
+  const [category, setCategory] = useState<string | undefined>(
+    sourceItem?.category
+    ?? route.params?.prefillCategory
+    ?? normalizeItemCategoryToClosetCategory(sourceItem?.category)
     ?? normalizeItemCategoryToClosetCategory(route.params?.prefillCategory),
   );
+  const [showCustomCategoryModal, setShowCustomCategoryModal] = useState(false);
+  const [showCustomTagModal, setShowCustomTagModal] = useState(false);
+  const [editingCustomTagId, setEditingCustomTagId] = useState<string | null>(null);
+  const [customTagDraftName, setCustomTagDraftName] = useState('');
+  const [convertingLockedCustomTag, setConvertingLockedCustomTag] = useState<string | null>(null);
   const [isFetchingPreview, setIsFetchingPreview] = useState(false);
   const [previewCard, setPreviewCard] = useState<PreviewCardState>(() => (route.params?.url ? { status: 'loading', domain: getDomainLabel(route.params.url) } : { status: 'idle' }));
   const [showPhotoEarlyAccessModal, setShowPhotoEarlyAccessModal] = useState(false);
@@ -374,9 +397,32 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const autofillMetaRef = useRef<{ titleAutoValue?: string; brandAutoValue?: string; imageAutoValue?: string }>({});
   const showLocationFeatures = children.length > 0;
   const hasMultiPhotoAccess = canUseMultipleItemPhotos(settings, purchaseState);
+  const hasClosetPowerAccess = hasProAccess(settings, purchaseState);
+  const categoryOptions = useMemo(() => [...ADD_ITEM_CATEGORY_OPTIONS, ...customCategories.map((entry) => entry.id)], [customCategories]);
+  const categoryOptionLabels = useMemo(
+    () => Object.fromEntries(categoryOptions.map((entry) => [entry, getCategoryLabel(entry, customCategories)])) as Record<string, string>,
+    [categoryOptions, customCategories],
+  );
   const scopedStorageLocations = useMemo(
     () => storageLocations.filter((location) => !location.childId || location.childId === primaryChildId),
     [storageLocations, primaryChildId],
+  );
+  const hasCustomTagAccess = hasClosetPowerAccess;
+  const availableCustomTags = useMemo(
+    () => customTags.map((entry) => entry.name).sort((a, b) => a.localeCompare(b)),
+    [customTags],
+  );
+  const displayCustomTags = useMemo(
+    () => Array.from(new Set([...availableCustomTags, ...lockedLegacyCustomTags])).sort((a, b) => a.localeCompare(b)),
+    [availableCustomTags, lockedLegacyCustomTags],
+  );
+  const selectedDisplayCustomTags = useMemo(
+    () => Array.from(new Set([...selectedCustomTags, ...lockedLegacyCustomTags])),
+    [selectedCustomTags, lockedLegacyCustomTags],
+  );
+  const customTagOptionLabels = useMemo(
+    () => Object.fromEntries(displayCustomTags.map((entry) => [entry, entry])) as Record<string, string>,
+    [displayCustomTags],
   );
   useEffect(() => {
     imageTouchedRef.current = imageTouched;
@@ -384,6 +430,26 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     imageUrlRef.current = imageUrl;
   }, [imageUrl]);
+  useEffect(() => {
+    if (settings.hasSeenStructuredTagsEducation) return;
+    void logEvent('tag_onboarding_viewed', { source: editing ? 'edit_item' : 'add_item' });
+  }, [editing, logEvent, settings.hasSeenStructuredTagsEducation]);
+  useEffect(() => {
+    if (!classifiedSourceTags.mappedLegacyTags.length) return;
+    void logEvent('legacy_tag_migrated', {
+      itemId: sourceItem?.id,
+      mappings: classifiedSourceTags.mappedLegacyTags.map((entry) => `${entry.from}->${entry.to}`).join(','),
+    });
+  }, [classifiedSourceTags.mappedLegacyTags, logEvent, sourceItem?.id]);
+  useEffect(() => {
+    setSelectedPresetTags(classifiedSourceTags.presetTags);
+    setSelectedCustomTags(classifiedSourceTags.customTags.filter((tag) => customTags.some((entry) => entry.normalizedName === normalizeCustomTagKey(tag))));
+    setLockedLegacyCustomTags(classifiedSourceTags.customTags.filter((tag) => !customTags.some((entry) => entry.normalizedName === normalizeCustomTagKey(tag))));
+  }, [classifiedSourceTags, customTags]);
+  useEffect(() => {
+    setSelectedSeasons(classifiedSourceSeasons.selectedSeasons);
+    setLegacySeasonTags(classifiedSourceSeasons.legacySeasons);
+  }, [classifiedSourceSeasons]);
 
   const photoUris = useMemo(() => parseImageUrlList(imageUrl, extraImageUrls), [extraImageUrls, imageUrl]);
 
@@ -403,17 +469,94 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       isPro: hasMultiPhotoAccess,
       triggeredFrom: 'item_form',
     });
-    void logEvent('early_access_modal_opened', {
-      surface: 'item_multi_photo',
-      joined: Boolean(settings.proEarlyAccessJoined),
-    });
-    setShowPhotoEarlyAccessModal(true);
+    navigation.navigate('ProPaywall', { source: 'item_multi_photo', entryContext: 'photo_expansion' });
   };
 
   const joinPhotoEarlyAccess = async () => {
     await updateSettings({ proEarlyAccessJoined: true });
     await logEvent('early_access_joined', { surface: 'item_multi_photo' });
     setPhotoEarlyAccessJoinedThisSession(true);
+  };
+
+  const openCustomTagPaywall = async (source: 'add_custom_tag' | 'legacy_locked_tag' | 'custom_tag_locked') => {
+    await logEvent(source === 'legacy_locked_tag' ? 'legacy_tag_locked_tapped' : 'custom_tag_tapped_locked', { source });
+    await logEvent('custom_tag_paywall_viewed', { source });
+    navigation.navigate('ProPaywall', { entryContext: 'tag_power' });
+  };
+
+  const handleCreateCustomCategory = async (input: { name: string; icon?: string }) => {
+    try {
+      const created = await createCustomCategory(input);
+      if (!created) return;
+      setCategory(created.id);
+      setShowCustomCategoryModal(false);
+      await logEvent('custom_category_created', { source: 'item_form', categoryId: created.id });
+    } catch (error) {
+      Alert.alert('Could not create category', error instanceof Error ? error.message : 'Please try again.');
+    }
+  };
+
+  const handleSubmitCustomTag = async (input: { name: string }) => {
+    const submittedName = input.name.trim();
+    const editingId = editingCustomTagId;
+    const convertingName = convertingLockedCustomTag;
+    const existingTag = editingId ? customTags.find((entry) => entry.id === editingId) : undefined;
+
+    setShowCustomTagModal(false);
+    setEditingCustomTagId(null);
+    setCustomTagDraftName('');
+    setConvertingLockedCustomTag(null);
+
+    try {
+      if (editingId) {
+        await updateCustomTag(editingId, input);
+        if (existingTag) {
+          setSelectedCustomTags((current) =>
+            current.map((entry) => (normalizeCustomTagKey(entry) === existingTag.normalizedName ? submittedName : entry)),
+          );
+        }
+      } else {
+        const created = await createCustomTag(input);
+        if (!created) return;
+        setSelectedCustomTags((current) => Array.from(new Set([...current, created.name])));
+        setLockedLegacyCustomTags((current) =>
+          current.filter((entry) => normalizeCustomTagKey(entry) !== normalizeCustomTagKey(convertingName ?? created.name)),
+        );
+        await logEvent('custom_tag_created', { source: 'item_form', tagId: created.id });
+      }
+    } catch (error) {
+      setCustomTagDraftName(submittedName);
+      setEditingCustomTagId(editingId ?? null);
+      setConvertingLockedCustomTag(convertingName ?? null);
+      setShowCustomTagModal(true);
+      Alert.alert('Could not save tag', error instanceof Error ? error.message : 'Please try again.');
+    }
+  };
+
+  const handleDeleteEditingCustomTag = async () => {
+    if (!editingCustomTagId) return;
+    const tag = customTags.find((entry) => entry.id === editingCustomTagId);
+    if (!tag) return;
+    Alert.alert(
+      'Delete custom tag?',
+      `This will remove "${tag.name}" from your saved custom tags and from any items using it.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteCustomTag(editingCustomTagId);
+            setSelectedCustomTags((current) => current.filter((entry) => normalizeCustomTagKey(entry) !== tag.normalizedName));
+            setLockedLegacyCustomTags((current) => current.filter((entry) => normalizeCustomTagKey(entry) !== tag.normalizedName));
+            setCustomTagDraftName('');
+            setConvertingLockedCustomTag(null);
+            setEditingCustomTagId(null);
+            setShowCustomTagModal(false);
+          },
+        },
+      ],
+    );
   };
 
   const defaultWearingSize = useMemo(() => {
@@ -845,8 +988,15 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       targetResalePrice,
       soldPrice,
       soldDate,
-      tags,
-      seasonTags,
+      tags: mergeStructuredTagsForSave({
+        presetTags: selectedPresetTags as any,
+        selectedCustomTags,
+        legacyLockedTags: lockedLegacyCustomTags,
+      }).join(', '),
+      seasonTags: mergeStructuredSeasonsForSave({
+        selectedSeasons: selectedSeasons as any,
+        legacySeasons: legacySeasonTags,
+      }).join(', '),
       notes,
       quantity,
       printAliases,
@@ -871,7 +1021,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
   };
 
   const getDuplicateCandidates = (): SimilarCandidate[] => {
-    const draftTitle = normalizeText((quickMode ? (title.trim() || `${size.trim() || 'New'} ${category ? closetLabel[category] : clothingType}`) : title).trim());
+    const draftTitle = normalizeText((quickMode ? (title.trim() || `${size.trim() || 'New'} ${category ? getCategoryLabel(category, customCategories) : clothingType}`) : title).trim());
     const normalizedBrand = normalizeText(brand || '');
     const normalizedPrint = resolvePrintName(printName, printAliases);
     const draftCategory = category;
@@ -886,7 +1036,9 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       })
       .flatMap((candidate) => {
         if (draftCategory) {
-          const candidateCategory = normalizeItemCategoryToClosetCategory(candidate.category);
+          const candidateCategory = isCustomCategoryId(candidate.category)
+            ? candidate.category
+            : normalizeItemCategoryToClosetCategory(candidate.category);
           if (candidateCategory && candidateCategory !== draftCategory) return [];
         }
         const exactTitle = draftTitle && normalizeText(candidate.title) === draftTitle;
@@ -980,7 +1132,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       });
       const inventoryRealityThreshold = normalizeInventoryRealityThreshold(settings.inventoryRealityCheckOwnedThreshold);
       if (awareness.ownedCount >= inventoryRealityThreshold) {
-        Alert.alert('Inventory Reality Check', `You already own ${awareness.ownedCount} ${category ? closetLabel[category] : clothingType} items in size ${size}.`);
+        Alert.alert('Inventory Reality Check', `You already own ${awareness.ownedCount} ${category ? getCategoryLabel(category, customCategories) : clothingType} items in size ${size}.`);
       }
     }
 
@@ -1005,8 +1157,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
           printName.trim() ||
             fabric.trim() ||
             notes.trim() ||
-            tags.trim() ||
-            seasonTags.trim() ||
+            selectedPresetTags.length ||
+            selectedCustomTags.length ||
+            lockedLegacyCustomTags.length ||
+            selectedSeasons.length ||
+            legacySeasonTags.length ||
             extraImageUrls.trim() ||
             (url.trim() && titleTouched) ||
             (brand.trim() && brandTouched) ||
@@ -1075,8 +1230,11 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
     setSoldPrice('');
     setSoldDate('');
     setNotes('');
-    setTags('');
-    setSeasonTags('');
+    setSelectedPresetTags([]);
+    setSelectedCustomTags([]);
+    setLockedLegacyCustomTags([]);
+    setSelectedSeasons([]);
+    setLegacySeasonTags([]);
     setQuantity(1);
     setCategory(undefined);
     setDidAutofillPrint(false);
@@ -1115,7 +1273,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       validateNewItemInput({
-        title: (quickMode ? (title.trim() || `${size.trim() || 'New'} ${category ? closetLabel[category] : 'Item'}`) : title).trim(),
+        title: (quickMode ? (title.trim() || `${size.trim() || 'New'} ${category ? getCategoryLabel(category, customCategories) : 'Item'}`) : title).trim(),
         clothingType,
         status,
         category,
@@ -1386,8 +1544,7 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
                 />
               ) : (
                 <Pressable onPress={openPhotoPaywall}>
-                  <Text style={styles.urlTip}>Add more photos</Text>
-                  <Text style={styles.urlTipSecondary}>{settings.proEarlyAccessJoined ? 'Early access joined' : 'Pro feature'}</Text>
+                  <Text style={styles.urlTip}>Add more photos   Pro</Text>
                 </Pressable>
               )}
             </>
@@ -1461,10 +1618,25 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
       ) : null}
       <ChipSelector
         label="Category"
-        options={categoryOptions.map((entry) => closetLabel[entry])}
-        value={category ? closetLabel[category] : undefined}
-        onChange={(label) => setCategory(categoryOptions.find((entry) => closetLabel[entry] === label))}
+        options={categoryOptions}
+        value={category}
+        optionLabels={categoryOptionLabels}
+        onChange={setCategory}
       />
+      <Pressable
+        onPress={() => {
+          if (!hasClosetPowerAccess) {
+            navigation.navigate('ProPaywall', { entryContext: 'closet_power' });
+            return;
+          }
+          setShowCustomCategoryModal(true);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Create custom category"
+      >
+        <Text style={styles.urlTip}>Category not listed? Create one with Pro</Text>
+        <Text style={styles.urlTipSecondary}>{hasClosetPowerAccess ? 'Create a custom category' : 'Unlock custom categories'}</Text>
+      </Pressable>
         <ChipSelector label="Status" options={statusOptions} value={status} onChange={setStatus} />
       {showLocationFeatures ? (
         <ChipSelector
@@ -1602,10 +1774,153 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
               ) : null}
             </>
           ) : null}
-          {status !== 'wishlist' ? <ChipSelector label="Condition" options={conditionOptions} value={condition} onChange={setCondition} /> : null}
-          <FormInput label="Tags (comma-separated)" value={tags} onChangeText={setTags} placeholder="casual, school" />
-          <FormInput label="Season Tags" value={seasonTags} onChangeText={setSeasonTags} placeholder="winter, summer" />
+          {status !== 'wishlist' ? <ChipSelector label="Condition" options={conditionOptions} value={condition} onChange={setCondition} optionLabels={conditionOptionLabels} /> : null}
         </>
+      ) : null}
+
+      <ChipSelector
+        label="Tags"
+        options={[...PRESET_TAGS]}
+        selectedValues={selectedPresetTags as any}
+        onChange={(value) => {
+          setSelectedPresetTags((current) => {
+            const next = current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value];
+            void logEvent('preset_tag_selected', { tag: value, selected: !current.includes(value) });
+            return next;
+          });
+        }}
+      />
+      <Text style={styles.assignmentMeta}>Tap to tag items for things like travel, holidays, or daycare.</Text>
+      {displayCustomTags.length ? (
+        <ChipSelector
+          label="Custom tags"
+          options={displayCustomTags}
+          selectedValues={selectedDisplayCustomTags as any}
+          optionLabels={customTagOptionLabels as any}
+          onChange={(value) => {
+            if (lockedLegacyCustomTags.includes(value)) {
+              if (!hasCustomTagAccess) {
+                void openCustomTagPaywall('legacy_locked_tag');
+                return;
+              }
+              setEditingCustomTagId(null);
+              setCustomTagDraftName(value);
+              setConvertingLockedCustomTag(value);
+              setShowCustomTagModal(true);
+              return;
+            }
+            if (!hasCustomTagAccess) {
+              void openCustomTagPaywall('custom_tag_locked');
+              return;
+            }
+            setSelectedCustomTags((current) => current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value]);
+          }}
+          onOptionLongPress={(value) => {
+            const tag = customTags.find((entry) => entry.name === value);
+            if (!tag) {
+              if (!hasCustomTagAccess) {
+                void openCustomTagPaywall('legacy_locked_tag');
+                return;
+              }
+              if (!lockedLegacyCustomTags.includes(value)) return;
+              setEditingCustomTagId(null);
+              setCustomTagDraftName(value);
+              setConvertingLockedCustomTag(value);
+              setShowCustomTagModal(true);
+              return;
+            }
+            if (!hasCustomTagAccess) {
+              void openCustomTagPaywall('custom_tag_locked');
+              return;
+            }
+            showActionMenu({
+              title: value,
+              message: 'Custom tag options',
+              actions: [
+                {
+                  label: 'Rename tag',
+                  onPress: () => {
+                    setEditingCustomTagId(tag.id);
+                    setCustomTagDraftName(tag.name);
+                    setConvertingLockedCustomTag(null);
+                    setShowCustomTagModal(true);
+                  },
+                },
+                {
+                  label: 'Delete tag',
+                  onPress: () => {
+                    setEditingCustomTagId(tag.id);
+                    void handleDeleteEditingCustomTag();
+                  },
+                },
+              ],
+            });
+          }}
+        />
+      ) : null}
+      {hasCustomTagAccess && customTags.length ? (
+        <Pressable
+          onPress={() => {
+            showActionMenu({
+              title: 'Manage custom tags',
+              message: 'Choose a tag to rename, edit, or delete.',
+              actions: customTags
+                .slice()
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((tag) => ({
+                  label: tag.name,
+                  onPress: () => {
+                    setEditingCustomTagId(tag.id);
+                    setCustomTagDraftName(tag.name);
+                    setConvertingLockedCustomTag(null);
+                    setShowCustomTagModal(true);
+                  },
+                })),
+            });
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Manage custom tags"
+        >
+          <Text style={styles.urlTip}>Manage custom tags</Text>
+          <Text style={styles.urlTipSecondary}>Rename, re-scope, or delete saved tags</Text>
+        </Pressable>
+      ) : null}
+      <Pressable
+        onPress={() => {
+          if (!hasCustomTagAccess) {
+            void openCustomTagPaywall('add_custom_tag');
+            return;
+          }
+          setEditingCustomTagId(null);
+          setCustomTagDraftName('');
+          setConvertingLockedCustomTag(null);
+          setShowCustomTagModal(true);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Add custom tag"
+      >
+        <Text style={styles.urlTip}>{hasCustomTagAccess ? '+ Add custom tag' : '+ Add custom tag   Pro'}</Text>
+        <Text style={styles.urlTipSecondary}>{hasCustomTagAccess ? 'Create a reusable custom tag' : 'Create your own tags'}</Text>
+      </Pressable>
+      <ChipSelector
+        label="Season"
+        options={[...SEASON_OPTIONS]}
+        selectedValues={selectedSeasons as any}
+        onChange={(value) => {
+          setSelectedSeasons((current) => {
+            const next = current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value];
+            void logEvent('season_selected', { season: value, selected: !current.includes(value) });
+            return next;
+          });
+        }}
+      />
+      {legacySeasonTags.length ? (
+        <ChipSelector
+          label="Existing Season Tags"
+          options={legacySeasonTags}
+          selectedValues={legacySeasonTags}
+          onChange={() => undefined}
+        />
       ) : null}
 
       <FormInput label="Notes" value={notes} onChangeText={setNotes} placeholder="Optional" multiline />
@@ -1763,6 +2078,25 @@ export const ItemFormScreen: React.FC<Props> = ({ route, navigation }) => {
           </Pressable>
         </Pressable>
       </Modal>
+      <CustomCategoryModal
+        visible={showCustomCategoryModal}
+        onDismiss={() => setShowCustomCategoryModal(false)}
+        onSubmit={handleCreateCustomCategory}
+      />
+      <CustomTagModal
+        visible={showCustomTagModal}
+        title={editingCustomTagId ? 'Edit custom tag' : 'Create custom tag'}
+        initialName={editingCustomTagId ? (customTags.find((entry) => entry.id === editingCustomTagId)?.name ?? customTagDraftName) : customTagDraftName}
+        submitLabel={editingCustomTagId ? 'Save tag' : 'Create tag'}
+        onDismiss={() => {
+          setShowCustomTagModal(false);
+          setEditingCustomTagId(null);
+          setCustomTagDraftName('');
+          setConvertingLockedCustomTag(null);
+        }}
+        onSubmit={handleSubmitCustomTag}
+        onDelete={editingCustomTagId ? handleDeleteEditingCustomTag : undefined}
+      />
     </Screen>
   );
 };

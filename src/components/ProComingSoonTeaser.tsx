@@ -50,6 +50,16 @@ export const ProComingSoonTeaser: React.FC<Props> = ({ variant, onPress, onDismi
       color: theme.colors.textSecondary,
       lineHeight: 19,
     },
+    subtext: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.accentPeriwinkle,
+    },
+    ctaHint: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
+    },
     dismissButton: {
       minWidth: 24,
       minHeight: 24,
@@ -69,7 +79,7 @@ export const ProComingSoonTeaser: React.FC<Props> = ({ variant, onPress, onDismi
   });
 
   return (
-    <Pressable style={styles.shell} onPress={onPress} accessibilityRole="button" accessibilityLabel="Layette Out Pro coming soon">
+    <Pressable style={styles.shell} onPress={onPress} accessibilityRole="button" accessibilityLabel="Layette Out Pro">
       <View style={styles.headerRow}>
         <Text style={styles.title}>✨ Layette Out Pro</Text>
         {onDismiss ? (
@@ -87,11 +97,9 @@ export const ProComingSoonTeaser: React.FC<Props> = ({ variant, onPress, onDismi
           </Pressable>
         ) : null}
       </View>
-      <Text style={styles.subtitle}>Coming soon</Text>
-      <Text style={styles.body}>
-        Thanks for being an early user — you&apos;ll receive special perks when Pro launches.
-      </Text>
+      <Text style={styles.body}>Create ready-to-post BST listings, add more photos, and customize your closet</Text>
+      <Text style={styles.subtext}>Founding price — limited time</Text>
+      <Text style={styles.ctaHint}>See how it works →</Text>
     </Pressable>
   );
 };
-

@@ -3,6 +3,11 @@ export type NormalizedSizeEntry = {
   label: string;
 };
 
+export type SizeEntryPresentation = {
+  standard: NormalizedSizeEntry[];
+  custom: NormalizedSizeEntry[];
+};
+
 const DASH_RE = /[\u2010-\u2015\u2212]/g;
 
 const KNOWN_ORDER = [
@@ -120,6 +125,47 @@ export const uniqueSortedSizeEntries = (labels: Array<string | null | undefined>
     .map(([normalized, label]) => ({ normalized, label }));
 };
 
+const SIZE_NOTE_HINT_RE = /\b(marked|more|maybe|likely|brand|website|lists?|could|also|fit|fits)\b/i;
+
+export const shouldRenderSizeAsStandardChip = (label: string): boolean => {
+  const trimmed = String(label || '').replace(/\s+/g, ' ').trim();
+  if (!trimmed) return false;
+
+  const normalized = normalizeSizeLabel(trimmed);
+  if (!normalized || normalized === 'NONE') return false;
+
+  const compact = trimmed.replace(/\s*\/\s*/g, '/').replace(/\s*-\s*/g, '-').trim();
+  const tokenCount = compact.split(/\s+/).filter(Boolean).length;
+  const noteLike = /[,;:()]/.test(trimmed) || SIZE_NOTE_HINT_RE.test(trimmed);
+
+  if (noteLike) return false;
+  if (tokenCount > 2) return false;
+  if (compact.length <= 12) return true;
+  if (getSizeRank(normalized) < 1000000 && compact.length <= 14) return true;
+  return false;
+};
+
+export const partitionSizeEntriesForDisplay = (entries: NormalizedSizeEntry[]): SizeEntryPresentation => (
+  entries.reduce<SizeEntryPresentation>((groups, entry) => {
+    if (shouldRenderSizeAsStandardChip(entry.label)) groups.standard.push(entry);
+    else groups.custom.push(entry);
+    return groups;
+  }, { standard: [], custom: [] })
+);
+
+export const formatSizeFilterDisplayLabel = (label: string, options?: { sentenceCase?: boolean }): string => {
+  const trimmed = String(label || '').replace(/\s+/g, ' ').trim();
+  if (!trimmed) return '';
+  if (!options?.sentenceCase) return trimmed;
+
+  const hasLetters = /[A-Za-z]/.test(trimmed);
+  const hasLowercase = /[a-z]/.test(trimmed);
+  if (!hasLetters || hasLowercase) return trimmed;
+
+  const lower = trimmed.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+};
+
 export type SizeChipMode = 'now' | 'next' | 'both';
 
 export type SizeChipTransitionResult = {
@@ -150,6 +196,11 @@ export const __sizeOrderTestVectors = {
   orderingExpected: ['18-24M', '2T', '3T'],
   dedupeInput: ['2t', '2T', ' 2T '],
   dedupeExpectedNormalized: ['2T'],
+  chipClassification: {
+    standard: shouldRenderSizeAsStandardChip('XS / 0-6M'),
+    custom: shouldRenderSizeAsStandardChip('MARKED AS A 3 BUT MORE A 3.5, MAYBE EVEN A 4'),
+    none: shouldRenderSizeAsStandardChip('NONE'),
+  },
   transitions: {
     toNow: getSizeChipTransitionOnTap({ tapped: '18-24M', currentSize: '18-24 months', nextSize: '2T' }),
     toNext: getSizeChipTransitionOnTap({ tapped: '2T', currentSize: '18-24M', nextSize: '2t' }),

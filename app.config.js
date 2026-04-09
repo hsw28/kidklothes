@@ -13,6 +13,7 @@ module.exports = () => {
       REVENUECAT_OFFERING_ID: process.env.REVENUECAT_OFFERING_ID || 'default',
       REVENUECAT_PRO_ENTITLEMENT_ID: process.env.REVENUECAT_PRO_ENTITLEMENT_ID || 'layette_out_pro',
       MONETIZATION_ENABLED: parseBoolean(process.env.MONETIZATION_ENABLED || 'false'),
+      FOUNDING_MEMBER_ENABLED: parseBoolean(process.env.FOUNDING_MEMBER_ENABLED || 'true'),
       POSTHOG_API_KEY: process.env.POSTHOG_API_KEY || '',
       POSTHOG_HOST: process.env.POSTHOG_HOST || '',
     },

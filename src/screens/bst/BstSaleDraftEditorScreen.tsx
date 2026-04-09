@@ -12,7 +12,8 @@ import { BST_COLLAGE_ORDER_MODES, BST_CONDITIONS, BST_DRYING_METHODS, BST_FLAW_T
 import { ClosetStackParamList } from '@/navigation/types';
 import { buildSaleDraftName, formatMoney, getDraftIncludedItems } from '@/services/bst/draft';
 import { trackBstDraftDeleted } from '@/services/bst/bstAnalytics';
-import { canCreateMultipleDrafts, canUseCustomBstHeaderImage, canUseMultipleItemPhotos } from '@/services/proAccess';
+import { FREE_BST_ITEM_CARD_LIMIT } from '@/services/bst/bstLimits';
+import { canCreateMultipleDrafts, canGenerateUnlimitedCards, canUseCustomBstHeaderImage, canUseMultipleItemPhotos } from '@/services/proAccess';
 import { useAppTheme } from '@/theme';
 import { persistLocalImage } from '@/utils/imageCache';
 import { getItemDisplayImageUri } from '@/utils/itemMedia';
@@ -98,6 +99,11 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
   const [itemOffersValue, setItemOffersValue] = useState<BoolChoice>('inherit');
   const [itemBundleOffersValue, setItemBundleOffersValue] = useState<BoolChoice>('inherit');
   const [itemSelectedPhotoUri, setItemSelectedPhotoUri] = useState<string | undefined>(undefined);
+  const [cardBrandInput, setCardBrandInput] = useState('');
+  const [cardSizeInput, setCardSizeInput] = useState('');
+  const [cardStyleInput, setCardStyleInput] = useState('');
+  const [cardPrintInput, setCardPrintInput] = useState('');
+  const [cardTitleInput, setCardTitleInput] = useState('');
   const [isDeletingDraft, setIsDeletingDraft] = useState(false);
   const draft = saleDrafts.find((entry) => entry.id === route.params.draftId);
   const draftItems = useMemo(
@@ -110,6 +116,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
   const hasMultiPhotoAccess = canUseMultipleItemPhotos(settings, purchaseState);
   const canUseCustomHeaderImage = canUseCustomBstHeaderImage(settings, purchaseState);
   const canDeleteDraft = canCreateMultipleDrafts(settings, purchaseState);
+  const unlimitedCards = canGenerateUnlimitedCards(settings, purchaseState);
   const shouldConfirmSelectionReset = !canDeleteDraft && Boolean(draft?.freeGenerationConsumedAt);
   const editingPhotoChoices = useMemo(
     () => {
@@ -167,6 +174,11 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
     },
     subhead: {
       fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
+    },
+    miniSubhead: {
+      fontSize: 15,
       fontWeight: '700',
       color: theme.colors.textPrimary,
     },
@@ -301,6 +313,15 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
     setItemSelectedPhotoUri(editingDraftItem.selectedPhotoUri);
   }, [editingDraftItem?.id]);
 
+  useEffect(() => {
+    if (!editingInventoryItem) return;
+    setCardBrandInput(editingInventoryItem.brand ?? '');
+    setCardSizeInput(editingInventoryItem.size ?? '');
+    setCardStyleInput(editingInventoryItem.styleName ?? '');
+    setCardPrintInput(editingInventoryItem.printName ?? '');
+    setCardTitleInput(editingInventoryItem.title ?? '');
+  }, [editingInventoryItem?.id]);
+
   if (!draft) {
     return (
       <Screen>
@@ -314,6 +335,14 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       editorScrollRef.current?.scrollTo({ y: editorScrollOffsetRef.current, animated: false });
     });
   }, []);
+
+  const closeItemEditor = useCallback(() => {
+    if (route.params.returnToPreview) {
+      navigation.goBack();
+      return;
+    }
+    setEditingItemId(null);
+  }, [navigation, route.params.returnToPreview]);
 
   const updateDraftPreservingScroll = useCallback(async (patch: Parameters<typeof updateSaleDraft>[1]) => {
     await updateSaleDraft(draft.id, patch);
@@ -357,7 +386,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
 
   const pickCustomHeaderImage = useCallback(() => {
     if (!canUseCustomHeaderImage) {
-      navigation.navigate('ProPaywall', { source: 'bst_locked_export' });
+      navigation.navigate('ProPaywall', { source: 'bst_locked_export', entryContext: 'bst' });
       return;
     }
     Alert.alert('Main post photo', 'Choose how you want to add your main post photo.', [
@@ -414,6 +443,11 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       bundleOffersAcceptedOverride: itemBundleOffersValue === 'inherit' ? undefined : itemBundleOffersValue === 'yes',
     });
     await updateItem(editingInventoryItem.id, {
+      brand: cardBrandInput.trim() || undefined,
+      size: cardSizeInput.trim(),
+      styleName: cardStyleInput.trim() || undefined,
+      printName: cardPrintInput.trim() || undefined,
+      title: cardTitleInput.trim() || editingInventoryItem.title,
       targetResalePrice: Number.isFinite(parsedPrice) ? parsedPrice : undefined,
       bstSelectedPhotoUri: itemSelectedPhotoUri,
       bstCondition: itemConditionValue === 'unset' ? undefined : itemConditionValue,
@@ -428,7 +462,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       bstOffersAccepted: itemOffersValue === 'inherit' ? undefined : itemOffersValue === 'yes',
       bstBundleOffersAccepted: itemBundleOffersValue === 'inherit' ? undefined : itemBundleOffersValue === 'yes',
     });
-    setEditingItemId(null);
+    closeItemEditor();
   };
 
   const applyAutoSort = useCallback(async (mode: 'highest-price' | 'newest-first') => {
@@ -538,17 +572,32 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
             />
           ) : null}
         </View>
+        <View style={styles.sectionGroup}>
+          <View style={styles.controlStack}>
+            <ChipSelector
+              label="Prices on collage"
+              options={['show', 'hide']}
+              value={draft.showPricesOnCollage ? 'show' : 'hide'}
+              onChange={(value) => void updateDraftPreservingScroll({ showPricesOnCollage: value === 'show' })}
+              accent="sage"
+            />
+          </View>
+        </View>
         <Text style={styles.meta}>Make your post stand out</Text>
       </Card>
 
       <Card>
-        <Text style={styles.subhead}>Apply to all items</Text>
-        <Text style={styles.body}>These apply to all items unless edited individually</Text>
+        <Text style={styles.subhead}>Draft-wide defaults</Text>
+        <Text style={styles.body}>These fill in every item by default. You can still override them on individual items below.</Text>
         <View style={styles.sectionStack}>
+          <View style={styles.sectionGroup}>
+            <Text style={styles.miniSubhead}>Care, home, and offer defaults</Text>
+            <Text style={styles.body}>Use these for wash notes, drying, smoke, pets, and offer preferences across the whole draft.</Text>
+          </View>
           <View style={styles.sectionGroup}>
             <View style={styles.controlStack}>
               <ChipSelector
-                label="Smoke note"
+                label="Default smoke note"
                 options={['unset', ...BST_SMOKE_NOTES]}
                 value={(draft.defaultSmokeNote ?? 'unset') as 'unset' | (typeof BST_SMOKE_NOTES)[number]}
                 onChange={(value) => void updateDraftPreservingScroll({ defaultSmokeNote: value === 'unset' ? undefined : value })}
@@ -560,7 +609,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
           <View style={styles.sectionGroup}>
             <View style={styles.controlStack}>
               <ChipSelector
-                label="Pet types"
+                label="Default pet types"
                 options={['none', 'dog', 'cat', 'other']}
                 selectedValues={draft.defaultPetTypes ?? []}
                 onChange={(value) => {
@@ -577,7 +626,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
               />
               {draft.defaultPetTypes?.includes('other') ? (
                 <FormInput
-                  label="Pet note"
+                  label="Default pet note"
                   value={petNoteInput}
                   onChangeText={setPetNoteInput}
                   onBlur={() => void saveDraftTextField('defaultPetNote', petNoteInput, draft.defaultPetNote)}
@@ -589,7 +638,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
           <View style={styles.sectionGroup}>
             <View style={styles.controlStack}>
               <FormInput
-                label="Wash note"
+                label="Default wash note"
                 value={washNoteInput}
                 onChangeText={setWashNoteInput}
                 onBlur={() => void saveDraftTextField('defaultWashNote', washNoteInput, draft.defaultWashNote)}
@@ -597,49 +646,49 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
               />
             </View>
             <Pressable onPress={() => setEditingItemId(draftItems[0]?.id ?? null)}>
-              <Text style={styles.inlineLink}>Add wash note individually for each item</Text>
+              <Text style={styles.inlineLink}>Switch to item-level wash notes</Text>
             </Pressable>
           </View>
 
           <View style={styles.sectionGroup}>
             <View style={styles.controlStack}>
               <ChipSelector
-                label="Drying method"
+                label="Default drying method"
                 options={['unset', ...BST_DRYING_METHODS]}
                 value={(draft.defaultDryingMethod ?? 'unset') as 'unset' | (typeof BST_DRYING_METHODS)[number]}
                 onChange={(value) => void updateDraftPreservingScroll({ defaultDryingMethod: value === 'unset' ? undefined : value })}
                 optionLabels={UNSET_OPTION_LABELS}
               />
-              <Text style={styles.body}>Wash and dry notes will not apply to items marked new or new with tag.</Text>
+              <Text style={styles.body}>Wash and dry notes do not apply to items marked new.</Text>
             </View>
             <Pressable onPress={() => void beginIndividualFieldEditing('drying')}>
-              <Text style={styles.inlineLink}>Set drying individually for items</Text>
+              <Text style={styles.inlineLink}>Switch to item-level drying notes</Text>
             </Pressable>
           </View>
 
           <View style={styles.sectionGroup}>
             <View style={styles.controlStack}>
               <BooleanSelector
-                label="Offers accepted"
+                label="Default offers accepted"
                 value={draft.defaultOffersAccepted === undefined ? 'unset' : draft.defaultOffersAccepted ? 'yes' : 'no'}
                 onChange={(value) => void updateDraftPreservingScroll({ defaultOffersAccepted: value === 'unset' ? undefined : value === 'yes' })}
               />
             </View>
             <Pressable onPress={() => void beginIndividualFieldEditing('offers')}>
-              <Text style={styles.inlineLink}>Set offers individually for items</Text>
+              <Text style={styles.inlineLink}>Switch to item-level offers</Text>
             </Pressable>
           </View>
 
           <View style={styles.sectionGroup}>
             <View style={styles.controlStack}>
               <BooleanSelector
-                label="Bundle offers accepted"
+                label="Default bundle offers accepted"
                 value={draft.defaultBundleOffersAccepted === undefined ? 'unset' : draft.defaultBundleOffersAccepted ? 'yes' : 'no'}
                 onChange={(value) => void updateDraftPreservingScroll({ defaultBundleOffersAccepted: value === 'unset' ? undefined : value === 'yes' })}
               />
             </View>
             <Pressable onPress={() => void beginIndividualFieldEditing('bundle')}>
-              <Text style={styles.inlineLink}>Set bundle offers individually for items</Text>
+              <Text style={styles.inlineLink}>Switch to item-level bundle offers</Text>
             </Pressable>
           </View>
 
@@ -778,27 +827,49 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
       <Card>
         <Text style={styles.subhead}>Create your post</Text>
         <Text style={styles.body}>See your collage, item cards, and post text</Text>
-        <PrimaryButton label="Preview post" onPress={() => navigation.navigate('BstSaleDraftPreview', { draftId: draft.id })} />
+        {!unlimitedCards && draft.freeGenerationConsumedAt ? (
+          <Text style={styles.body}>This post already used its free preview. Create a new post or unlock full version.</Text>
+        ) : null}
+        <PrimaryButton
+          label="Preview post"
+          onPress={() => {
+            void (async () => {
+              const patch: Parameters<typeof updateSaleDraft>[1] = {};
+              if (!draft.previewVisitedAt) {
+                patch.previewVisitedAt = Date.now();
+              }
+              if (!unlimitedCards && !(draft.freeGeneratedCardItemIds?.length ?? 0)) {
+                patch.freeGeneratedCardItemIds = draftItems.slice(0, FREE_BST_ITEM_CARD_LIMIT).map((entry) => entry.id);
+              }
+              if (Object.keys(patch).length) {
+                await updateDraftPreservingScroll(patch);
+              }
+              navigation.navigate('BstSaleDraftPreview', { draftId: draft.id });
+            })();
+          }}
+        />
       </Card>
 
       {canDeleteDraft ? (
-        <View style={styles.bottomSection}>
-          <View style={styles.simpleDangerSection}>
-            <Text style={styles.subhead}>Delete draft</Text>
-            <Text style={styles.body}>Permanently delete this draft</Text>
-            <PrimaryButton label="Delete Draft" variant="danger" onPress={confirmDeleteDraft} />
-          </View>
+        <View style={styles.simpleDangerSection}>
+          <Text style={styles.body}>Need to start over?</Text>
+          <PrimaryButton label="Delete draft" variant="dangerSecondary" onPress={confirmDeleteDraft} />
         </View>
       ) : null}
 
-      <Modal visible={Boolean(editingDraftItem && editingInventoryItem)} transparent animationType="slide" onRequestClose={() => setEditingItemId(null)}>
+      <Modal visible={Boolean(editingDraftItem && editingInventoryItem)} transparent animationType="slide" onRequestClose={closeItemEditor}>
         <View style={styles.modalBackdrop}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setEditingItemId(null)} />
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={closeItemEditor} />
           <Pressable style={styles.modalCard} onPress={() => undefined}>
             {editingDraftItem && editingInventoryItem ? (
               <ScrollView contentContainerStyle={styles.modalScroll}>
-                <Text style={styles.title}>Edit #{editingDraftItem.itemNumber}</Text>
-                <Text style={styles.body}>{editingInventoryItem.title}</Text>
+                <Text style={styles.title}>{`Edit item #${editingDraftItem.itemNumber}`}</Text>
+                <Text style={styles.body}>Item-level overrides for {editingInventoryItem.title}</Text>
+                <FormInput label="Brand" value={cardBrandInput} onChangeText={setCardBrandInput} />
+                <FormInput label="Size" value={cardSizeInput} onChangeText={setCardSizeInput} />
+                <FormInput label="Style (optional)" value={cardStyleInput} onChangeText={setCardStyleInput} />
+                <FormInput label="Print (optional)" value={cardPrintInput} onChangeText={setCardPrintInput} />
+                <FormInput label="Title" value={cardTitleInput} onChangeText={setCardTitleInput} multiline />
                 <FormInput
                   label="Price"
                   value={itemPriceInput}
@@ -812,7 +883,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                   onChange={setItemConditionValue}
                   optionLabels={UNSET_OPTION_LABELS}
                 />
-                <FormInput label="Condition notes" value={itemConditionNotesInput} onChangeText={setItemConditionNotesInput} multiline />
+                <FormInput label="Condition note override" value={itemConditionNotesInput} onChangeText={setItemConditionNotesInput} multiline />
                 <Text style={styles.meta}>Selected photo</Text>
                 <View style={styles.pillRow}>
                   {editingPhotoChoices.map((uri, index) => (
@@ -846,7 +917,9 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                     );
                   })}
                 </View>
-                <FormInput label="Flaw notes" value={itemFlawNotesInput} onChangeText={setItemFlawNotesInput} multiline />
+                <FormInput label="Flaw note override" value={itemFlawNotesInput} onChangeText={setItemFlawNotesInput} multiline />
+                <Text style={styles.miniSubhead}>Care, home, and offer overrides</Text>
+                <Text style={styles.body}>These are the wash, drying, smoke, pet, and offer settings that were missing before. They apply only to this item.</Text>
                 <FormInput label="Wash note override" value={itemWashNotesInput} onChangeText={setItemWashNotesInput} multiline />
                 <ChipSelector
                   label="Drying override"
@@ -862,7 +935,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                   onChange={setItemSmokeValue}
                 />
                 <ChipSelector
-                  label="Pet override"
+                  label="Pet setting"
                   options={['inherit']}
                   value={itemPetUsesInheritance ? 'inherit' : undefined}
                   onChange={() => {
@@ -873,7 +946,7 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                   accent="sage"
                 />
                 <ChipSelector
-                  label="Item pet types"
+                  label="Pet type override"
                   options={['none', 'dog', 'cat', 'other']}
                   selectedValues={itemPetUsesInheritance ? [] : itemPetTypesValue}
                   onChange={(value) => {
@@ -901,9 +974,9 @@ export const BstSaleDraftEditorScreen: React.FC<Props> = ({ navigation, route })
                   value={itemBundleOffersValue}
                   onChange={setItemBundleOffersValue}
                 />
-                <Text style={styles.body}>Saved BST details on this item, including price, will prefill future BST drafts.</Text>
+                <Text style={styles.body}>These item-level BST details, including price, will prefill future BST drafts for this item.</Text>
                 <PrimaryButton label="Save Item Details" onPress={() => void saveEditingItem()} />
-                <PrimaryButton label="Cancel" variant="secondary" onPress={() => setEditingItemId(null)} />
+                <PrimaryButton label="Cancel" variant="secondary" onPress={closeItemEditor} />
               </ScrollView>
             ) : null}
           </Pressable>

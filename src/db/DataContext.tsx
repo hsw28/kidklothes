@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
-import { ActivityEvent, AppSettings, BackupPayload, Child, ChildItem, FilterPreset, ID, Item, Outfit, PrintAlias, PurchaseStateSnapshot, SaleDraft, SaleDraftItem, StorageLocation } from '@/models';
+import { ActivityEvent, AppSettings, BackupPayload, Child, ChildItem, CustomCategory, CustomTag, FilterPreset, ID, Item, Outfit, PrintAlias, PurchaseStateSnapshot, SaleDraft, SaleDraftItem, StorageLocation } from '@/models';
 import { appConfig } from '@/config';
 import { getEntitlementSnapshot, initPurchases } from '@/services/purchases';
 import { trackBstDraftArchived, trackBstDraftCreated } from '@/services/bst/bstAnalytics';
@@ -16,6 +16,8 @@ interface DataContextValue {
   children: Child[];
   items: Item[];
   childItems: ChildItem[];
+  customTags: CustomTag[];
+  customCategories: CustomCategory[];
   storageLocations: StorageLocation[];
   printAliases: PrintAlias[];
   purchaseState?: PurchaseStateSnapshot;
@@ -28,8 +30,14 @@ interface DataContextValue {
   refresh: () => Promise<void>;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   addChild: (input: NewChildInput) => Promise<Child | undefined>;
+  reorderChildren: (orderedChildIds: ID[]) => Promise<void>;
   updateChild: (id: ID, patch: Partial<NewChildInput>) => Promise<void>;
   deleteChild: (id: ID) => Promise<void>;
+  createCustomTag: (input: { name: string }) => Promise<CustomTag | undefined>;
+  updateCustomTag: (id: ID, input: { name: string }) => Promise<void>;
+  deleteCustomTag: (id: ID) => Promise<void>;
+  createCustomCategory: (input: { name: string; icon?: string }) => Promise<CustomCategory | undefined>;
+  deleteCustomCategory: (id: ID) => Promise<void>;
   getKidCount: () => Promise<number>;
   canCreateAnotherKid: () => Promise<{ ok: boolean; current: number; max: number }>;
   addItem: (input: NewItemInput) => Promise<Item | undefined>;
@@ -84,6 +92,7 @@ const defaultSettings: AppSettings = {
   advancedFeaturesUnlocked: false,
   lastShoppingType: undefined,
   lastShoppingChildId: undefined,
+  lastBackupAt: undefined,
   closetCategoryOrder: undefined,
   hiddenClosetCategoriesGlobal: [],
   wishlistCategoryOrder: undefined,
@@ -91,11 +100,14 @@ const defaultSettings: AppSettings = {
   kidsPreviewCategories: undefined,
   developerModeEnabled: false,
   developerForceProAccessEnabled: false,
+  developerActLikeFirstTimeUser: false,
   betaKidLimitBannerDismissed: false,
   proTeaserBannerDismissed: false,
   missingPhotoRestoreNudgeShown: true,
   hasSeenBstPostingGuide: false,
+  hasSeenBstEntryOnboarding: false,
   proEarlyAccessJoined: false,
+  foundingMemberJoined: false,
 };
 
 const DataContext = createContext<DataContextValue | undefined>(undefined);
@@ -106,6 +118,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [allChildren, setChildren] = useState<Child[]>([]);
   const [allItems, setItems] = useState<Item[]>([]);
   const [allChildItems, setChildItems] = useState<ChildItem[]>([]);
+  const [allCustomTags, setCustomTags] = useState<CustomTag[]>([]);
+  const [allCustomCategories, setCustomCategories] = useState<CustomCategory[]>([]);
   const [allStorageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
   const [allPrintAliases, setPrintAliases] = useState<PrintAlias[]>([]);
   const [purchaseState, setPurchaseState] = useState<PurchaseStateSnapshot | undefined>(undefined);
@@ -140,7 +154,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     }
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { refreshPurchases?: boolean }) => {
     setLoading(true);
     setErrorMessage(undefined);
     try {
@@ -149,6 +163,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       setChildren(data.children);
       setItems(data.items);
       setChildItems(data.childItems);
+      setCustomTags(data.customTags);
+      setCustomCategories(data.customCategories);
       setStorageLocations(data.storageLocations);
       setPrintAliases(data.printAliases);
       setPurchaseState(data.purchaseState);
@@ -159,7 +175,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       setSaleDraftItems(data.saleDraftItems);
       setSettings(data.settings);
 
-      if (appConfig.monetizationEnabled) {
+      if (options?.refreshPurchases !== false && appConfig.monetizationEnabled) {
         await refreshPurchaseState();
       }
     } catch (error) {
@@ -173,7 +189,7 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   }, [refreshPurchaseState]);
 
   useEffect(() => {
-    void refresh().catch(() => undefined);
+    void refresh({ refreshPurchases: true }).catch(() => undefined);
   }, [refresh]);
 
   useEffect(() => {
@@ -261,18 +277,43 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const runAndRefresh = useCallback(
     async (action: () => Promise<unknown>) => {
       await action();
-      await refresh();
+      await refresh({ refreshPurchases: false });
     },
     [refresh],
   );
   const runAndRefreshWithResult = useCallback(
     async <T,>(action: () => Promise<T>): Promise<T> => {
       const result = await action();
-      await refresh();
+      await refresh({ refreshPurchases: false });
       return result;
     },
     [refresh],
   );
+  const updateSettingsFn = useCallback(async (patch: Partial<AppSettings>) => {
+    await runAndRefresh(() => repository.updateSettings(patch));
+  }, [runAndRefresh]);
+  const updateSaleDraftFn = useCallback(async (id: ID, patch: UpdateSaleDraftInput) => {
+    const existingDraft = allSaleDrafts.find((draft) => draft.id === id);
+    await runAndRefresh(() => repository.updateSaleDraft(id, patch));
+    if (patch.status === 'archived' && existingDraft?.status !== 'archived') {
+      await trackBstDraftArchived(async (type, payload) => {
+        await repository.logEvent({ type, payload });
+      }, {
+        draftId: id,
+        itemCount: allSaleDraftItems.filter((item) => item.saleDraftId === id && item.included).length,
+        isPro: hasProAccess(settings, purchaseState),
+      });
+    }
+  }, [allSaleDraftItems, allSaleDrafts, purchaseState, runAndRefresh, settings]);
+  const deleteSaleDraftFn = useCallback(async (id: ID) => {
+    await runAndRefresh(() => repository.deleteSaleDraft(id));
+  }, [runAndRefresh]);
+  const logEventFn = useCallback(async (type: string, payload?: Record<string, unknown>) => {
+    await repository.logEvent({ type, payload });
+  }, []);
+  const getEventCountFn = useCallback(async (type: string, sinceDate: number) => (
+    repository.getEventCount(type, sinceDate)
+  ), []);
 
   const isLocalLikeUri = (value?: string) => /^(file:\/\/|content:\/\/|ph:\/\/|assets-library:\/\/)/i.test((value ?? '').trim());
   const isRemoteHttpUri = (value?: string) => /^https?:\/\//i.test((value ?? '').trim());
@@ -416,6 +457,8 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       children: allChildren,
       items: allItems,
       childItems: allChildItems,
+      customTags: allCustomTags,
+      customCategories: allCustomCategories,
       storageLocations: allStorageLocations,
       printAliases: allPrintAliases,
       purchaseState,
@@ -426,10 +469,16 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       saleDraftItems: allSaleDraftItems,
       settings,
       refresh,
-      updateSettings: async (patch) => runAndRefresh(() => repository.updateSettings(patch)),
+      updateSettings: updateSettingsFn,
       addChild: async (input) => runAndRefreshWithResult(() => repository.addChild(input)),
+      reorderChildren: async (orderedChildIds) => runAndRefresh(() => repository.reorderChildren(orderedChildIds)),
       updateChild: async (id, patch) => runAndRefresh(() => repository.updateChild(id, patch)),
       deleteChild: async (id) => runAndRefresh(() => repository.deleteChild(id)),
+      createCustomTag: async (input) => runAndRefreshWithResult(() => repository.createCustomTag(input)),
+      updateCustomTag: async (id, input) => runAndRefresh(() => repository.updateCustomTag(id, input)),
+      deleteCustomTag: async (id) => runAndRefresh(() => repository.deleteCustomTag(id)),
+      createCustomCategory: async (input) => runAndRefreshWithResult(() => repository.createCustomCategory(input)),
+      deleteCustomCategory: async (id) => runAndRefresh(() => repository.deleteCustomCategory(id)),
       getKidCount: async () => repository.getKidCount(),
       canCreateAnotherKid: async () => repository.canCreateAnotherKid(),
       addItem: async (input) => {
@@ -491,39 +540,25 @@ export const DataProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         }
         return created;
       },
-      updateSaleDraft: async (id, patch) => {
-        const existingDraft = allSaleDrafts.find((draft) => draft.id === id);
-        await runAndRefresh(() => repository.updateSaleDraft(id, patch));
-        if (patch.status === 'archived' && existingDraft?.status !== 'archived') {
-          await trackBstDraftArchived(async (type, payload) => {
-            await repository.logEvent({ type, payload });
-          }, {
-            draftId: id,
-            itemCount: allSaleDraftItems.filter((item) => item.saleDraftId === id && item.included).length,
-            isPro: hasProAccess(settings, purchaseState),
-          });
-        }
-      },
+      updateSaleDraft: updateSaleDraftFn,
       updateSaleDraftItem: async (id, patch) => runAndRefresh(() => repository.updateSaleDraftItem(id, patch)),
       bulkUpdateSaleDraftItems: async (saleDraftId, patch) => runAndRefresh(() => repository.bulkUpdateSaleDraftItems(saleDraftId, patch)),
-      deleteSaleDraft: async (id) => runAndRefresh(() => repository.deleteSaleDraft(id)),
+      deleteSaleDraft: deleteSaleDraftFn,
       removeSaleDraftItem: async (id) => runAndRefresh(() => repository.removeSaleDraftItem(id)),
       reorderSaleDraftItems: async (saleDraftId, orderedDraftItemIds) => runAndRefresh(() => repository.reorderSaleDraftItems(saleDraftId, orderedDraftItemIds)),
       saveFilterPreset: async (input) => runAndRefresh(() => repository.saveFilterPreset(input)),
       deleteFilterPreset: async (id) => runAndRefresh(() => repository.deleteFilterPreset(id)),
-      logEvent: async (type, payload) => {
-        await repository.logEvent({ type, payload });
-      },
+      logEvent: logEventFn,
       getEvents: async (limit) => repository.getEvents(limit),
       listRecentItems: async (input) => repository.listRecentItems(input),
-      getEventCount: async (type, sinceDate) => repository.getEventCount(type, sinceDate),
+      getEventCount: getEventCountFn,
       clearEvents: async () => repository.clearEvents(),
       refreshPurchaseState,
       getPurchaseState: async () => repository.getPurchaseState(),
       exportBackup: async () => repository.exportBackup(),
       importBackup: async (payload) => runAndRefresh(() => repository.importBackup(payload)),
     }),
-    [allChildren, allItems, allChildItems, allStorageLocations, allPrintAliases, purchaseState, allOutfits, allFilterPresets, allBrands, allSaleDrafts, allSaleDraftItems, loading, errorMessage, settings, refresh, runAndRefresh, runAndRefreshWithResult, refreshPurchaseState, prepareInputWithPersistentImage, ensureItemHasPersistentCopy, warnIfMissingPersistentImage],
+    [allChildren, allItems, allChildItems, allCustomTags, allCustomCategories, allStorageLocations, allPrintAliases, purchaseState, allOutfits, allFilterPresets, allBrands, allSaleDrafts, allSaleDraftItems, loading, errorMessage, settings, refresh, runAndRefresh, runAndRefreshWithResult, refreshPurchaseState, prepareInputWithPersistentImage, ensureItemHasPersistentCopy, warnIfMissingPersistentImage, updateSettingsFn, updateSaleDraftFn, deleteSaleDraftFn, logEventFn, getEventCountFn],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

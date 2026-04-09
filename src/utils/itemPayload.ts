@@ -1,5 +1,5 @@
 import { BrandFit, Condition, ItemStatus, KidFit, PrintAlias, ItemSizeScheme, ItemSizeSystem, ItemSizeType, FitBin } from '@/models';
-import { ClosetCategory, closetCategoryToClothingType, closetLabel } from '@/utils/categories';
+import { closetCategoryToClothingType, getCategoryLabel } from '@/utils/categories';
 import { normalizeWhitespace } from '@/utils/normalize';
 import { resolveOutboundLink } from '@/utils/outbound';
 import { resolvePrintName } from '@/utils/printName';
@@ -24,7 +24,7 @@ type ItemPayloadFormInput = {
   sizeRaw?: string;
   fitBin?: FitBin;
   fitBinTouched?: boolean;
-  category?: ClosetCategory;
+  category?: string;
   storageLocationId: string;
   brandFit?: BrandFit;
   kidFit?: KidFit;
@@ -64,7 +64,7 @@ export type NormalizedItemPayload = {
   sizeRaw?: string;
   fitBin?: FitBin;
   fitBinTouched?: boolean;
-  category?: ClosetCategory;
+  category?: string;
   storageLocationId?: string;
   brandFit?: BrandFit;
   kidFit?: KidFit;
@@ -102,7 +102,7 @@ export const normalizeItemPayload = (input: ItemPayloadFormInput): NormalizedIte
   const printNameDisplay = input.printName.trim() ? normalizeWhitespace(input.printName) : '';
   const derivedType = closetCategoryToClothingType(input.category);
   const baseTitle = input.quickMode
-    ? `${input.size.trim() || 'New'} ${input.category ? closetLabel[input.category] : input.clothingTypeLabelFallback}`
+    ? `${input.size.trim() || 'New'} ${input.category ? getCategoryLabel(input.category) : input.clothingTypeLabelFallback}`
     : input.title;
 
   const payload = {

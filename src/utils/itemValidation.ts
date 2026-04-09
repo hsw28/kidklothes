@@ -1,5 +1,5 @@
 import { CLOTHING_TYPES, ITEM_STATUSES, Item, ItemCategory } from '@/models';
-import { closetCategories } from './categories';
+import { closetCategories, isCustomCategoryId } from './categories';
 import { normalizeWhitespace, trimOrNull } from './normalize';
 
 type ItemCreateValidationInput = {
@@ -20,7 +20,9 @@ export const validateNewItemInput = (input: ItemCreateValidationInput): { ok: tr
   if (!title.trim()) throw new Error('Item title is required.');
   if (!allowedClothingTypes.has(String(input.clothingType))) throw new Error(`Invalid clothingType: ${String(input.clothingType)}`);
   if (!allowedStatuses.has(String(input.status))) throw new Error(`Invalid status: ${String(input.status)}`);
-  if (input.category && !allowedCategories.has(String(input.category))) throw new Error(`Invalid category: ${String(input.category)}`);
+  if (input.category && !allowedCategories.has(String(input.category)) && !isCustomCategoryId(String(input.category))) {
+    throw new Error(`Invalid category: ${String(input.category)}`);
+  }
   if (input.size !== undefined && trimOrNull(input.size) !== null && normalizeWhitespace(input.size).length > 80) {
     throw new Error('Size is too long.');
   }

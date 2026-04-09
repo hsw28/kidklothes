@@ -25,7 +25,7 @@ import { normalizeStyleName } from '@/utils/styleName';
 type Props = NativeStackScreenProps<ClosetStackParamList, 'DropPrep'>;
 
 export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { children, childItems, items, settings, purchaseState, logEvent, getEventCount, updateSettings } = useData();
+  const { children, childItems, items, storageLocations, settings, purchaseState, logEvent, getEventCount, updateSettings } = useData();
   const defaultChildId = route.params?.childId ?? settings.lastShoppingChildId ?? children[0]?.id;
   const [childId, setChildId] = useState(defaultChildId ?? '');
   const [sizeBucket, setSizeBucket] = useState<'now' | 'next' | 'both'>('now');
@@ -53,8 +53,8 @@ export const DropPrepScreen: React.FC<Props> = ({ route, navigation }) => {
   ]);
 
   const summary = useMemo(
-    () => (selectedChild ? getDropPrepSummary(selectedChild.id, items, childItems, brandId === 'All' ? undefined : brandId, selectedChild) : undefined),
-    [selectedChild, items, childItems, brandId],
+    () => (selectedChild ? getDropPrepSummary(selectedChild.id, items, childItems, storageLocations, brandId === 'All' ? undefined : brandId, selectedChild) : undefined),
+    [selectedChild, items, childItems, storageLocations, brandId],
   );
   const snapshotCounts = useMemo(
     () =>

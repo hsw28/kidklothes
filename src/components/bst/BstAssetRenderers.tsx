@@ -13,6 +13,7 @@ export type CollageViewProps = {
   width?: number;
   brandingMode?: 'free' | 'pro';
   previewMode?: 'export' | 'free-preview';
+  showPricesOnCollage?: boolean;
 };
 
 export type ItemCardViewProps = {
@@ -67,28 +68,32 @@ const PreviewProtectionOverlay: React.FC<{
     },
     diagonalLayer: {
       ...StyleSheet.absoluteFillObject,
+      overflow: 'hidden',
       alignItems: 'center',
       justifyContent: 'center',
-      overflow: 'hidden',
     },
-    diagonalWrap: {
+    diagonalContent: {
       position: 'absolute',
-      width: '165%',
+      width: '260%',
+      height: '145%',
       alignItems: 'center',
-      gap: 44 * scale,
+      justifyContent: 'space-between',
       transform: [{ rotate: '-30deg' }],
     },
     diagonalRow: {
       flexDirection: 'row',
       justifyContent: 'center',
-      gap: 34 * scale,
+      gap: 14 * scale,
     },
     diagonalText: {
       fontSize: diagonalSize,
       lineHeight: diagonalSize * 1.08,
       fontWeight: '700',
-      color: 'rgba(255,255,255,0.18)',
-      letterSpacing: 0.34 * scale,
+      color: 'rgba(255,255,255,0.4)',
+      letterSpacing: 0.48 * scale,
+      textShadowColor: 'rgba(0,0,0,0.24)',
+      textShadowRadius: 2 * scale,
+      textShadowOffset: { width: 0, height: 1 * scale },
     },
     labelWrap: {
       position: 'absolute',
@@ -142,10 +147,10 @@ const PreviewProtectionOverlay: React.FC<{
             <Text style={styles.label}>Preview — unlock clean version</Text>
           </View>
           <View style={styles.diagonalLayer}>
-            <View style={styles.diagonalWrap}>
-              {[0, 1, 2, 3, 4].map((row) => (
+            <View style={styles.diagonalContent}>
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((row) => (
                 <View key={`preview-row-${row}`} style={styles.diagonalRow}>
-                  {[0, 1, 2].map((index) => (
+                  {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((index) => (
                     <Text key={`preview-row-${row}-item-${index}`} style={styles.diagonalText}>
                       Layette Out
                     </Text>
@@ -172,7 +177,13 @@ const formatCollagePrice = (value?: number): string | undefined => {
   return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 };
 
-export const CollageView: React.FC<CollageViewProps> = ({ items, onAssetLoadEnd, width = 1080, previewMode = 'export' }) => {
+export const CollageView: React.FC<CollageViewProps> = ({
+  items,
+  onAssetLoadEnd,
+  width = 1080,
+  previewMode = 'export',
+  showPricesOnCollage = true,
+}) => {
   const columns = getCollageColumnCount(items.length);
   const rows = chunkForCollageRows(items, columns);
   const rowCount = Math.max(1, rows.length);
@@ -298,7 +309,7 @@ export const CollageView: React.FC<CollageViewProps> = ({ items, onAssetLoadEnd,
                     </View>
                   )}
                   <Text style={styles.badgeText}>#{entry.draftItem.itemNumber}</Text>
-                  {formatCollagePrice(entry.draftItem.price) ? (
+                  {showPricesOnCollage && formatCollagePrice(entry.draftItem.price) ? (
                     <View style={styles.pricePill}>
                       <Text style={styles.price}>{formatCollagePrice(entry.draftItem.price)}</Text>
                     </View>
@@ -323,7 +334,8 @@ export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, o
   const brandLabel = entry.inventoryItem.brand?.trim();
   const titleLine = entry.inventoryItem.title?.trim() || 'Untitled item';
   const sizeLabel = entry.inventoryItem.size?.trim();
-  const conditionLabel = entry.draftItem.condition?.trim();
+  const styleLabel = entry.inventoryItem.styleName?.trim();
+  const printLabel = entry.inventoryItem.printName?.trim();
   const styles = StyleSheet.create({
     shell: {
       width,
@@ -423,6 +435,18 @@ export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, o
       color: '#564E47',
       marginBottom: 0 * scale,
     },
+    detailLine: {
+      fontSize: 24.5 * scale,
+      lineHeight: 26.5 * scale,
+      fontWeight: '600',
+      color: '#6A625B',
+      marginTop: 1 * scale,
+    },
+    titleWrap: {
+      flex: 1,
+      minWidth: 0,
+      marginTop: 8 * scale,
+    },
     title: {
       fontSize: 23.5 * scale,
       lineHeight: 25.5 * scale,
@@ -435,12 +459,13 @@ export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, o
       flexDirection: 'row',
       alignItems: 'flex-end',
       justifyContent: 'space-between',
-      marginTop: 1 * scale,
+      marginTop: 2 * scale,
     },
     footer: {
       alignItems: 'flex-end',
-      marginLeft: 8 * scale,
-      transform: [{ translateY: 2 * scale }],
+      marginLeft: 12 * scale,
+      flexShrink: 0,
+      transform: [{ translateY: 16 * scale }],
     },
   });
 
@@ -462,11 +487,13 @@ export const ItemCardView: React.FC<ItemCardViewProps> = ({ draftTitle, entry, o
           {priceLabel ? <Text style={styles.price}>{priceLabel}</Text> : <Text style={styles.priceMissing}>Price not set</Text>}
         </View>
         {brandLabel ? <Text numberOfLines={1} style={styles.brand}>{brandLabel}</Text> : null}
-        {[sizeLabel, conditionLabel].filter(Boolean).length ? (
-          <Text numberOfLines={1} style={styles.metadataLine}>{[sizeLabel, conditionLabel].filter(Boolean).join(' • ')}</Text>
-        ) : null}
+        {sizeLabel ? <Text numberOfLines={1} style={styles.metadataLine}>{sizeLabel}</Text> : null}
+        {styleLabel ? <Text numberOfLines={1} style={styles.detailLine}>{styleLabel}</Text> : null}
+        {printLabel ? <Text numberOfLines={1} style={styles.detailLine}>{printLabel}</Text> : null}
         <View style={styles.bottomRow}>
-          <Text numberOfLines={1} style={styles.title}>{titleLine}</Text>
+          <View style={styles.titleWrap}>
+            <Text numberOfLines={1} style={styles.title}>{titleLine}</Text>
+          </View>
           <View style={styles.footer}>
             <BrandWatermark scale={scale} />
           </View>
