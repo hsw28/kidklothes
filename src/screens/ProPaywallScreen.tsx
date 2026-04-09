@@ -268,7 +268,7 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const isPhotoPaywall = route.params?.source === 'item_multi_photo';
   const isBstCardUnlockPaywall = route.params?.source === 'bst_locked_card' || route.params?.source === 'bst_save_all_cards' || route.params?.source === 'bst_save_collage_locked';
-  const foundingVisible = !isBstCardUnlockPaywall && foundingEligible && foundingOffer.status === 'available' && !isPro;
+  const foundingVisible = foundingEligible && foundingOffer.status === 'available' && !isPro;
 
   useEffect(() => {
     const yearlyOption = options.find((entry) => entry.kind === 'yearly');
@@ -337,7 +337,11 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     [options, selectedOption],
   );
   const totalItems = route.params?.totalItems ?? paywallDraftItems.length ?? 0;
-  const contextualCopy = foundingVisible ? foundingPaywallContent : paywallContent[entryContext];
+  const contextualCopy = entryContext === 'bst'
+    ? paywallContent[entryContext]
+    : foundingVisible
+      ? foundingPaywallContent
+      : paywallContent[entryContext];
   const headline = contextualCopy.title;
   const subtext = !foundingVisible && entryContext === 'bst' && isPhotoPaywall
     ? 'Free includes 1 photo per item. Unlock more with Pro.'
@@ -369,6 +373,7 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     const yearlyOption = options.find((entry) => entry.kind === 'yearly');
     return isPlaceholderPrice(yearlyOption?.priceString) ? '$19.99 / year' : String(yearlyOption?.priceString ?? '$19.99 / year');
   }, [options]);
+  const foundingIntroPrice = foundingOffer.discountedPriceString || '$9.99';
 
   const styles = StyleSheet.create({
     title: {
@@ -761,7 +766,18 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {isBstCardUnlockPaywall ? (
         <Card style={styles.pricingSummaryCard}>
-          <Text style={styles.pricingSummaryPrimary}>Unlock all items in this post • $19.99</Text>
+          <Text style={styles.pricingSummaryPrimary}>Unlock all items in this post</Text>
+          {foundingVisible ? (
+            <View style={styles.foundingPriceStack}>
+              <View style={[styles.foundingPriceRow, { justifyContent: 'center' }]}>
+                <Text style={styles.foundingOriginalPrice}>{foundingYearlyBasePrice}</Text>
+                <Text style={styles.foundingIntroPrice}>{foundingIntroPrice}</Text>
+              </View>
+              <Text style={styles.foundingSavings}>Founder price (first year)</Text>
+            </View>
+          ) : (
+            <Text style={styles.pricingSummaryValue}>{foundingYearlyBasePrice.replace(' / year', '')}</Text>
+          )}
           <Text style={styles.pricingSummaryValue}>Include all items + remove watermark overlay</Text>
           <Text style={styles.pricingSummaryAlt}>or $2.99/month</Text>
         </Card>
@@ -825,6 +841,9 @@ export const ProPaywallScreen: React.FC<Props> = ({ navigation, route }) => {
           disabled={loading}
         />
         {isBstCardUnlockPaywall ? <Text style={styles.ctaNote}>Unlock instantly</Text> : null}
+        {isBstCardUnlockPaywall && foundingVisible ? (
+          <Text style={styles.ctaContext}>Then $19.99/year after</Text>
+        ) : null}
         {!isBstCardUnlockPaywall && foundingVisible && selectedKind === 'yearly' ? (
           <Text style={styles.ctaContext}>Then $19.99/year after</Text>
         ) : !isBstCardUnlockPaywall && contextualCopy.ctaSubtext ? (

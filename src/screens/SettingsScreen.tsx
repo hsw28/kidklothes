@@ -136,6 +136,7 @@ export const SettingsScreen: React.FC = () => {
   const [purchaseDiagnostics, setPurchaseDiagnostics] = useState<PurchasesDebugSnapshot | null>(null);
   const [posthogDebug, setPosthogDebug] = useState(getPostHogDebugState());
   const [foundingOfferVisible, setFoundingOfferVisible] = useState(false);
+  const [foundingOfferPrice, setFoundingOfferPrice] = useState<string | null>(null);
   const versionTapTimesRef = useRef<number[]>([]);
   const advancedUnlocked = isAdvancedUnlocked(settings, children, childItems, items);
   const proAccess = getProAccessState(settings, purchaseState);
@@ -203,6 +204,7 @@ export const SettingsScreen: React.FC = () => {
     void (async () => {
       const foundingSummary = await getFoundingMemberYearlyOffer();
       if (cancelled) return;
+      setFoundingOfferPrice(foundingSummary.status === 'available' ? foundingSummary.discountedPriceString ?? null : null);
       setFoundingOfferVisible(
         foundingSummary.status === 'available'
         && !proAccess.hasProAccess
@@ -690,7 +692,7 @@ export const SettingsScreen: React.FC = () => {
         {settings.foundingMemberJoined ? (
           <Text style={{ color: '#6b7280', fontWeight: '700', marginTop: 8 }}>You’re a Founding Member</Text>
         ) : foundingOfferVisible ? (
-          <Text style={{ color: '#7c89d9', fontWeight: '700', marginTop: 8 }}>Founding Member pricing available</Text>
+          <Text style={{ color: '#7c89d9', fontWeight: '700', marginTop: 8 }}>{`Founder price ${foundingOfferPrice ?? '$9.99'} first year`}</Text>
         ) : null}
         <PrimaryButton label="View Pro features →" variant="secondary" onPress={() => navigation.navigate('ExplorePro')} />
       </Card>

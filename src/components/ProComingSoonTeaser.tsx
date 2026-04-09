@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { getFoundingMemberYearlyOffer } from '@/services/purchases';
 import { useAppTheme } from '@/theme';
 
 type Props = {
@@ -11,6 +12,21 @@ type Props = {
 export const ProComingSoonTeaser: React.FC<Props> = ({ variant, onPress, onDismiss }) => {
   const theme = useAppTheme();
   const isBanner = variant === 'banner';
+  const [foundingPrice, setFoundingPrice] = useState('$9.99');
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const foundingSummary = await getFoundingMemberYearlyOffer();
+      if (cancelled) return;
+      if (foundingSummary.status === 'available' && foundingSummary.discountedPriceString) {
+        setFoundingPrice(foundingSummary.discountedPriceString);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const styles = StyleSheet.create({
     shell: {
@@ -98,7 +114,7 @@ export const ProComingSoonTeaser: React.FC<Props> = ({ variant, onPress, onDismi
         ) : null}
       </View>
       <Text style={styles.body}>Create ready-to-post BST listings, add more photos, and customize your closet</Text>
-      <Text style={styles.subtext}>Founding price — limited time</Text>
+      <Text style={styles.subtext}>{`Founder price ${foundingPrice} first year`}</Text>
       <Text style={styles.ctaHint}>See how it works →</Text>
     </Pressable>
   );

@@ -193,7 +193,7 @@ export const ExploreProScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.title}>Explore Pro</Text>
           <Text style={styles.subtitle}>See everything. Miss nothing.</Text>
           {isFoundingMember ? <Text style={styles.badge}>You're a Founding Member</Text> : null}
-          {!isFoundingMember && foundingVisible ? <Text style={styles.badge}>Founding price — limited time</Text> : null}
+          {!isFoundingMember && foundingVisible ? <Text style={styles.badge}>{`Founder price ${foundingPrice ?? '$9.99'} first year`}</Text> : null}
         </View>
 
         <Card>
@@ -253,7 +253,7 @@ export const ExploreProScreen: React.FC<Props> = ({ navigation }) => {
                 onPress={() => navigation.navigate('ProPaywall', { entryContext: 'generic_pro', source: 'explore_pro' })}
               />
               <Text style={styles.ctaMeta}>
-                {foundingVisible ? 'Founding pricing available for a limited time' : 'Monthly, yearly, and lifetime options'}
+                {foundingVisible ? 'Then $19.99/year after' : 'Monthly, yearly, and lifetime options'}
               </Text>
             </>
           )}

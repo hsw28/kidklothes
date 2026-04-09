@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card } from '@/components/Card';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { appConfig } from '@/config';
 import { useData } from '@/db/DataContext';
-import { getBstProPaywallOptions, getOfferings, purchasePackage, restorePurchases } from '@/services/purchases';
+import { getBstProPaywallOptions, getFoundingMemberYearlyOffer, getOfferings, purchasePackage, restorePurchases } from '@/services/purchases';
 
 type Props = {
   visible: boolean;
@@ -17,9 +17,22 @@ export const UpsellModal: React.FC<Props> = ({ visible, context, usageCount, onC
   const { logEvent, refreshPurchaseState } = useData();
   const [loading, setLoading] = useState(false);
   const [packages, setPackages] = useState<Array<{ identifier: string; title: string; priceString: string }>>([]);
+  const [foundingPrice, setFoundingPrice] = useState<string | null>(null);
   const defaultPackageId = appConfig.defaultPackageIdentifier;
 
   const shouldShowPackageList = useMemo(() => !defaultPackageId, [defaultPackageId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const foundingSummary = await getFoundingMemberYearlyOffer();
+      if (cancelled) return;
+      setFoundingPrice(foundingSummary.status === 'available' ? foundingSummary.discountedPriceString ?? null : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadPackages = async () => {
     if (!shouldShowPackageList) return packages;
@@ -85,11 +98,19 @@ export const UpsellModal: React.FC<Props> = ({ visible, context, usageCount, onC
     onClose();
   };
 
+  const getDisplayPrice = (pkg: { identifier: string; title: string; priceString: string }) => {
+    if (!foundingPrice) return pkg.priceString;
+    const haystack = `${pkg.identifier} ${pkg.title}`.toLowerCase();
+    const looksYearly = haystack.includes('annual') || haystack.includes('yearly') || haystack.includes('year');
+    return looksYearly ? foundingPrice : pkg.priceString;
+  };
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => void dismiss()}>
       <View style={styles.backdrop}>
         <Card style={styles.modalCard}>
           <Text style={styles.title}>Unlock Pro tools</Text>
+          {foundingPrice ? <Text style={styles.foundingCallout}>{`Founder price ${foundingPrice} first year`}</Text> : null}
           <Text style={styles.bullet}>• Drop prep power tools</Text>
           <Text style={styles.bullet}>• Brand-level insights</Text>
           <Text style={styles.bullet}>• Resale workflow helpers</Text>
@@ -99,7 +120,7 @@ export const UpsellModal: React.FC<Props> = ({ visible, context, usageCount, onC
               {packages.slice(0, 6).map((pkg) => (
                 <Pressable key={pkg.identifier} style={styles.packageRow} onPress={() => void handlePurchase(pkg.identifier)}>
                   <Text style={styles.packageTitle}>{pkg.title}</Text>
-                  <Text style={styles.packagePrice}>{pkg.priceString}</Text>
+                  <Text style={styles.packagePrice}>{getDisplayPrice(pkg)}</Text>
                 </Pressable>
               ))}
             </View>
@@ -130,6 +151,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
     color: '#111827',
+  },
+  foundingCallout: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#7c89d9',
   },
   bullet: {
     fontSize: 14,

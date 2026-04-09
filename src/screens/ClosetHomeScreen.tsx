@@ -955,6 +955,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
   const [showFirstRunOnboarding, setShowFirstRunOnboarding] = useState(false);
   const [devFirstTimePreviewDismissed, setDevFirstTimePreviewDismissed] = useState(false);
   const [foundingOfferVisible, setFoundingOfferVisible] = useState(false);
+  const [foundingOfferPrice, setFoundingOfferPrice] = useState<string | null>(null);
   const [preparingClosetSnapshot, setPreparingClosetSnapshot] = useState(false);
   const [copiedPostToastVisible, setCopiedPostToastVisible] = useState(false);
   const [showClosetSnapshotRenderer, setShowClosetSnapshotRenderer] = useState(false);
@@ -2591,6 +2592,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
     void (async () => {
       const foundingSummary = await getFoundingMemberYearlyOffer();
       if (cancelled) return;
+      setFoundingOfferPrice(foundingSummary.status === 'available' ? foundingSummary.discountedPriceString ?? null : null);
       setFoundingOfferVisible(
         foundingSummary.status === 'available'
         && !proAccessEnabled
@@ -2857,7 +2859,7 @@ export const ClosetHomeScreen: React.FC<Props> = ({ navigation, route }) => {
           accessibilityLabel="You're eligible for Founding Member pricing"
         >
           <View style={styles.bstInlineCopy}>
-            <Text style={styles.bstInlineTitle}>You’re eligible for Founding Member pricing</Text>
+            <Text style={styles.bstInlineTitle}>{`Founder price ${foundingOfferPrice ?? '$9.99'} first year`}</Text>
             <Text style={styles.bstInlineSubtitle}>Early supporters get special pricing while we build.</Text>
           </View>
           <Text style={styles.bstInlineChevron}>›</Text>

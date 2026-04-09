@@ -57,6 +57,7 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
   const [brandFilter, setBrandFilter] = useState<string>('All');
   const [listedFilter, setListedFilter] = useState<ListedFilter>('All');
   const [foundingOfferVisible, setFoundingOfferVisible] = useState(false);
+  const [foundingOfferPrice, setFoundingOfferPrice] = useState<string | null>(null);
 
   const childOptions = useMemo(() => ['All', ...children.map((child) => child.name)], [children]);
   const brandOptions = useMemo(() => ['All', ...brands], [brands]);
@@ -163,6 +164,7 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
     void (async () => {
       const foundingSummary = await getFoundingMemberYearlyOffer();
       if (cancelled) return;
+      setFoundingOfferPrice(foundingSummary.status === 'available' ? foundingSummary.discountedPriceString ?? null : null);
       setFoundingOfferVisible(
         foundingSummary.status === 'available'
         && !isPro
@@ -357,7 +359,7 @@ export const SellBinScreen: React.FC<Props> = ({ navigation }) => {
       />
       {foundingOfferVisible ? (
         <Card>
-          <Text style={styles.summary}>Founding Member pricing available</Text>
+          <Text style={styles.summary}>{`Founder price ${foundingOfferPrice ?? '$9.99'} first year`}</Text>
           <Text style={styles.meta}>Unlock unlimited BST posts and clean exports.</Text>
           <PrimaryButton
             label="Get 50% off Pro"
